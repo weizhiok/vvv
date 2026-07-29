@@ -3,7 +3,7 @@ set -Eeuo pipefail
 umask 077
 
 REPO_RAW="https://raw.githubusercontent.com/weizhiok/vvv/main"
-PARTS=4
+PARTS=16
 TMP_DIR="$(mktemp -d /tmp/vvv-bootstrap.XXXXXX)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
