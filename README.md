@@ -2,17 +2,19 @@
 
 一个入口脚本，支持以下可叠加角色：
 
-1. 订阅中心（含本机直连代理）
-2. 中转主机（含本机代理、VPS 中转、HTTP/HTTPS/SOCKS5 中转）
-3. 中转副机
-4. 仅直连代理
-5. 单机全能模式（订阅中心 + 直连代理 + 中转管理）
+1. 安装订阅中心（含自身代理）
+2. 安装中转主机（含自身代理）
+3. 安装中转副机
+4. 安装直连代理
+5. 以上全部安装（不含副机）
 
-## 一行安装
+## 永久固定安装地址
 
 ```bash
-curl -fsSL --retry 3 https://raw.githubusercontent.com/weizhiok/vvv/main/install.sh | bash
+curl -fsSL --retry 5 https://raw.githubusercontent.com/weizhiok/vvv/install/vvv-install.sh | bash
 ```
+
+`install` 是固定入口分支。入口文件会自动取得 `main` 分支的最新稳定安装程序，因此后续升级不需要更换安装命令。
 
 安装完成后统一使用：
 
@@ -20,26 +22,38 @@ curl -fsSL --retry 3 https://raw.githubusercontent.com/weizhiok/vvv/main/install
 vps
 ```
 
+## 安装交互
+
+选择角色后，脚本会先一次性收集该角色所需的全部参数，再开始安装。安装过程中不再穿插询问：
+
+- 代理协议与监听端口；
+- VLESS + REALITY 伪装域名，默认 `www.softbank.jp`；
+- 订阅访问域名，可回车使用 IP 模式；
+- 订阅服务端口，默认 TCP/8443；
+- 订阅中心接入码或副机对接密钥。
+
 ## 订阅中心
 
-- 支持域名 HTTPS 和公网 IP HTTPS。
-- 默认监听 TCP/8443，不占用 VLESS/Hysteria 2 使用的 TCP/UDP 443。
-- 域名模式会强制检查 A/AAAA 记录是否指向本机。
-- 客户端建议每 24 小时自动刷新。
-- 节点变化后立即向订阅中心同步完整快照。
-- 中转主机自动保存订阅中心的加密异地备份。
+- 域名模式使用 HTTPS，并强制检查域名 IPv4 A 记录是否指向本机。
+- IP 模式使用 HTTP，主要用于临时、备用或不方便配置域名的环境。
+- 默认监听公网 TCP/8443，不占用 VLESS/Hysteria 2 使用的 TCP/UDP 443。
+- 客户端默认更新周期为 24 小时。
+- 节点变化后立即同步完整快照。
+- 中转主机可以保存订阅中心的加密异地备份。
 - GitHub 仓库只保存程序，不保存节点、密钥、代理凭证或订阅数据。
 
 ## 支持的客户端订阅
 
-- Clash Verge Rev / Mihomo
-- Quantumult X
-- Loon
-- Shadowrocket
-- v2rayNG
+- Clash Verge Rev / Mihomo：显示订阅地址，不生成二维码；
+- Quantumult X：订阅地址和二维码；
+- Loon：订阅地址和二维码；
+- Shadowrocket：订阅地址和二维码；
+- v2rayNG：订阅地址和二维码。
+
+输入 `vps`，选择“查看订阅地址和二维码”，即可重新显示。
 
 ## 系统说明
 
-- 主机/订阅中心：Debian 12/13。
-- 中转副机：沿用脚本现有 Debian/Alpine 支持。
-- 推荐以 root 用户执行。
+- 主机和订阅中心：Debian 12/13；
+- 中转副机：沿用现有 Debian/Alpine 支持；
+- 推荐使用 root 用户执行。
