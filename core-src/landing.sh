@@ -172,9 +172,9 @@ upgrade_system_once() {
   if [ "$OS_FAMILY" = "debian" ]; then
     export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
     # 不执行 full-upgrade，避免不同 VPS 镜像升级内核、GRUB、网络或 SSH 时失败。
-    retry 5 10 apt-get -o DPkg::Lock::Timeout=120 -o Acquire::PDiffs=false update
+    retry 5 10 apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 -o DPkg::Lock::Timeout=120 -o Acquire::PDiffs=false update
     dpkg --configure -a >/dev/null 2>&1 || true
-    retry 3 10 apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
+    retry 3 10 apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
       ca-certificates curl unzip tar gzip openssl jq iproute2 procps \
       tzdata kmod qrencode util-linux
     update-ca-certificates >/dev/null 2>&1 || true

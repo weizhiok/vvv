@@ -318,9 +318,9 @@ upgrade_system_once() {
 
   # 为了兼容不同 VPS 镜像，不执行 full-upgrade：它可能替换内核、GRUB、网络组件或 SSH。
   # 代理运行所需组件单独安装即可，降低一次性安装失败和重启后无法启动的风险。
-  retry 5 10 apt-get -o DPkg::Lock::Timeout=120 -o Acquire::PDiffs=false update
+  retry 5 10 apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 -o DPkg::Lock::Timeout=120 -o Acquire::PDiffs=false update
   dpkg --configure -a >/dev/null 2>&1 || true
-  retry 3 10 apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
+  retry 3 10 apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
     ca-certificates curl unzip tar gzip openssl jq python3 iproute2 procps \
     tzdata kmod util-linux qrencode
   update-ca-certificates >/dev/null 2>&1 || true
