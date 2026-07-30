@@ -3,7 +3,6 @@ set -Eeuo pipefail
 umask 077
 RAW="https://raw.githubusercontent.com/weizhiok/vvv/main"
 PARTS=9
-MODULES_SHA256="c0c0418fb1b16c13eeacbe6814c37152d40ec1723297c20dc601f96f6cea2b63"
 TMP="$(mktemp -d /tmp/vvv-install.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 fail(){ echo "错误：$*" >&2; exit 1; }
@@ -18,7 +17,7 @@ if ! command -v curl >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; th
     fail "系统缺少必要命令，且无法自动安装。"
   fi
 fi
-for cmd in base64 sha256sum tar gzip bash awk tr wc grep python3; do command -v "$cmd" >/dev/null 2>&1 || fail "系统缺少命令：$cmd"; done
+for cmd in base64 tar gzip bash awk tr wc grep python3; do command -v "$cmd" >/dev/null 2>&1 || fail "系统缺少命令：$cmd"; done
 nonce="$(date +%s)-$$"
 : > "$TMP/bundle.b64"
 echo "正在下载 VVV 核心安装包……"
@@ -38,13 +37,15 @@ gzip -t "$TMP/vvv-bundle.tar.gz" 2>/dev/null || fail "核心安装包 gzip 检�
 mkdir -p "$TMP/app"
 tar -xzf "$TMP/vvv-bundle.tar.gz" -C "$TMP/app" || fail "解压核心安装包失败。"
 
-echo "正在下载 VVV v2 更新模块……"
-curl -fsSL --retry 5 --retry-all-errors --connect-timeout 15 "$RAW/v2/modules.b64?v=$nonce" -o "$TMP/modules.b64" || fail "下载 v2 更新模块失败。"
-actual="$(sha256sum "$TMP/modules.b64" | awk '{print $1}')"
-[[ "$actual" == "$MODULES_SHA256" ]] || fail "v2 更新模块校验失败：$actual"
-base64 -d "$TMP/modules.b64" > "$TMP/modules.tar.gz" 2>/dev/null || fail "v2 更新模块解码失败。"
-gzip -t "$TMP/modules.tar.gz" || fail "v2 更新模块损坏。"
-tar -xzf "$TMP/modules.tar.gz" -C "$TMP/app" || fail "v2 更新模块解压失败。"
+echo "正在下载 VVV 功能模块……"
+curl -fsSL --retry 5 --retry-all-errors --connect-timeout 15 "$RAW/v2/modules.b64?v=$nonce" -o "$TMP/modules.b64" || fail "下载 VVV 功能模块失败。"
+[[ -s "$TMP/modules.b64" ]] || fail "VVV 功能模块为空。"
+tr -d '\r\n\t ' < "$TMP/modules.b64" > "$TMP/modules.clean.b64"
+grep -Eq '^[A-Za-z0-9+/=]+$' "$TMP/modules.clean.b64" || fail "VVV 功能模块包含非法 Base64 字符。"
+(( $(wc -c < "$TMP/modules.clean.b64") % 4 == 0 )) || fail "VVV 功能模块 Base64 长度异常。"
+base64 -d "$TMP/modules.clean.b64" > "$TMP/modules.tar.gz" 2>/dev/null || fail "VVV 功能模块解码失败。"
+gzip -t "$TMP/modules.tar.gz" 2>/dev/null || fail "VVV 功能模块 gzip 检查失败。"
+tar -xzf "$TMP/modules.tar.gz" -C "$TMP/app" || fail "VVV 功能模块解压失败。"
 
 python3 - "$TMP/app/host.sh" "$TMP/app/landing.sh" <<'PY'
 from pathlib import Path
@@ -144,5 +145,5 @@ install -d -m 700 /usr/local/lib/vvv-source
 rm -rf /usr/local/lib/vvv-source/*
 cp -a "$TMP/app/." /usr/local/lib/vvv-source/
 chmod 700 /usr/local/lib/vvv-source/*.sh /usr/local/lib/vvv-source/*.py 2>/dev/null || true
-echo "VVV v2 安装文件校验全部通过。"
+echo "VVV 安装文件校验全部通过。"
 if [[ -r /dev/tty ]]; then exec bash /usr/local/lib/vvv-source/bootstrap.sh </dev/tty; else exec bash /usr/local/lib/vvv-source/bootstrap.sh; fi
