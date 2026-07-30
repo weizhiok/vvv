@@ -1,0 +1,10 @@
+status=ok
+bootstrap.sh
+center_install.sh
+host.sh
+landing.sh
+register_sync.sh
+sub_center.py
+sync_agent.py
+validation.txt
+vvv_manager.sh
