@@ -1,0 +1,8 @@
+status=ok
+confirmation=removed
+center_local_api=127.0.0.1
+caddy_capabilities=ok
+internal_health=ok
+https_health=ok
+shell=ok
+python=ok

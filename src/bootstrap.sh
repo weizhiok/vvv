@@ -149,8 +149,7 @@ if [[ "$choice" == 1 || "$choice" == 5 ]]; then
 fi
 [[ "$choice" == 2 || "$choice" == 4 ]] && echo "订阅接入码：$([[ -n "$registration_code" ]] && echo 已填写 || echo 稍后配置)"
 [[ "$choice" == 3 ]] && echo "副机对接密钥：已填写"
-read -r -p "按回车或输入 Y 开始安装，输入 N 取消：" confirm
-case "${confirm,,}" in ""|y|yes) ;; *) echo "已取消。"; exit 0;; esac
+echo "参数设置完成，开始安装。"
 
 case "$choice" in
   1)

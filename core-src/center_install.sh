@@ -8,6 +8,16 @@ SERVICE_PORT=18081
 
 fail(){ echo "错误：$*" >&2; exit 1; }
 valid_port(){ [[ "$1" =~ ^[0-9]+$ ]] && ((10#$1>=1 && 10#$1<=65535)); }
+open_firewall_port(){
+  local port="$1"
+  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
+    ufw allow "${port}/tcp" >/dev/null
+  fi
+  if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    firewall-cmd --permanent --add-port="${port}/tcp" >/dev/null
+    firewall-cmd --reload >/dev/null
+  fi
+}
 
 install_caddy(){
   command -v caddy >/dev/null 2>&1 && return 0
@@ -44,6 +54,8 @@ fi
 
 apt-get update -y >/dev/null
 DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl jq openssl python3 tar gzip qrencode >/dev/null
+open_firewall_port "$public_port"
+if [[ "$mode" == domain ]]; then open_firewall_port 80; fi
 install -d -m 700 "$CFG_DIR" "$DATA_DIR" "$DATA_DIR/hosts" "$DATA_DIR/output" "$DATA_DIR/backups" /usr/local/lib/vvv /var/backups/vvv-remote
 install -m 755 "$BASE_DIR/sub_center.py" /usr/local/lib/vvv/sub_center.py
 install -m 755 "$BASE_DIR/sync_agent.py" /usr/local/lib/vvv/sync_agent.py
@@ -111,6 +123,8 @@ ExecStart=${caddy_bin} run --environ --config /etc/caddy/Caddyfile
 ExecReload=${caddy_bin} reload --config /etc/caddy/Caddyfile --force
 TimeoutStopSec=5s
 LimitNOFILE=1048576
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 PrivateTmp=true
 ProtectSystem=full
 ReadWritePaths=/var/lib/caddy /var/log/caddy
@@ -136,9 +150,30 @@ fi
 systemctl daemon-reload
 systemctl enable --now vvv-sub.service
 if [[ "$mode" == domain ]]; then systemctl enable --now caddy.service; fi
-sleep 2
-systemctl is-active --quiet vvv-sub.service || { journalctl -u vvv-sub -n 50 --no-pager; fail "订阅中心启动失败。"; }
-if [[ "$mode" == domain ]]; then systemctl is-active --quiet caddy || { journalctl -u caddy -n 80 --no-pager; fail "Caddy HTTPS 服务启动失败。"; }; fi
+
+internal_ok=0
+for _ in $(seq 1 30); do
+  if curl -fsS --connect-timeout 2 "http://127.0.0.1:${listen_port}/health" >/dev/null 2>&1; then internal_ok=1; break; fi
+  sleep 1
+done
+if [[ "$internal_ok" != 1 ]]; then
+  journalctl -u vvv-sub -n 80 --no-pager || true
+  fail "订阅中心内部服务健康检查失败。"
+fi
+
+if [[ "$mode" == domain ]]; then
+  systemctl is-active --quiet caddy || { journalctl -u caddy -n 100 --no-pager; fail "Caddy HTTPS 服务启动失败。"; }
+  https_ok=0
+  echo "正在等待 HTTPS 证书签发和订阅端口就绪……"
+  for _ in $(seq 1 120); do
+    if curl -fsS --connect-timeout 3 --max-time 6 --resolve "${domain}:${public_port}:127.0.0.1" "https://${domain}:${public_port}/health" >/dev/null 2>&1; then https_ok=1; break; fi
+    sleep 1
+  done
+  if [[ "$https_ok" != 1 ]]; then
+    journalctl -u caddy -n 120 --no-pager || true
+    fail "HTTPS 订阅入口未就绪。请确认云厂商安全组已开放 TCP/80 和 TCP/${public_port}。"
+  fi
+fi
 
 registration_json="$(jq -nc --arg base "$base_url" --arg token "$master_token" '{base_url:$base,master_token:$token}')"
 registration_code="VVV1.$(printf %s "$registration_json" | base64 -w0 | tr '+/' '-_' | tr -d '=')"

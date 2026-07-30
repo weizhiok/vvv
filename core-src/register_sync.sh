@@ -40,7 +40,7 @@ Unit=vvv-sync.service
 WantedBy=multi-user.target
 EOF
 
-if [[ "$role" == relay || "$role" == all ]]; then
+if [[ "$role" == relay ]]; then
   cat > /etc/systemd/system/vvv-backup-pull.service <<'EOF'
 [Unit]
 Description=Pull encrypted VVV center backup
@@ -66,7 +66,7 @@ systemctl daemon-reload
 if [[ -f /etc/vvv/client.json ]]; then
   systemctl enable --now vvv-sync.timer vvv-sync.path
   systemctl start vvv-sync.service || true
-  if [[ "$role" == relay || "$role" == all ]]; then systemctl enable --now vvv-backup-pull.timer; systemctl start vvv-backup-pull.service || true; fi
+  if [[ "$role" == relay ]]; then systemctl enable --now vvv-backup-pull.timer; systemctl start vvv-backup-pull.service || true; fi
 else
   echo "未提供订阅中心接入码；以后可在 vps 菜单中注册。"
 fi
