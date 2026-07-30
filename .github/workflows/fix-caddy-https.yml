@@ -16,28 +16,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Patch Caddy installation and HTTPS configuration
+      - name: Patch and verify Caddy HTTPS
         shell: bash
         run: |
           set -Eeuo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path('core-src/center_install.sh')
           text = path.read_text(encoding='utf-8')
 
-          old_install = '''install_caddy(){
-            command -v caddy >/dev/null 2>&1 && return 0
-            if apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 install -y caddy >/dev/null 2>&1; then return 0; fi
-            local arch asset api url tmp
-            case "$(uname -m)" in x86_64|amd64) arch=amd64;; aarch64|arm64) arch=arm64;; *) fail "Caddy 不支持当前架构。";; esac
-            api="$(curl -fsSL --retry 5 https://api.github.com/repos/caddyserver/caddy/releases/latest)" || fail "无法查询 Caddy 最新版。"
-            url="$(jq -r --arg a "linux_${arch}.tar.gz" '.assets[]|select(.name|endswith($a))|.browser_download_url' <<<"$api" | head -n1)"
-            [[ -n "$url" && "$url" != null ]] || fail "未找到 Caddy 下载文件。"
-            tmp="$(mktemp -d)"; curl -fsSL --retry 5 "$url" -o "$tmp/caddy.tgz"; tar -xzf "$tmp/caddy.tgz" -C "$tmp" caddy
-            install -m 755 "$tmp/caddy" /usr/local/bin/caddy; rm -rf "$tmp"
-          }'''
-          new_install = '''install_caddy(){
+          new_install = r'''install_caddy(){
             local arch api url tmp version
             case "$(uname -m)" in
               x86_64|amd64) arch=amd64 ;;
@@ -56,27 +46,19 @@ jobs:
             [[ -n "$version" ]] || fail "Caddy 安装后无法运行。"
             echo "Caddy：$version（官方最新版）"
           }'''
-          if old_install not in text:
-              raise SystemExit('未找到旧 install_caddy 函数')
-          text = text.replace(old_install, new_install, 1)
+          text, count = re.subn(r'(?ms)^install_caddy\(\)\{.*?^\}', new_install, text, count=1)
+          if count != 1:
+              raise SystemExit(f'install_caddy 替换数量异常：{count}')
 
-          text = text.replace(
-              'ExecStart=${caddy_bin} run --environ --config /etc/caddy/Caddyfile\nExecReload=${caddy_bin} reload --config /etc/caddy/Caddyfile --force',
-              'ExecStart=${caddy_bin} run --environ --config /etc/caddy/Caddyfile --adapter caddyfile\nExecReload=${caddy_bin} reload --config /etc/caddy/Caddyfile --adapter caddyfile --force',
-              1,
-          )
+          old_start = 'ExecStart=${caddy_bin} run --environ --config /etc/caddy/Caddyfile\nExecReload=${caddy_bin} reload --config /etc/caddy/Caddyfile --force'
+          new_start = 'ExecStart=${caddy_bin} run --environ --config /etc/caddy/Caddyfile --adapter caddyfile\nExecReload=${caddy_bin} reload --config /etc/caddy/Caddyfile --adapter caddyfile --force'
+          if old_start not in text:
+              raise SystemExit('未找到 Caddy systemd 启动参数')
+          text = text.replace(old_start, new_start, 1)
 
-          old_caddyfile = '''{
-            admin off
-            auto_https disable_redirects
-          }
-          https://${domain}:${public_port} {
-            log { output discard }
-            @allowed path /r/* /api/v1/* /health
-            handle @allowed { reverse_proxy 127.0.0.1:${SERVICE_PORT} }
-            respond 404
-          }'''
-          new_caddyfile = '''{
+          caddy_re = re.compile(r'(?ms)^  cat > /etc/caddy/Caddyfile <<EOF\n.*?^EOF\n  chown -R caddy:caddy /var/lib/caddy /var/log/caddy$')
+          caddy_block = r'''  cat > /etc/caddy/Caddyfile <<EOF
+          {
             admin off
             auto_https disable_redirects
           }
@@ -86,23 +68,13 @@ jobs:
             @allowed path /r/* /api/v1/* /health
             handle @allowed { reverse_proxy 127.0.0.1:${SERVICE_PORT} }
             respond 404
-          }'''
-          if old_caddyfile not in text:
-              raise SystemExit('未找到旧 Caddyfile 模板')
-          text = text.replace(old_caddyfile, new_caddyfile, 1)
-
-          marker = '''  chown -R caddy:caddy /var/lib/caddy /var/log/caddy
-          fi
-
-          systemctl daemon-reload'''
-          replacement = '''  chown -R caddy:caddy /var/lib/caddy /var/log/caddy
+          }
+          EOF
             "$caddy_bin" validate --config /etc/caddy/Caddyfile --adapter caddyfile || fail "Caddy HTTPS 配置验证失败。"
-          fi
-
-          systemctl daemon-reload'''
-          if marker not in text:
-              raise SystemExit('未找到 Caddy 配置验证插入位置')
-          text = text.replace(marker, replacement, 1)
+            chown -R caddy:caddy /var/lib/caddy /var/log/caddy'''
+          text, count = caddy_re.subn(caddy_block, text, count=1)
+          if count != 1:
+              raise SystemExit(f'Caddyfile 模板替换数量异常：{count}')
 
           path.write_text(text, encoding='utf-8')
           PY
@@ -110,10 +82,8 @@ jobs:
           bash -n core-src/center_install.sh
           python3 -m py_compile src/prepare.py core-src/sub_center.py core-src/sync_agent.py
 
-          # Download current upstream Caddy and verify the generated template adapts to HTTPS on 8443.
-          arch=amd64
           api="$(curl -fsSL --retry 5 https://api.github.com/repos/caddyserver/caddy/releases/latest)"
-          url="$(jq -r --arg suffix "linux_${arch}.tar.gz" '.assets[] | select(.name | endswith($suffix)) | .browser_download_url' <<<"$api" | head -n1)"
+          url="$(jq -r --arg suffix 'linux_amd64.tar.gz' '.assets[] | select(.name | endswith($suffix)) | .browser_download_url' <<<"$api" | head -n1)"
           testdir="$(mktemp -d)"
           curl -fsSL --retry 5 "$url" -o "$testdir/caddy.tgz"
           tar -xzf "$testdir/caddy.tgz" -C "$testdir" caddy
@@ -132,16 +102,14 @@ jobs:
           "$testdir/caddy" adapt --config "$testdir/Caddyfile" --adapter caddyfile --pretty > "$testdir/config.json"
           python3 - "$testdir/config.json" <<'PY'
           import json, sys
-          cfg=json.load(open(sys.argv[1],encoding='utf-8'))
-          servers=(cfg.get('apps') or {}).get('http',{}).get('servers',{})
-          if not servers:
-              raise SystemExit('Caddy 适配结果没有 HTTP/HTTPS server')
-          listens=[x for s in servers.values() for x in s.get('listen',[])]
+          cfg=json.load(open(sys.argv[1], encoding='utf-8'))
+          servers=(cfg.get('apps') or {}).get('http', {}).get('servers', {})
+          listens=[item for server in servers.values() for item in server.get('listen', [])]
+          policies=[item for server in servers.values() for item in server.get('tls_connection_policies', [])]
           if ':8443' not in listens:
-              raise SystemExit(f'Caddy 未生成 8443 监听：{listens}')
-          policies=[p for s in servers.values() for p in s.get('tls_connection_policies',[])]
+              raise SystemExit(f'未生成 HTTPS/8443 监听：{listens}')
           if not policies:
-              raise SystemExit('Caddy 未生成 TLS connection policy')
+              raise SystemExit('未生成 TLS 策略')
           PY
 
           mkdir -p validation
@@ -155,7 +123,7 @@ jobs:
           shell=ok
           EOF
 
-      - name: Commit fix
+      - name: Commit verified fix
         shell: bash
         run: |
           set -Eeuo pipefail
