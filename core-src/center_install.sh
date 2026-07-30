@@ -188,10 +188,12 @@ ${domain}:${public_port} {
 }
 EOF
 
-  /usr/local/bin/caddy validate \
+  chown root:caddy /etc/caddy/Caddyfile
+  chmod 640 /etc/caddy/Caddyfile
+  runuser -u caddy -- /usr/local/bin/caddy validate \
     --config /etc/caddy/Caddyfile \
     --adapter caddyfile \
-    || fail "Caddy HTTPS 配置验证失败。"
+    || fail "Caddy 用户无法读取或验证 HTTPS 配置。"
 
   cat > /etc/systemd/system/caddy.service <<EOF
 [Unit]
