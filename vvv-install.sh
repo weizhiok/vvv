@@ -3,7 +3,7 @@ set -Eeuo pipefail
 umask 077
 RAW="https://raw.githubusercontent.com/weizhiok/vvv/main"
 PARTS=9
-MODULES_SHA256="2745e348e594e4ac5707fac6db0b8c1f5fd3d69ed9812a396ed57eb7787c4472"
+MODULES_SHA256="c0c0418fb1b16c13eeacbe6814c37152d40ec1723297c20dc601f96f6cea2b63"
 TMP="$(mktemp -d /tmp/vvv-install.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 fail(){ echo "错误：$*" >&2; exit 1; }
