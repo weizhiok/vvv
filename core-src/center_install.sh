@@ -21,7 +21,7 @@ open_firewall_port(){
 
 install_caddy(){
   command -v caddy >/dev/null 2>&1 && return 0
-  if apt-get install -y caddy >/dev/null 2>&1; then return 0; fi
+  if apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 install -y caddy >/dev/null 2>&1; then return 0; fi
   local arch asset api url tmp
   case "$(uname -m)" in x86_64|amd64) arch=amd64;; aarch64|arm64) arch=arm64;; *) fail "Caddy 不支持当前架构。";; esac
   api="$(curl -fsSL --retry 5 https://api.github.com/repos/caddyserver/caddy/releases/latest)" || fail "无法查询 Caddy 最新版。"
@@ -52,8 +52,8 @@ if [[ -n "$domain" ]]; then
   if ss -lntH 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)${SERVICE_PORT}$"; then fail "订阅中心内部端口 ${SERVICE_PORT} 已被占用。"; fi
 fi
 
-apt-get update -y >/dev/null
-DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl jq openssl python3 tar gzip qrencode >/dev/null
+apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 update -y >/dev/null
+DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 install -y ca-certificates curl jq openssl python3 tar gzip qrencode >/dev/null
 open_firewall_port "$public_port"
 if [[ "$mode" == domain ]]; then open_firewall_port 80; fi
 install -d -m 700 "$CFG_DIR" "$DATA_DIR" "$DATA_DIR/hosts" "$DATA_DIR/output" "$DATA_DIR/backups" /usr/local/lib/vvv /var/backups/vvv-remote

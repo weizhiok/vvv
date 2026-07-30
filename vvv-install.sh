@@ -9,8 +9,8 @@ fail(){ echo "错误：$*" >&2; exit 1; }
 
 if ! command -v curl >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
   if command -v apt-get >/dev/null 2>&1; then
-    apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates bash python3
+    apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 update
+    DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 install -y curl ca-certificates bash python3
   elif command -v apk >/dev/null 2>&1; then
     apk add --no-cache curl ca-certificates bash python3
   else
