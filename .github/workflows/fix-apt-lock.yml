@@ -1,0 +1,80 @@
+name: Fix APT lock handling
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-apt-lock.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add native APT lock wait and retries
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          targets = [
+              Path('vvv-install.sh'),
+              Path('core-src/host.sh'),
+              Path('core-src/landing.sh'),
+              Path('core-src/center_install.sh'),
+          ]
+          pattern = re.compile(r'(?<![A-Za-z0-9_-])apt-get(?=\s+(?:update|install|upgrade|dist-upgrade|full-upgrade)\b)')
+          replacement = 'apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5'
+          report = []
+          total = 0
+          for path in targets:
+              text = path.read_text(encoding='utf-8')
+              updated, count = pattern.subn(replacement, text)
+              path.write_text(updated, encoding='utf-8')
+              report.append(f'{path}: replacements={count}')
+              total += count
+          if total == 0:
+              raise SystemExit('没有找到需要修复的 apt-get 命令')
+          Path('validation').mkdir(exist_ok=True)
+          Path('validation/apt-lock.txt').write_text(
+              'status=ok\n'
+              'method=DPkg::Lock::Timeout\n'
+              'timeout_seconds=600\n'
+              'download_retries=5\n' + '\n'.join(report) + '\n',
+              encoding='utf-8',
+          )
+          PY
+
+          bash -n vvv-install.sh
+          bash -n core-src/host.sh
+          bash -n core-src/center_install.sh
+          bash -n core-src/register_sync.sh
+          bash -n core-src/vvv_manager.sh
+          sh -n core-src/landing.sh
+          python3 -m py_compile src/prepare.py core-src/sub_center.py core-src/sync_agent.py
+
+          if grep -REn '(?<![A-Za-z0-9_-])apt-get[[:space:]]+(update|install|upgrade|dist-upgrade|full-upgrade)' \
+              vvv-install.sh core-src/host.sh core-src/landing.sh core-src/center_install.sh 2>/dev/null; then
+            echo '仍存在未设置锁等待的 apt-get 命令' >&2
+            exit 1
+          fi
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add vvv-install.sh core-src/host.sh core-src/landing.sh core-src/center_install.sh validation/apt-lock.txt
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'Wait for Debian APT locks automatically'
+          git push
