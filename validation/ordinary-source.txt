@@ -1,0 +1,6 @@
+status=ok
+transport=ordinary-files
+base64=disabled
+shell=ok
+python=ok
+prepare=ok
