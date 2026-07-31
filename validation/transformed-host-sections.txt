@@ -1,0 +1,725 @@
+===== clients= =====
+877-  runuser -u sing-box -- test -r "$cert" || fail "sing-box 用户无法读取 Hysteria 2 证书。"
+878-  runuser -u sing-box -- test -r "$key" || fail "sing-box 用户无法读取 Hysteria 2 私钥。"
+879-}
+880-
+881-build_xray_config() {
+882-  local state_path="$1" output="$2"
+883-  python3 - "$state_path" "$output" <<'PY_BUILD_XRAY'
+884-import json, sys
+885-from pathlib import Path
+886-state=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+887-if state["protocol_mode"] not in ("dual","vless"):
+888-    Path(sys.argv[2]).write_text("{}\n",encoding="utf-8")
+889-    raise SystemExit
+890-v=state["vless"]; sni=state["sni"]; port=int(state["listen_port"])
+891-relays=state.get("relays",[])
+892-upstreams=state.get("upstream_relays",[])
+893:clients=[{"id":v["direct_user"]["uuid"],"level":0,"email":v["direct_user"]["email"],"flow":"xtls-rprx-vision"}]
+894-for user in v.get("reserve_users",[]):
+895-    clients.append({"id":user["uuid"],"level":0,"email":user["email"],"flow":"xtls-rprx-vision"})
+896-inbounds=[{
+897- "tag":"in-vless-reality","listen":"0.0.0.0","port":port,"protocol":"vless",
+898- "settings":{"clients":clients,"decryption":"none"},
+899- "streamSettings":{"method":"raw","security":"reality","realitySettings":{
+900-   "show":False,"target":f"{sni}:443","xver":0,"serverNames":[sni],
+901-   "privateKey":v["reality"]["private_key"],"shortIds":[v["reality"]["short_id"]]}},
+902- "sniffing":{"enabled":True,"destOverride":["http","tls","quic"],"routeOnly":True}
+903-}]
+904-inbounds.append({"tag":"api-in","listen":"127.0.0.1","port":10085,"protocol":"dokodemo-door","settings":{"address":"127.0.0.1"}})
+905-outbounds=[{"tag":"direct","protocol":"freedom","settings":{"domainStrategy":"UseIPv4"}}]
+906-test_rules=[]
+907-route_rules=[]
+908-udp_block_rules=[]
+909-for r in relays:
+===== api-in =====
+888-    Path(sys.argv[2]).write_text("{}\n",encoding="utf-8")
+889-    raise SystemExit
+890-v=state["vless"]; sni=state["sni"]; port=int(state["listen_port"])
+891-relays=state.get("relays",[])
+892-upstreams=state.get("upstream_relays",[])
+893-clients=[{"id":v["direct_user"]["uuid"],"level":0,"email":v["direct_user"]["email"],"flow":"xtls-rprx-vision"}]
+894-for user in v.get("reserve_users",[]):
+895-    clients.append({"id":user["uuid"],"level":0,"email":user["email"],"flow":"xtls-rprx-vision"})
+896-inbounds=[{
+897- "tag":"in-vless-reality","listen":"0.0.0.0","port":port,"protocol":"vless",
+898- "settings":{"clients":clients,"decryption":"none"},
+899- "streamSettings":{"method":"raw","security":"reality","realitySettings":{
+900-   "show":False,"target":f"{sni}:443","xver":0,"serverNames":[sni],
+901-   "privateKey":v["reality"]["private_key"],"shortIds":[v["reality"]["short_id"]]}},
+902- "sniffing":{"enabled":True,"destOverride":["http","tls","quic"],"routeOnly":True}
+903-}]
+904:inbounds.append({"tag":"api-in","listen":"127.0.0.1","port":10085,"protocol":"dokodemo-door","settings":{"address":"127.0.0.1"}})
+905-outbounds=[{"tag":"direct","protocol":"freedom","settings":{"domainStrategy":"UseIPv4"}}]
+906-test_rules=[]
+907-route_rules=[]
+908-udp_block_rules=[]
+909-for r in relays:
+910-    rv=r.get("vless")
+911-    if not rv: continue
+912-    inbounds.append({
+913-      "tag":rv["test_inbound_tag"],"listen":"127.0.0.1","port":int(rv["test_socks_port"]),
+914-      "protocol":"socks","settings":{"udp":False},
+915-      "sniffing":{"enabled":True,"destOverride":["http","tls"],"routeOnly":True}
+916-    })
+917-    outbounds.append({
+918-      "tag":rv["outbound_tag"],"protocol":"vless",
+919-      "settings":{"address":r["remote_ip"],"port":int(r["remote_port"]),"id":rv["outbound_uuid"],"encryption":"none","flow":"xtls-rprx-vision"},
+920-      "streamSettings":{"method":"raw","security":"reality","realitySettings":{
+--
+930-      "sniffing":{"enabled":True,"destOverride":["http","tls"],"routeOnly":True}
+931-    })
+932-    outbounds.append({
+933-      "tag":r["outbound_tag"],"protocol":r["proxy_protocol"],
+934-      "settings":{"address":r["host"],"port":int(r["port"]),"user":r["username"],"pass":r["password"]}
+935-    })
+936-    test_rules.append({"type":"field","inboundTag":[r["test_inbound_tag"]],"outboundTag":r["outbound_tag"],"ruleTag":f"test-{r['id']}"})
+937-    udp_block_rules.append({"type":"field","user":[r["client_email"]],"network":"udp","outboundTag":"blocked","ruleTag":f"block-udp-{r['id']}"})
+938-    route_rules.append({"type":"field","user":[r["client_email"]],"outboundTag":r["outbound_tag"],"ruleTag":f"route-{r['id']}"})
+939-private_ips=[
+940- "0.0.0.0/8","10.0.0.0/8","100.64.0.0/10","127.0.0.0/8",
+941- "169.254.0.0/16","172.16.0.0/12","192.0.0.0/24","192.0.2.0/24",
+942- "192.168.0.0/16","198.18.0.0/15","198.51.100.0/24","203.0.113.0/24",
+943- "224.0.0.0/4","240.0.0.0/4","::1/128","fc00::/7","fe80::/10"
+944-]
+945-rules=test_rules+udp_block_rules+[
+946: {"type":"field","inboundTag":["api-in"],"outboundTag":"api","ruleTag":"api-route"},
+947- {"type":"field","ip":private_ips,"outboundTag":"blocked","ruleTag":"block-private"},
+948- {"type":"field","protocol":["bittorrent"],"outboundTag":"blocked","ruleTag":"block-bittorrent"},
+949- {"type":"field","user":[v["direct_user"]["email"]],"outboundTag":"direct","ruleTag":"direct-japan"}
+950-]+route_rules
+951-outbounds.append({"tag":"blocked","protocol":"blackhole","settings":{}})
+952-cfg={"log":{"loglevel":"warning"},"api":{"tag":"api","services":["HandlerService","RoutingService"]},"inbounds":inbounds,"outbounds":outbounds,"routing":{"domainStrategy":"AsIs","rules":rules}}
+953-Path(sys.argv[2]).write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+954-PY_BUILD_XRAY
+955-}
+956-
+957-build_sing_config() {
+958-  local state_path="$1" output="$2"
+959-  python3 - "$state_path" "$output" "$HY2_LIMIT_MBPS" <<'PY_BUILD_SING'
+960-import json, sys
+961-from pathlib import Path
+962-state=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+--
+1094-    SING_BOX_VERSION_SOURCE="备用稳定版（最新版配置测试失败）"
+1095-    install_sing_box_version "$SING_BOX_VERSION" || fail "sing-box 备用版安装失败。"
+1096-    changed=1
+1097-  fi
+1098-  (( changed == 1 )) || fail "代理服务配置或启动测试失败。"
+1099-  update_state_core_versions
+1100-  activate_initial_state || fail "使用备用版本后，代理服务仍无法启动。"
+1101-}
+1102-
+1103-xray_dynamic_parts() {
+1104-  local config="$1" dir="$2"
+1105-  mkdir -p "$dir"
+1106-  python3 - "$config" "$dir" <<'PY_PARTS'
+1107-import json,sys
+1108-from pathlib import Path
+1109-cfg=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8')); out=Path(sys.argv[2])
+1110:ins=[x for x in cfg.get('inbounds',[]) if x.get('tag') not in ('in-vless-reality','api-in')]
+1111-outs=[x for x in cfg.get('outbounds',[]) if x.get('tag') not in ('direct','blocked')]
+1112-(out/'in.json').write_text(json.dumps({'inbounds':ins},ensure_ascii=False),encoding='utf-8')
+1113-(out/'out.json').write_text(json.dumps({'outbounds':outs},ensure_ascii=False),encoding='utf-8')
+1114-(out/'in.tags').write_text('
+1115-'.join(x.get('tag','') for x in ins if x.get('tag'))+'
+1116-',encoding='utf-8')
+1117-(out/'out.tags').write_text('
+1118-'.join(x.get('tag','') for x in outs if x.get('tag'))+'
+1119-',encoding='utf-8')
+1120-PY_PARTS
+1121-}
+1122-
+1123-xray_hot_apply() {
+1124-  local target="$1" old="$2" dir tag count
+1125-  dir="$(mktemp -d /tmp/vvv-xray-api.XXXXXX)"; TMP_FILES+=("$dir")
+1126-  xray_dynamic_parts "$target" "$dir/new"; xray_dynamic_parts "$old" "$dir/old"
+===== test_rules= =====
+890-v=state["vless"]; sni=state["sni"]; port=int(state["listen_port"])
+891-relays=state.get("relays",[])
+892-upstreams=state.get("upstream_relays",[])
+893-clients=[{"id":v["direct_user"]["uuid"],"level":0,"email":v["direct_user"]["email"],"flow":"xtls-rprx-vision"}]
+894-for user in v.get("reserve_users",[]):
+895-    clients.append({"id":user["uuid"],"level":0,"email":user["email"],"flow":"xtls-rprx-vision"})
+896-inbounds=[{
+897- "tag":"in-vless-reality","listen":"0.0.0.0","port":port,"protocol":"vless",
+898- "settings":{"clients":clients,"decryption":"none"},
+899- "streamSettings":{"method":"raw","security":"reality","realitySettings":{
+900-   "show":False,"target":f"{sni}:443","xver":0,"serverNames":[sni],
+901-   "privateKey":v["reality"]["private_key"],"shortIds":[v["reality"]["short_id"]]}},
+902- "sniffing":{"enabled":True,"destOverride":["http","tls","quic"],"routeOnly":True}
+903-}]
+904-inbounds.append({"tag":"api-in","listen":"127.0.0.1","port":10085,"protocol":"dokodemo-door","settings":{"address":"127.0.0.1"}})
+905-outbounds=[{"tag":"direct","protocol":"freedom","settings":{"domainStrategy":"UseIPv4"}}]
+906:test_rules=[]
+907-route_rules=[]
+908-udp_block_rules=[]
+909-for r in relays:
+910-    rv=r.get("vless")
+911-    if not rv: continue
+912-    inbounds.append({
+913-      "tag":rv["test_inbound_tag"],"listen":"127.0.0.1","port":int(rv["test_socks_port"]),
+914-      "protocol":"socks","settings":{"udp":False},
+915-      "sniffing":{"enabled":True,"destOverride":["http","tls"],"routeOnly":True}
+916-    })
+917-    outbounds.append({
+918-      "tag":rv["outbound_tag"],"protocol":"vless",
+919-      "settings":{"address":r["remote_ip"],"port":int(r["remote_port"]),"id":rv["outbound_uuid"],"encryption":"none","flow":"xtls-rprx-vision"},
+920-      "streamSettings":{"method":"raw","security":"reality","realitySettings":{
+921-        "serverName":sni,"fingerprint":"chrome","password":rv["remote_reality"]["public_key"],
+922-        "shortId":rv["remote_reality"]["short_id"],"spiderX":""}}
+===== private_ips= =====
+923-    })
+924-    test_rules.append({"type":"field","inboundTag":[rv["test_inbound_tag"]],"outboundTag":rv["outbound_tag"],"ruleTag":f"test-{r['id']}"})
+925-    route_rules.append({"type":"field","user":[rv["client_email"]],"outboundTag":rv["outbound_tag"],"ruleTag":f"route-{r['id']}"})
+926-for r in upstreams:
+927-    inbounds.append({
+928-      "tag":r["test_inbound_tag"],"listen":"127.0.0.1","port":int(r["test_socks_port"]),
+929-      "protocol":"socks","settings":{"udp":False},
+930-      "sniffing":{"enabled":True,"destOverride":["http","tls"],"routeOnly":True}
+931-    })
+932-    outbounds.append({
+933-      "tag":r["outbound_tag"],"protocol":r["proxy_protocol"],
+934-      "settings":{"address":r["host"],"port":int(r["port"]),"user":r["username"],"pass":r["password"]}
+935-    })
+936-    test_rules.append({"type":"field","inboundTag":[r["test_inbound_tag"]],"outboundTag":r["outbound_tag"],"ruleTag":f"test-{r['id']}"})
+937-    udp_block_rules.append({"type":"field","user":[r["client_email"]],"network":"udp","outboundTag":"blocked","ruleTag":f"block-udp-{r['id']}"})
+938-    route_rules.append({"type":"field","user":[r["client_email"]],"outboundTag":r["outbound_tag"],"ruleTag":f"route-{r['id']}"})
+939:private_ips=[
+940- "0.0.0.0/8","10.0.0.0/8","100.64.0.0/10","127.0.0.0/8",
+941- "169.254.0.0/16","172.16.0.0/12","192.0.0.0/24","192.0.2.0/24",
+942- "192.168.0.0/16","198.18.0.0/15","198.51.100.0/24","203.0.113.0/24",
+943- "224.0.0.0/4","240.0.0.0/4","::1/128","fc00::/7","fe80::/10"
+944-]
+945-rules=test_rules+udp_block_rules+[
+946- {"type":"field","inboundTag":["api-in"],"outboundTag":"api","ruleTag":"api-route"},
+947- {"type":"field","ip":private_ips,"outboundTag":"blocked","ruleTag":"block-private"},
+948- {"type":"field","protocol":["bittorrent"],"outboundTag":"blocked","ruleTag":"block-bittorrent"},
+949- {"type":"field","user":[v["direct_user"]["email"]],"outboundTag":"direct","ruleTag":"direct-japan"}
+950-]+route_rules
+951-outbounds.append({"tag":"blocked","protocol":"blackhole","settings":{}})
+952-cfg={"log":{"loglevel":"warning"},"api":{"tag":"api","services":["HandlerService","RoutingService"]},"inbounds":inbounds,"outbounds":outbounds,"routing":{"domainStrategy":"AsIs","rules":rules}}
+953-Path(sys.argv[2]).write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+954-PY_BUILD_XRAY
+955-}
+===== cfg={ =====
+936-    test_rules.append({"type":"field","inboundTag":[r["test_inbound_tag"]],"outboundTag":r["outbound_tag"],"ruleTag":f"test-{r['id']}"})
+937-    udp_block_rules.append({"type":"field","user":[r["client_email"]],"network":"udp","outboundTag":"blocked","ruleTag":f"block-udp-{r['id']}"})
+938-    route_rules.append({"type":"field","user":[r["client_email"]],"outboundTag":r["outbound_tag"],"ruleTag":f"route-{r['id']}"})
+939-private_ips=[
+940- "0.0.0.0/8","10.0.0.0/8","100.64.0.0/10","127.0.0.0/8",
+941- "169.254.0.0/16","172.16.0.0/12","192.0.0.0/24","192.0.2.0/24",
+942- "192.168.0.0/16","198.18.0.0/15","198.51.100.0/24","203.0.113.0/24",
+943- "224.0.0.0/4","240.0.0.0/4","::1/128","fc00::/7","fe80::/10"
+944-]
+945-rules=test_rules+udp_block_rules+[
+946- {"type":"field","inboundTag":["api-in"],"outboundTag":"api","ruleTag":"api-route"},
+947- {"type":"field","ip":private_ips,"outboundTag":"blocked","ruleTag":"block-private"},
+948- {"type":"field","protocol":["bittorrent"],"outboundTag":"blocked","ruleTag":"block-bittorrent"},
+949- {"type":"field","user":[v["direct_user"]["email"]],"outboundTag":"direct","ruleTag":"direct-japan"}
+950-]+route_rules
+951-outbounds.append({"tag":"blocked","protocol":"blackhole","settings":{}})
+952:cfg={"log":{"loglevel":"warning"},"api":{"tag":"api","services":["HandlerService","RoutingService"]},"inbounds":inbounds,"outbounds":outbounds,"routing":{"domainStrategy":"AsIs","rules":rules}}
+953-Path(sys.argv[2]).write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+954-PY_BUILD_XRAY
+955-}
+956-
+957-build_sing_config() {
+958-  local state_path="$1" output="$2"
+959-  python3 - "$state_path" "$output" "$HY2_LIMIT_MBPS" <<'PY_BUILD_SING'
+960-import json, sys
+961-from pathlib import Path
+962-state=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+963-limit_mbps=int(sys.argv[3])
+964-if state["protocol_mode"] not in ("dual","hy2"):
+965-    Path(sys.argv[2]).write_text("{}\n",encoding="utf-8")
+966-    raise SystemExit
+967-h=state["hy2"]; port=int(state["listen_port"])
+968-users=[{"name":h["direct_user"]["name"],"password":h["direct_user"]["password"]}]
+--
+984-    if not rh: continue
+985-    inbounds.append({
+986-      "type":"mixed","tag":rh["test_inbound_tag"],"listen":"127.0.0.1",
+987-      "listen_port":int(rh["test_socks_port"])
+988-    })
+989-    outbounds.append({
+990-      "type":"hysteria2","tag":rh["outbound_tag"],"server":r["remote_ip"],
+991-      "server_port":int(r["remote_port"]),"up_mbps":limit_mbps,"down_mbps":limit_mbps,
+992-      "password":rh["outbound_password"],
+993-      "obfs":{"type":"salamander","password":rh["outbound_obfs_password"]},
+994-      "tls":{"enabled":True,"server_name":rh["outbound_server_name"],"insecure":True,"alpn":["h3"],
+995-             "min_version":"1.3","certificate_public_key_sha256":[rh["remote_certificate_public_key_sha256"]]}
+996-    })
+997-    rules.append({"inbound":[rh["test_inbound_tag"]],"action":"route","outbound":rh["outbound_tag"]})
+998-    rules.append({"auth_user":[rh["client_user"]],"action":"route","outbound":rh["outbound_tag"]})
+999-rules.append({"auth_user":[h["direct_user"]["name"]],"action":"route","outbound":"direct"})
+1000:cfg={
+1001- "log":{"level":"warn","timestamp":True},
+1002- "inbounds":inbounds,
+1003- "outbounds":outbounds,
+1004- "route":{"rules":rules,"final":"direct","auto_detect_interface":True}
+1005-}
+1006-Path(sys.argv[2]).write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+1007-PY_BUILD_SING
+1008-}
+1009-
+1010-verify_xray_runtime() {
+1011-  mode_has_vless || return 0
+1012-  local port
+1013-  port="$(jq -r '.listen_port' "$STATE_FILE")"
+1014-  systemctl is-active --quiet xray || return 1
+1015-  ss -H -lntp "sport = :${port}" 2>/dev/null | grep -qi xray || return 1
+1016-  while IFS= read -r port; do
+===== allocate_vless_slot =====
+1361-  jq -n \
+1362-    --arg server_name "$server_name" \
+1363-    --arg cert_pem "$(cat "$cert")" \
+1364-    --arg key_pem "$(cat "$key")" \
+1365-    --arg fp "$(jq -r '.fingerprint' <<< "$meta")" \
+1366-    --arg pinhex "$(jq -r '.pin_hex' <<< "$meta")" \
+1367-    --arg pinb64 "$(jq -r '.public_key_sha256' <<< "$meta")" \
+1368-    '{server_name:$server_name,certificate_pem:$cert_pem,key_pem:$key_pem,fingerprint:$fp,pin_hex:$pinhex,public_key_sha256:$pinb64}' > "$out_json"
+1369-}
+1370-
+1371-vvv_event_backup() {
+1372-  local reason="$1"
+1373-  [[ -x /usr/local/lib/vvv/backup_manager.py && -f /etc/vvv-sub/config.json ]] || return 0
+1374-  python3 /usr/local/lib/vvv/backup_manager.py create "$reason" --force >/dev/null || echo "警告：自动备份失败。" >&2
+1375-}
+1376-
+1377:allocate_vless_slot() {
+1378-  local slot_json
+1379-  slot_json="$(jq -c '[.vless.reserve_users[] | select(.assigned_id==null)][0] // empty' "$STATE_FILE")"
+1380-  [[ -n "$slot_json" ]] || fail "VLESS 动态线路已达到 64 条上限。"
+1381-  ALLOC_VLESS_SLOT="$(jq -r '.slot' <<<"$slot_json")"
+1382-  ALLOC_VLESS_UUID="$(jq -r '.uuid' <<<"$slot_json")"
+1383-  ALLOC_VLESS_EMAIL="$(jq -r '.email' <<<"$slot_json")"
+1384-}
+1385-
+1386-release_orphaned_vless_slots() {
+1387-  local path="$1" tmp
+1388-  [[ "$(jq -r '.vless // empty' "$path")" != "" ]] || return 0
+1389-  tmp="$(mktemp --suffix=.json /tmp/vvv-slots.XXXXXX)"; TMP_FILES+=("$tmp")
+1390-  jq '([.relays[]?.id] + [.upstream_relays[]?.id]) as $active | .vless.reserve_users |= map(if (.assigned_id != null and (($active|index(.assigned_id)) == null)) then .assigned_id=null else . end)' "$path" > "$tmp"
+1391-  install -m600 "$tmp" "$path"
+1392-}
+1393-
+--
+1411-from pathlib import Path
+1412-src,dst,rid,ip,port,now=sys.argv[1:]
+1413-s=json.loads(Path(src).read_text(encoding="utf-8"))
+1414-for r in s["relays"]:
+1415-    if r["id"]==rid:
+1416-        r["remote_ip"]=ip; r["remote_port"]=int(port); r["updated_at"]=now
+1417-s["updated_at"]=now
+1418-Path(dst).write_text(json.dumps(s,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+1419-PY_OVERWRITE
+1420-    echo "覆盖同名线路并复用原有双协议凭证。"
+1421-  else
+1422-    relay_id="$(printf '%s:%s:%s' "$node_name" "$remote_ip" "$remote_port" | sha256sum | awk '{print "relay-" substr($1,1,20)}')"
+1423-    local vless_json='null' hy2_json='null'
+1424-    if mode_has_vless; then
+1425-      local client_uuid client_email reserve_slot outbound_uuid key_output private_key public_key short_id
+1426-      test_vless="$(allocate_test_port vless)"
+1427:      allocate_vless_slot
+1428-      client_uuid="$ALLOC_VLESS_UUID"; client_email="$ALLOC_VLESS_EMAIL"; reserve_slot="$ALLOC_VLESS_SLOT"
+1429-      outbound_uuid="$(new_uuid)"
+1430-      key_output="$("$XRAY" x25519)"
+1431-      parse_x25519_keys "$key_output"
+1432-      private_key="$GENERATED_PRIVATE_KEY"; public_key="$GENERATED_PUBLIC_KEY"; short_id="$(openssl rand -hex 8)"
+1433-      vless_json="$(jq -n \
+1434-        --arg client_uuid "$client_uuid" --arg email "$client_email" --arg reserve_slot "$reserve_slot" \
+1435-        --arg outbound_uuid "$outbound_uuid" --arg private "$private_key" --arg public "$public_key" --arg sid "$short_id" \
+1436-        --arg outtag "vless-out-${relay_id}" --arg testtag "vless-test-${relay_id}" --argjson testport "$test_vless" \
+1437-        '{client_uuid:$client_uuid,client_email:$email,reserve_slot:$reserve_slot,outbound_uuid:$outbound_uuid,remote_reality:{private_key:$private,public_key:$public,short_id:$sid},outbound_tag:$outtag,test_inbound_tag:$testtag,test_socks_port:$testport}')"
+1438-    fi
+1439-    if mode_has_hy2; then
+1440-      local material client_password outbound_password outbound_obfs
+1441-      test_hy2="$(allocate_test_port hy2)"
+1442-      material="$(mktemp --suffix=.json /tmp/jp-hy2-material.XXXXXX)"
+1443-      TMP_FILES+=("$material")
+--
+1530-    upstream_id="$(jq -r --arg n "$node_name" '.upstream_relays[]|select(.name==$n)|.id' "$STATE_FILE")"
+1531-    python3 - "$STATE_FILE" "$candidate" "$upstream_id" "$proxy_protocol" "$protocol_label" "$host" "$port" "$username" "$password" "$exit_ip" "$now" <<'PY_UPSTREAM_OVERWRITE'
+1532-import json,sys
+1533-from pathlib import Path
+1534-src,dst,rid,proto,label,host,port,user,password,exit_ip,now=sys.argv[1:]
+1535-s=json.loads(Path(src).read_text(encoding='utf-8'))
+1536-for r in s.get('upstream_relays',[]):
+1537-    if r['id']==rid:
+1538-        r.update(proxy_protocol=proto,protocol_label=label,host=host,port=int(port),username=user,password=password,last_exit_ip=exit_ip,updated_at=now)
+1539-s['updated_at']=now
+1540-Path(dst).write_text(json.dumps(s,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+1541-PY_UPSTREAM_OVERWRITE
+1542-    echo "覆盖同名动态代理线路，并复用原 VLESS UUID。"
+1543-  else
+1544-    upstream_id="$(printf '%s:%s:%s:%s' "$node_name" "$proxy_protocol" "$host" "$port" | sha256sum | awk '{print "upstream-" substr($1,1,20)}')"
+1545-    test_port="$(allocate_test_port upstream)"
+1546:    allocate_vless_slot
+1547-    client_uuid="$ALLOC_VLESS_UUID"
+1548-    python3 - "$STATE_FILE" "$candidate" "$upstream_id" "$node_name" "$proxy_protocol" "$protocol_label" "$host" "$port" "$username" "$password" "$client_uuid" "$test_port" "$exit_ip" "$now" <<'PY_UPSTREAM_NEW'
+1549-import json,sys
+1550-from pathlib import Path
+1551-(src,dst,rid,name,proto,label,host,port,user,password,uuid,test_port,exit_ip,now)=sys.argv[1:]
+1552-s=json.loads(Path(src).read_text(encoding='utf-8'))
+1553-s.setdefault('upstream_relays',[]).append({
+1554- 'id':rid,'name':name,'kind':'upstream','proxy_protocol':proto,'protocol_label':label,
+1555- 'host':host,'port':int(port),'username':user,'password':password,
+1556- 'client_uuid':uuid,'client_email':f'{rid}@upstream.local',
+1557- 'outbound_tag':f'upstream-out-{rid}','test_inbound_tag':f'upstream-test-{rid}',
+1558- 'test_socks_port':int(test_port),'last_exit_ip':exit_ip,
+1559- 'created_at':now,'updated_at':now
+1560-})
+1561-s['updated_at']=now
+1562-Path(dst).write_text(json.dumps(s,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+===== test_vless= =====
+1410-import json,sys
+1411-from pathlib import Path
+1412-src,dst,rid,ip,port,now=sys.argv[1:]
+1413-s=json.loads(Path(src).read_text(encoding="utf-8"))
+1414-for r in s["relays"]:
+1415-    if r["id"]==rid:
+1416-        r["remote_ip"]=ip; r["remote_port"]=int(port); r["updated_at"]=now
+1417-s["updated_at"]=now
+1418-Path(dst).write_text(json.dumps(s,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+1419-PY_OVERWRITE
+1420-    echo "覆盖同名线路并复用原有双协议凭证。"
+1421-  else
+1422-    relay_id="$(printf '%s:%s:%s' "$node_name" "$remote_ip" "$remote_port" | sha256sum | awk '{print "relay-" substr($1,1,20)}')"
+1423-    local vless_json='null' hy2_json='null'
+1424-    if mode_has_vless; then
+1425-      local client_uuid client_email reserve_slot outbound_uuid key_output private_key public_key short_id
+1426:      test_vless="$(allocate_test_port vless)"
+1427-      allocate_vless_slot
+1428-      client_uuid="$ALLOC_VLESS_UUID"; client_email="$ALLOC_VLESS_EMAIL"; reserve_slot="$ALLOC_VLESS_SLOT"
+1429-      outbound_uuid="$(new_uuid)"
+1430-      key_output="$("$XRAY" x25519)"
+1431-      parse_x25519_keys "$key_output"
+1432-      private_key="$GENERATED_PRIVATE_KEY"; public_key="$GENERATED_PUBLIC_KEY"; short_id="$(openssl rand -hex 8)"
+1433-      vless_json="$(jq -n \
+1434-        --arg client_uuid "$client_uuid" --arg email "$client_email" --arg reserve_slot "$reserve_slot" \
+1435-        --arg outbound_uuid "$outbound_uuid" --arg private "$private_key" --arg public "$public_key" --arg sid "$short_id" \
+1436-        --arg outtag "vless-out-${relay_id}" --arg testtag "vless-test-${relay_id}" --argjson testport "$test_vless" \
+1437-        '{client_uuid:$client_uuid,client_email:$email,reserve_slot:$reserve_slot,outbound_uuid:$outbound_uuid,remote_reality:{private_key:$private,public_key:$public,short_id:$sid},outbound_tag:$outtag,test_inbound_tag:$testtag,test_socks_port:$testport}')"
+1438-    fi
+1439-    if mode_has_hy2; then
+1440-      local material client_password outbound_password outbound_obfs
+1441-      test_hy2="$(allocate_test_port hy2)"
+1442-      material="$(mktemp --suffix=.json /tmp/jp-hy2-material.XXXXXX)"
+===== test_port= =====
+1529-  if (( count == 1 )); then
+1530-    upstream_id="$(jq -r --arg n "$node_name" '.upstream_relays[]|select(.name==$n)|.id' "$STATE_FILE")"
+1531-    python3 - "$STATE_FILE" "$candidate" "$upstream_id" "$proxy_protocol" "$protocol_label" "$host" "$port" "$username" "$password" "$exit_ip" "$now" <<'PY_UPSTREAM_OVERWRITE'
+1532-import json,sys
+1533-from pathlib import Path
+1534-src,dst,rid,proto,label,host,port,user,password,exit_ip,now=sys.argv[1:]
+1535-s=json.loads(Path(src).read_text(encoding='utf-8'))
+1536-for r in s.get('upstream_relays',[]):
+1537-    if r['id']==rid:
+1538-        r.update(proxy_protocol=proto,protocol_label=label,host=host,port=int(port),username=user,password=password,last_exit_ip=exit_ip,updated_at=now)
+1539-s['updated_at']=now
+1540-Path(dst).write_text(json.dumps(s,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+1541-PY_UPSTREAM_OVERWRITE
+1542-    echo "覆盖同名动态代理线路，并复用原 VLESS UUID。"
+1543-  else
+1544-    upstream_id="$(printf '%s:%s:%s:%s' "$node_name" "$proxy_protocol" "$host" "$port" | sha256sum | awk '{print "upstream-" substr($1,1,20)}')"
+1545:    test_port="$(allocate_test_port upstream)"
+1546-    allocate_vless_slot
+1547-    client_uuid="$ALLOC_VLESS_UUID"
+1548-    python3 - "$STATE_FILE" "$candidate" "$upstream_id" "$node_name" "$proxy_protocol" "$protocol_label" "$host" "$port" "$username" "$password" "$client_uuid" "$test_port" "$exit_ip" "$now" <<'PY_UPSTREAM_NEW'
+1549-import json,sys
+1550-from pathlib import Path
+1551-(src,dst,rid,name,proto,label,host,port,user,password,uuid,test_port,exit_ip,now)=sys.argv[1:]
+1552-s=json.loads(Path(src).read_text(encoding='utf-8'))
+1553-s.setdefault('upstream_relays',[]).append({
+1554- 'id':rid,'name':name,'kind':'upstream','proxy_protocol':proto,'protocol_label':label,
+1555- 'host':host,'port':int(port),'username':user,'password':password,
+1556- 'client_uuid':uuid,'client_email':f'{rid}@upstream.local',
+1557- 'outbound_tag':f'upstream-out-{rid}','test_inbound_tag':f'upstream-test-{rid}',
+1558- 'test_socks_port':int(test_port),'last_exit_ip':exit_ip,
+1559- 'created_at':now,'updated_at':now
+1560-})
+1561-s['updated_at']=now
+===== xray_dynamic_parts =====
+1087-    XRAY_VERSION="$XRAY_FALLBACK_VERSION"
+1088-    XRAY_VERSION_SOURCE="备用稳定版（最新版配置测试失败）"
+1089-    install_xray_version "$XRAY_VERSION" || fail "Xray 备用版安装失败。"
+1090-    changed=1
+1091-  fi
+1092-  if mode_has_hy2 && [[ "$SING_BOX_VERSION" != "$SING_BOX_FALLBACK_VERSION" ]]; then
+1093-    SING_BOX_VERSION="$SING_BOX_FALLBACK_VERSION"
+1094-    SING_BOX_VERSION_SOURCE="备用稳定版（最新版配置测试失败）"
+1095-    install_sing_box_version "$SING_BOX_VERSION" || fail "sing-box 备用版安装失败。"
+1096-    changed=1
+1097-  fi
+1098-  (( changed == 1 )) || fail "代理服务配置或启动测试失败。"
+1099-  update_state_core_versions
+1100-  activate_initial_state || fail "使用备用版本后，代理服务仍无法启动。"
+1101-}
+1102-
+1103:xray_dynamic_parts() {
+1104-  local config="$1" dir="$2"
+1105-  mkdir -p "$dir"
+1106-  python3 - "$config" "$dir" <<'PY_PARTS'
+1107-import json,sys
+1108-from pathlib import Path
+1109-cfg=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8')); out=Path(sys.argv[2])
+1110-ins=[x for x in cfg.get('inbounds',[]) if x.get('tag') not in ('in-vless-reality','api-in')]
+1111-outs=[x for x in cfg.get('outbounds',[]) if x.get('tag') not in ('direct','blocked')]
+1112-(out/'in.json').write_text(json.dumps({'inbounds':ins},ensure_ascii=False),encoding='utf-8')
+1113-(out/'out.json').write_text(json.dumps({'outbounds':outs},ensure_ascii=False),encoding='utf-8')
+1114-(out/'in.tags').write_text('
+1115-'.join(x.get('tag','') for x in ins if x.get('tag'))+'
+1116-',encoding='utf-8')
+1117-(out/'out.tags').write_text('
+1118-'.join(x.get('tag','') for x in outs if x.get('tag'))+'
+1119-',encoding='utf-8')
+1120-PY_PARTS
+1121-}
+1122-
+1123-xray_hot_apply() {
+1124-  local target="$1" old="$2" dir tag count
+1125-  dir="$(mktemp -d /tmp/vvv-xray-api.XXXXXX)"; TMP_FILES+=("$dir")
+1126:  xray_dynamic_parts "$target" "$dir/new"; xray_dynamic_parts "$old" "$dir/old"
+1127-  cat "$dir/old/in.tags" "$dir/new/in.tags" | sort -u | while IFS= read -r tag; do [[ -z "$tag" ]] || "$XRAY" api rmi --server=127.0.0.1:10085 "$tag" >/dev/null 2>&1 || true; done
+1128-  cat "$dir/old/out.tags" "$dir/new/out.tags" | sort -u | while IFS= read -r tag; do [[ -z "$tag" ]] || "$XRAY" api rmo --server=127.0.0.1:10085 "$tag" >/dev/null 2>&1 || true; done
+1129-  count="$(jq '.inbounds|length' "$dir/new/in.json")"; (( count==0 )) || "$XRAY" api adi --server=127.0.0.1:10085 "$dir/new/in.json"
+1130-  count="$(jq '.outbounds|length' "$dir/new/out.json")"; (( count==0 )) || "$XRAY" api ado --server=127.0.0.1:10085 "$dir/new/out.json"
+1131-  "$XRAY" api adrules --server=127.0.0.1:10085 "$target"
+1132-}
+1133-
+1134-apply_candidate_with_rollback() {
+1135-  local candidate_state="$1" delete_dir="${2:-}" old_state old_xray old_sing candidate_xray candidate_sing xray_pid="" sing_changed=0 ok=1
+1136-  old_state="$(mktemp --suffix=.json /tmp/vvv-old-state.XXXXXX)"; old_xray="$(mktemp --suffix=.json /tmp/vvv-old-xray.XXXXXX)"; old_sing="$(mktemp --suffix=.json /tmp/vvv-old-sing.XXXXXX)"
+1137-  candidate_xray="$(mktemp --suffix=.json /tmp/vvv-new-xray.XXXXXX)"; candidate_sing="$(mktemp --suffix=.json /tmp/vvv-new-sing.XXXXXX)"
+1138-  TMP_FILES+=("$old_state" "$old_xray" "$old_sing" "$candidate_xray" "$candidate_sing")
+1139-  cp -a "$STATE_FILE" "$old_state"; [[ ! -f "$XRAY_CFG" ]] || cp -a "$XRAY_CFG" "$old_xray"; [[ ! -f "$SING_CFG" ]] || cp -a "$SING_CFG" "$old_sing"
+1140-  release_orphaned_vless_slots "$candidate_state"
+1141-  vvv_event_backup before-line-change
+1142-  if mode_has_vless "$(jq -r '.protocol_mode' "$candidate_state")"; then
+===== xray_hot_apply =====
+1107-import json,sys
+1108-from pathlib import Path
+1109-cfg=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8')); out=Path(sys.argv[2])
+1110-ins=[x for x in cfg.get('inbounds',[]) if x.get('tag') not in ('in-vless-reality','api-in')]
+1111-outs=[x for x in cfg.get('outbounds',[]) if x.get('tag') not in ('direct','blocked')]
+1112-(out/'in.json').write_text(json.dumps({'inbounds':ins},ensure_ascii=False),encoding='utf-8')
+1113-(out/'out.json').write_text(json.dumps({'outbounds':outs},ensure_ascii=False),encoding='utf-8')
+1114-(out/'in.tags').write_text('
+1115-'.join(x.get('tag','') for x in ins if x.get('tag'))+'
+1116-',encoding='utf-8')
+1117-(out/'out.tags').write_text('
+1118-'.join(x.get('tag','') for x in outs if x.get('tag'))+'
+1119-',encoding='utf-8')
+1120-PY_PARTS
+1121-}
+1122-
+1123:xray_hot_apply() {
+1124-  local target="$1" old="$2" dir tag count
+1125-  dir="$(mktemp -d /tmp/vvv-xray-api.XXXXXX)"; TMP_FILES+=("$dir")
+1126-  xray_dynamic_parts "$target" "$dir/new"; xray_dynamic_parts "$old" "$dir/old"
+1127-  cat "$dir/old/in.tags" "$dir/new/in.tags" | sort -u | while IFS= read -r tag; do [[ -z "$tag" ]] || "$XRAY" api rmi --server=127.0.0.1:10085 "$tag" >/dev/null 2>&1 || true; done
+1128-  cat "$dir/old/out.tags" "$dir/new/out.tags" | sort -u | while IFS= read -r tag; do [[ -z "$tag" ]] || "$XRAY" api rmo --server=127.0.0.1:10085 "$tag" >/dev/null 2>&1 || true; done
+1129-  count="$(jq '.inbounds|length' "$dir/new/in.json")"; (( count==0 )) || "$XRAY" api adi --server=127.0.0.1:10085 "$dir/new/in.json"
+1130-  count="$(jq '.outbounds|length' "$dir/new/out.json")"; (( count==0 )) || "$XRAY" api ado --server=127.0.0.1:10085 "$dir/new/out.json"
+1131-  "$XRAY" api adrules --server=127.0.0.1:10085 "$target"
+1132-}
+1133-
+1134-apply_candidate_with_rollback() {
+1135-  local candidate_state="$1" delete_dir="${2:-}" old_state old_xray old_sing candidate_xray candidate_sing xray_pid="" sing_changed=0 ok=1
+1136-  old_state="$(mktemp --suffix=.json /tmp/vvv-old-state.XXXXXX)"; old_xray="$(mktemp --suffix=.json /tmp/vvv-old-xray.XXXXXX)"; old_sing="$(mktemp --suffix=.json /tmp/vvv-old-sing.XXXXXX)"
+1137-  candidate_xray="$(mktemp --suffix=.json /tmp/vvv-new-xray.XXXXXX)"; candidate_sing="$(mktemp --suffix=.json /tmp/vvv-new-sing.XXXXXX)"
+1138-  TMP_FILES+=("$old_state" "$old_xray" "$old_sing" "$candidate_xray" "$candidate_sing")
+1139-  cp -a "$STATE_FILE" "$old_state"; [[ ! -f "$XRAY_CFG" ]] || cp -a "$XRAY_CFG" "$old_xray"; [[ ! -f "$SING_CFG" ]] || cp -a "$SING_CFG" "$old_sing"
+1140-  release_orphaned_vless_slots "$candidate_state"
+1141-  vvv_event_backup before-line-change
+1142-  if mode_has_vless "$(jq -r '.protocol_mode' "$candidate_state")"; then
+1143-    build_xray_config "$candidate_state" "$candidate_xray"; "$XRAY" run -test -format=json -config "$candidate_xray"
+1144-    xray_pid="$(systemctl show -p MainPID --value xray)"
+1145-    "$XRAY" api inbounduser --server=127.0.0.1:10085 -tag=in-vless-reality >/dev/null
+1146:    if ! xray_hot_apply "$candidate_xray" "$old_xray"; then xray_hot_apply "$old_xray" "$candidate_xray" || true; fail "Xray API 热更新失败，已恢复旧运行配置。"; return 1; fi
+1147-  fi
+1148-  if mode_has_hy2 "$(jq -r '.protocol_mode' "$candidate_state")"; then
+1149-    build_sing_config "$candidate_state" "$candidate_sing"; "$SING_BOX" check -c "$candidate_sing"; cmp -s "$candidate_sing" "$SING_CFG" || sing_changed=1
+1150-  fi
+1151-  install -m600 "$candidate_state" "$STATE_FILE"
+1152-  if mode_has_vless; then install -o root -g xray -m640 "$candidate_xray" "$XRAY_CFG"; fi
+1153-  if (( sing_changed==1 )); then install -o root -g sing-box -m640 "$candidate_sing" "$SING_CFG"; systemctl restart sing-box >/dev/null 2>&1 || ok=0; fi
+1154-  sleep 2
+1155-  [[ -z "$xray_pid" || "$(systemctl show -p MainPID --value xray)" == "$xray_pid" ]] || ok=0
+1156-  verify_xray_runtime || ok=0; verify_sing_runtime || ok=0
+1157-  if (( ok==1 )); then
+1158-    [[ -z "$delete_dir" ]] || rm -rf -- "$delete_dir"
+1159-    vvv_event_backup after-line-change
+1160-    systemctl start vvv-sync.service >/dev/null 2>&1 || true
+1161-    return 0
+1162-  fi
+1163-  install -m600 "$old_state" "$STATE_FILE"
+1164:  if mode_has_vless && [[ -s "$old_xray" ]]; then install -o root -g xray -m640 "$old_xray" "$XRAY_CFG"; xray_hot_apply "$old_xray" "$candidate_xray" || true; fi
+1165-  if (( sing_changed==1 )) && [[ -s "$old_sing" ]]; then install -o root -g sing-box -m640 "$old_sing" "$SING_CFG"; systemctl restart sing-box >/dev/null 2>&1 || true; fi
+1166-  fail "新配置未生效，已恢复旧配置。"
+1167-}
+1168-
+1169-generate_client_files() {
+1170-  local state_path="$1" relay_id="$2" out_dir="$3" kind="${4:-relay}"
+1171-  mkdir -p "$out_dir"
+1172-  python3 - "$state_path" "$relay_id" "$out_dir" "$kind" "$HY2_LIMIT_MBPS" <<'PY_CLIENTS'
+1173-import json, re, sys
+1174-from pathlib import Path
+1175-from urllib.parse import quote, urlencode
+1176-
+1177-def protocol_name(base, proto):
+1178-    m=re.match(r"^([A-Z]{2})-(.+)$", base)
+1179-    if m:
+1180-        return f"{m.group(1)}-{proto}-{m.group(2)}"
+===== build_hy2_slot_configs =====
+===== apply_candidate_with_rollback =====
+1118-'.join(x.get('tag','') for x in outs if x.get('tag'))+'
+1119-',encoding='utf-8')
+1120-PY_PARTS
+1121-}
+1122-
+1123-xray_hot_apply() {
+1124-  local target="$1" old="$2" dir tag count
+1125-  dir="$(mktemp -d /tmp/vvv-xray-api.XXXXXX)"; TMP_FILES+=("$dir")
+1126-  xray_dynamic_parts "$target" "$dir/new"; xray_dynamic_parts "$old" "$dir/old"
+1127-  cat "$dir/old/in.tags" "$dir/new/in.tags" | sort -u | while IFS= read -r tag; do [[ -z "$tag" ]] || "$XRAY" api rmi --server=127.0.0.1:10085 "$tag" >/dev/null 2>&1 || true; done
+1128-  cat "$dir/old/out.tags" "$dir/new/out.tags" | sort -u | while IFS= read -r tag; do [[ -z "$tag" ]] || "$XRAY" api rmo --server=127.0.0.1:10085 "$tag" >/dev/null 2>&1 || true; done
+1129-  count="$(jq '.inbounds|length' "$dir/new/in.json")"; (( count==0 )) || "$XRAY" api adi --server=127.0.0.1:10085 "$dir/new/in.json"
+1130-  count="$(jq '.outbounds|length' "$dir/new/out.json")"; (( count==0 )) || "$XRAY" api ado --server=127.0.0.1:10085 "$dir/new/out.json"
+1131-  "$XRAY" api adrules --server=127.0.0.1:10085 "$target"
+1132-}
+1133-
+1134:apply_candidate_with_rollback() {
+1135-  local candidate_state="$1" delete_dir="${2:-}" old_state old_xray old_sing candidate_xray candidate_sing xray_pid="" sing_changed=0 ok=1
+1136-  old_state="$(mktemp --suffix=.json /tmp/vvv-old-state.XXXXXX)"; old_xray="$(mktemp --suffix=.json /tmp/vvv-old-xray.XXXXXX)"; old_sing="$(mktemp --suffix=.json /tmp/vvv-old-sing.XXXXXX)"
+1137-  candidate_xray="$(mktemp --suffix=.json /tmp/vvv-new-xray.XXXXXX)"; candidate_sing="$(mktemp --suffix=.json /tmp/vvv-new-sing.XXXXXX)"
+1138-  TMP_FILES+=("$old_state" "$old_xray" "$old_sing" "$candidate_xray" "$candidate_sing")
+1139-  cp -a "$STATE_FILE" "$old_state"; [[ ! -f "$XRAY_CFG" ]] || cp -a "$XRAY_CFG" "$old_xray"; [[ ! -f "$SING_CFG" ]] || cp -a "$SING_CFG" "$old_sing"
+1140-  release_orphaned_vless_slots "$candidate_state"
+1141-  vvv_event_backup before-line-change
+1142-  if mode_has_vless "$(jq -r '.protocol_mode' "$candidate_state")"; then
+1143-    build_xray_config "$candidate_state" "$candidate_xray"; "$XRAY" run -test -format=json -config "$candidate_xray"
+1144-    xray_pid="$(systemctl show -p MainPID --value xray)"
+1145-    "$XRAY" api inbounduser --server=127.0.0.1:10085 -tag=in-vless-reality >/dev/null
+1146-    if ! xray_hot_apply "$candidate_xray" "$old_xray"; then xray_hot_apply "$old_xray" "$candidate_xray" || true; fail "Xray API 热更新失败，已恢复旧运行配置。"; return 1; fi
+1147-  fi
+1148-  if mode_has_hy2 "$(jq -r '.protocol_mode' "$candidate_state")"; then
+1149-    build_sing_config "$candidate_state" "$candidate_sing"; "$SING_BOX" check -c "$candidate_sing"; cmp -s "$candidate_sing" "$SING_CFG" || sing_changed=1
+1150-  fi
+--
+1470-  staging="$(mktemp -d "${PACKAGE_ROOT}/.${relay_id}.staging.XXXXXX")"
+1471-  TMP_FILES+=("$staging")
+1472-  generate_client_files "$candidate" "$relay_id" "$staging" relay >/dev/null
+1473-  key="$(make_pairing_key "$candidate" "$relay_id")"
+1474-  printf '%s\n' "$key" > "$staging/落地VPS对接密钥.txt"
+1475-  cat > "$staging/使用说明.txt" <<EOF_RELAY_HELP
+1476-线路：${node_name}
+1477-协议模式：$(jq -r '.protocol_mode' "$candidate")
+1478-日本入口：$(jq -r '.public_ip' "$candidate"):$(jq -r '.listen_port' "$candidate")
+1479-落地入口：${remote_ip}:${remote_port}
+1480-
+1481-把“落地VPS对接密钥.txt”中的完整 JPR3 密钥粘贴到落地脚本顶部，然后在落地 VPS 上运行。
+1482-落地脚本不会再询问任何问题，会自动按 JPR3 安装单协议或双协议。
+1483-EOF_RELAY_HELP
+1484-  chmod 600 "$staging"/*
+1485-
+1486:  apply_candidate_with_rollback "$candidate"
+1487-
+1488-  package_dir="${PACKAGE_ROOT}/${relay_id}"
+1489-  rm -rf -- "${package_dir}.old" 2>/dev/null || true
+1490-  [[ ! -d "$package_dir" ]] || mv "$package_dir" "${package_dir}.old"
+1491-  mv "$staging" "$package_dir"
+1492-  rm -rf -- "${package_dir}.old"
+1493-
+1494-  log "日本中转线路配置成功"
+1495-  echo "线路：${node_name}"
+1496-  echo "协议模式：$(jq -r '.protocol_mode' "$STATE_FILE")"
+1497-  echo "日本入口：$(jq -r '.public_ip' "$STATE_FILE"):$(jq -r '.listen_port' "$STATE_FILE")"
+1498-  echo "落地入口：${remote_ip}:${remote_port}"
+1499-  echo "线路已通过运行时接口生效；Xray 主进程未重启。"
+1500-  echo "客户端配置目录：${package_dir}"
+1501-  echo
+1502-  echo "==================== 落地 VPS JPR3 对接密钥 ===================="
+--
+1570-  fi
+1571-
+1572-  local staging package_dir
+1573-  staging="$(mktemp -d "${PACKAGE_ROOT}/.${upstream_id}.staging.XXXXXX")"
+1574-  TMP_FILES+=("$staging")
+1575-  generate_client_files "$candidate" "$upstream_id" "$staging" upstream >/dev/null
+1576-  cat > "$staging/使用说明.txt" <<EOF_UPSTREAM_HELP
+1577-线路：${node_name}
+1578-上游协议：${protocol_label}
+1579-上游地址：${host}:${port}
+1580-日本加密入口：$(jq -r '.public_ip' "$candidate"):$(jq -r '.listen_port' "$candidate")
+1581-客户端协议：VLESS + XTLS Vision + REALITY
+1582-UDP：服务器端拒绝，避免绕过动态代理出口
+1583-EOF_UPSTREAM_HELP
+1584-  chmod 600 "$staging"/*
+1585-
+1586:  apply_candidate_with_rollback "$candidate"
+1587-  package_dir="${PACKAGE_ROOT}/${upstream_id}"
+1588-  rm -rf -- "${package_dir}.old" 2>/dev/null || true
+1589-  [[ ! -d "$package_dir" ]] || mv "$package_dir" "${package_dir}.old"
+1590-  mv "$staging" "$package_dir"
+1591-  rm -rf -- "${package_dir}.old"
+1592-
+1593-  log "动态代理中转线路配置成功"
+1594-  show_upstream_client_config "$upstream_id"
+1595-  refresh_upstream_status "$upstream_id" || true
+1596-  echo
+1597-  echo "==================== 线路状态 ===================="
+1598-  print_protocol_status "VLESS + REALITY" "$UPSTREAM_STATUS" "$UPSTREAM_REASON" "$UPSTREAM_TIME" "$UPSTREAM_EXIT_IP"
+1599-}
+1600-
+1601-prompt_new_upstream_relay() {
+1602-  mode_has_vless || { echo "该功能需要 VLESS + REALITY；当前主机只安装了 Hysteria 2。"; return 0; }
+--
+1936-  echo
+1937-  echo "==================== 落地 VPS JPR3 对接密钥 ===================="
+1938-  echo "$key"
+1939-  echo "================================================================"
+1940-}
+1941-
+1942-perform_delete() {
+1943-  local relay_id="$1" name confirm candidate package_dir
+1944-  name="$(jq -r --arg id "$relay_id" '.relays[]|select(.id==$id)|.name' "$STATE_FILE")"
+1945-  read -r -p "确认删除“${name}”？输入 Y 确认：" confirm
+1946-  case "$confirm" in [Yy]) ;; *) echo "已取消删除。"; return 0;; esac
+1947-  candidate="$(mktemp --suffix=.json /tmp/jp-delete.XXXXXX)"
+1948-  TMP_FILES+=("$candidate")
+1949-  jq --arg id "$relay_id" --arg now "$(date --iso-8601=seconds)" \
+1950-    '.relays |= map(select(.id!=$id)) | .updated_at=$now' "$STATE_FILE" > "$candidate"
+1951-  package_dir="${PACKAGE_ROOT}/${relay_id}"
+1952:  apply_candidate_with_rollback "$candidate" "$package_dir"
+1953-  echo "线路“${name}”已删除。"
+1954-}
+1955-
+1956-perform_delete_upstream() {
+1957-  local upstream_id="$1" name confirm candidate package_dir
+1958-  name="$(jq -r --arg id "$upstream_id" '.upstream_relays[]|select(.id==$id)|.name' "$STATE_FILE")"
+1959-  read -r -p "确认删除“${name}”？输入 Y 确认：" confirm
+1960-  case "$confirm" in [Yy]) ;; *) echo "已取消删除。"; return 0;; esac
+1961-  candidate="$(mktemp --suffix=.json /tmp/jp-upstream-delete.XXXXXX)"
+1962-  TMP_FILES+=("$candidate")
+1963-  jq --arg id "$upstream_id" --arg now "$(date --iso-8601=seconds)" \
+1964-    '.upstream_relays |= map(select(.id!=$id)) | .updated_at=$now' "$STATE_FILE" > "$candidate"
+1965-  package_dir="${PACKAGE_ROOT}/${upstream_id}"
+1966:  apply_candidate_with_rollback "$candidate" "$package_dir"
+1967-  echo "线路“${name}”已删除。"
+1968-}
+1969-
+1970-upstream_submenu() {
+1971-  local upstream_id="$1" action
+1972-  printf '正在检测动态代理实际出口……\r'
+1973-  refresh_upstream_status "$upstream_id" || true
+1974-  printf '%-60s\r' ''
+1975-  while true; do
+1976-    echo
+1977-    echo "========== HTTP/HTTPS/SOCKS5 中转线路 =========="
+1978-    print_upstream_status_header "$upstream_id"
+1979-    echo
+1980-    echo "1. 查看客户端配置"
+1981-    echo "2. 查看线路详情"
+1982-    echo "3. 检测线路状态"
