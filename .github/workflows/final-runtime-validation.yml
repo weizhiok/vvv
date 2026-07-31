@@ -1,0 +1,166 @@
+name: Final VVV runtime validation
+on:
+  push:
+    paths:
+      - '.github/workflows/final-runtime-validation.yml'
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq qrencode openssl curl unzip
+      - name: Transform installation sources
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cp core-src/host.sh /tmp/host.sh
+          cp core-src/landing.sh /tmp/landing.sh
+          cp core-src/center_install.sh /tmp/center.sh
+          python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
+          bash -n /tmp/host.sh
+          sh -n /tmp/landing.sh
+          awk "/<<'PY_BUILD_XRAY'/{f=1;next}/^PY_BUILD_XRAY$/{f=0}f" /tmp/host.sh >/tmp/build_xray.py
+          awk "/<<'PY_BUILD_SING'/{f=1;next}/^PY_BUILD_SING$/{f=0}f" /tmp/host.sh >/tmp/build_sing.py
+          awk "/<<'PY_HY2_SLOTS'/{f=1;next}/^PY_HY2_SLOTS$/{f=0}f" /tmp/host.sh >/tmp/build_slots.py
+          python3 -m py_compile /tmp/build_xray.py /tmp/build_sing.py /tmp/build_slots.py
+      - name: Download current proxy cores
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          xapi=$(curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest)
+          xurl=$(jq -r '.assets[]|select(.name=="Xray-linux-64.zip")|.browser_download_url' <<<"$xapi")
+          curl -fsSL "$xurl" -o /tmp/xray.zip; unzip -q /tmp/xray.zip xray -d /tmp; chmod +x /tmp/xray
+          sapi=$(curl -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/latest)
+          surl=$(jq -r '.assets[]|select(.name|test("linux-amd64.tar.gz$"))|.browser_download_url' <<<"$sapi"|head -n1)
+          curl -fsSL "$surl" -o /tmp/sing.tgz
+          tar -xzf /tmp/sing.tgz -C /tmp
+          find /tmp -type f -name sing-box -perm -111 | head -n1 | xargs -I{} cp {} /tmp/sing-box
+          chmod +x /tmp/sing-box
+          /tmp/xray version | head -n2
+          /tmp/sing-box version | head -n3
+      - name: Build and check real core configurations
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/tls /tmp/slots
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 2 -subj /CN=hy2.local -addext subjectAltName=DNS:hy2.local -keyout /tmp/tls/key.pem -out /tmp/tls/cert.pem >/dev/null 2>&1
+          kout=$(/tmp/xray x25519); priv=$(sed -n 's/^PrivateKey:[[:space:]]*//p' <<<"$kout"|head -n1); pub=$(sed -n -E -e 's/^Password( \(PublicKey\))?:[[:space:]]*//p' -e 's/^PublicKey:[[:space:]]*//p' <<<"$kout"|head -n1)
+          pin=$(openssl x509 -in /tmp/tls/cert.pem -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64 -w0)
+          python3 - "$priv" "$pub" "$pin" <<'PY'
+          import json,sys
+          priv,pub,pin=sys.argv[1:]
+          state={
+           'schema':3,'role':'japan-hub','protocol_mode':'dual','public_ip':'127.0.0.1','listen_port':18443,'sni':'www.softbank.jp','direct_base_name':'JP-127.0.0.1:18443','xray_version':'test','sing_box_version':'test','relay_manager_enabled':True,
+           'vless':{'reality':{'private_key':priv,'public_key':pub,'short_id':'0123456789abcdef'},'direct_user':{'uuid':'11111111-1111-4111-8111-111111111111','email':'direct@test'},'reserve_users':[
+             {'slot':'v01','uuid':'22222222-2222-4222-8222-222222222222','email':'reserve-01@test','assigned_id':'relay1'},
+             {'slot':'v02','uuid':'33333333-3333-4333-8333-333333333333','email':'reserve-02@test','assigned_id':'up1'},
+             {'slot':'v03','uuid':'44444444-4444-4444-8444-444444444444','email':'reserve-03@test','assigned_id':None}]},
+           'hy2':{'server_name':'hy2.local','certificate_path':'/tmp/tls/cert.pem','key_path':'/tmp/tls/key.pem','certificate_fingerprint':'AA','certificate_pin_hex':'aa','certificate_public_key_sha256':pin,'obfs_password':'obfs_main','direct_user':{'name':'direct-hy2','password':'direct_pass'},'reserve_users':[
+             {'slot':'h01','name':'reserve-h01','password':'slot_pass','local_port':21101,'assigned_id':'relay1'},
+             {'slot':'h02','name':'reserve-h02','password':'unused_pass','local_port':21102,'assigned_id':None}]},
+           'relays':[{'id':'relay1','name':'SG-Relay','remote_ip':'203.0.113.10','remote_port':2443,
+             'vless':{'client_uuid':'22222222-2222-4222-8222-222222222222','client_email':'reserve-01@test','reserve_slot':'v01','outbound_uuid':'55555555-5555-4555-8555-555555555555','remote_reality':{'private_key':priv,'public_key':pub,'short_id':'abcdef0123456789'},'outbound_tag':'vless-out-relay1','test_inbound_tag':'vless-test-relay1','test_socks_port':18081},
+             'hy2':{'client_user':'reserve-h01','client_password':'slot_pass','reserve_slot':'h01','outbound_password':'remote_pass','outbound_obfs_password':'remote_obfs','outbound_tag':'hy2-out-relay1','test_inbound_tag':'hy2-test-relay1','test_socks_port':21101,'outbound_server_name':'landing.local','remote_certificate_public_key_sha256':pin,'remote_certificate_fingerprint':'AA','remote_certificate_pin_hex':'aa','remote_certificate_pem':'','remote_key_pem':''}}],
+           'upstream_relays':[{'id':'up1','name':'HTTP-Upstream','kind':'upstream','proxy_protocol':'http','protocol_label':'HTTP/HTTPS','host':'127.0.0.1','port':18090,'username':'user','password':'pass','client_uuid':'33333333-3333-4333-8333-333333333333','client_email':'reserve-02@test','reserve_slot':'v02','outbound_tag':'upstream-out-up1','test_inbound_tag':'upstream-test-up1','test_socks_port':20081,'last_exit_ip':''}]
+          }
+          open('/tmp/state.json','w').write(json.dumps(state,indent=2)+'\n')
+          old=json.loads(json.dumps(state)); old['relays']=[]; old['upstream_relays']=[]
+          for u in old['vless']['reserve_users']: u['assigned_id']=None
+          for u in old['hy2']['reserve_users']: u['assigned_id']=None
+          open('/tmp/old-state.json','w').write(json.dumps(old,indent=2)+'\n')
+          PY
+          python3 /tmp/build_xray.py /tmp/state.json /tmp/xray.json
+          python3 /tmp/build_xray.py /tmp/old-state.json /tmp/xray-old.json
+          /tmp/xray run -test -format=json -config /tmp/xray.json
+          python3 /tmp/build_sing.py /tmp/state.json /tmp/sing.json 50
+          /tmp/sing-box check -c /tmp/sing.json
+          python3 /tmp/build_slots.py /tmp/state.json /tmp/slots 50
+          test -s /tmp/slots/h01.json
+          /tmp/sing-box check -c /tmp/slots/h01.json
+          jq -e '.outbounds[]|select(.tag=="hy2-slot-h01" and .type=="socks")' /tmp/sing.json >/dev/null
+          jq -e '.routing.rules[]|select(.ruleTag=="block-unused-vless")' /tmp/xray.json >/dev/null
+      - name: Exercise Xray API without process restart
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          /tmp/xray run -format=json -config /tmp/xray-old.json >/tmp/xray.log 2>&1 & xp=$!
+          trap 'kill $xp 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do /tmp/xray api inbounduser --server=127.0.0.1:10085 -tag=in-vless-reality >/dev/null 2>&1 && break; sleep .2; done
+          kill -0 "$xp"
+          python3 - <<'PY'
+          import json
+          cfg=json.load(open('/tmp/xray.json'))
+          ins=[x for x in cfg['inbounds'] if x.get('tag') not in ('in-vless-reality','api-in')]
+          outs=[x for x in cfg['outbounds'] if x.get('tag') not in ('direct','blocked')]
+          json.dump({'inbounds':ins},open('/tmp/in.json','w')); json.dump({'outbounds':outs},open('/tmp/out.json','w'))
+          PY
+          /tmp/xray api adi --server=127.0.0.1:10085 /tmp/in.json
+          /tmp/xray api ado --server=127.0.0.1:10085 /tmp/out.json
+          /tmp/xray api adrules --server=127.0.0.1:10085 /tmp/xray.json
+          kill -0 "$xp"
+          ss -lnt | grep -q ':18081 '
+          ss -lnt | grep -q ':20081 '
+      - name: Validate subscriptions, short paths, QR and encrypted backup
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo mkdir -p /etc/vvv-sub /etc/vvv /etc/jp-relay /var/lib/vvv-sub/hosts /var/lib/vvv-sub/output /var/lib/vvv-sub/backups /usr/local/lib/vvv
+          sudo cp core-src/backup_manager.py /usr/local/lib/vvv/backup_manager.py
+          sudo cp core-src/qr_helper.sh /usr/local/lib/vvv/qr_helper.sh
+          sudo cp /tmp/state.json /etc/jp-relay/state.json
+          sudo cp /tmp/state.json /var/lib/vvv-sub/hosts/test.json
+          sudo python3 - <<'PY'
+          import json,time
+          p='/var/lib/vvv-sub/hosts/test.json'; state=json.load(open(p)); json.dump({'host_id':'test','role':'center-relay','state':state,'meta':{},'last_seen_ts':time.time()},open(p,'w'))
+          json.dump({'schema':2,'mode':'ip','base_url':'http://127.0.0.1:18091','listen_host':'127.0.0.1','listen_port':18091,'subscription_token':'token123','master_token':'master123','recovery_password':'test-password'},open('/etc/vvv-sub/config.json','w'))
+          json.dump({'hosts':[]},open('/var/lib/vvv-sub/registry.json','w'))
+          PY
+          sudo python3 core-src/sub_center.py regenerate
+          grep -q 'salamander-password=obfs_main' /var/lib/vvv-sub/output/loon
+          ! grep -q 'salamander-password="' /var/lib/vvv-sub/output/loon
+          base64 -d /var/lib/vvv-sub/output/v2rayng >/tmp/v2.txt
+          grep -q '^hy2://' /tmp/v2.txt
+          ! grep -q 'pinSHA256' /tmp/v2.txt
+          sudo python3 core-src/sub_center.py serve >/tmp/sub.log 2>&1 & sp=$!
+          trap 'kill $sp 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18091/health >/dev/null 2>&1 && break; sleep .2; done
+          for p in c qx ln sr v2; do curl -fsS "http://127.0.0.1:18091/r/token123/$p" >/dev/null; done
+          for p in clash quantumultx loon shadowrocket v2rayng; do test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:18091/r/token123/$p")" = 404; done
+          source core-src/qr_helper.sh
+          vvv_print_qr 'https://example.test/r/token/sr' >/tmp/qr.txt
+          head -n1 /tmp/qr.txt | grep -q $'\033[47m'
+          sudo python3 core-src/backup_manager.py create validation --force >/tmp/backup-path
+          test -s /var/lib/vvv-sub/backups/latest.enc
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass pass:test-password -in /var/lib/vvv-sub/backups/latest.enc | tar -tzf - >/tmp/backup-list
+          grep -q 'etc/vvv-sub/config.json' /tmp/backup-list
+          ! grep -R -qE 'OnCalendar=.*backup|vvv-backup-pull|pull-backup|/api/v1/backup' core-src src vvv-install.sh
+      - name: Record validation
+        shell: bash
+        run: |
+          mkdir -p validation
+          cat > validation/final-vvv-validation.txt <<EOF
+          status=ok
+          date=$(date -u +%FT%TZ)
+          xray_config=ok
+          xray_api_hot_load=ok
+          xray_pid_preserved=ok
+          sing_box_main_config=ok
+          sing_box_slot_config=ok
+          subscription_renderers=ok
+          short_paths=ok
+          old_paths_404=ok
+          qr_top_border=ok
+          encrypted_event_backup=ok
+          cross_host_backup=absent
+          EOF
+      - name: Commit result
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add validation/final-vvv-validation.txt
+          git commit -m 'Validate VVV all in one runtime'
+          git push
