@@ -1,0 +1,635 @@
+===== b64_sha =====
+18f228ffce5dcb0cf421b5d3425d41f62273314b55a54132a098da5ec3f357d9  /tmp/gooddiag/prepare.b64
+exit=0
+===== decode =====
+#!/usr/bin/env python3
+from pathlib import Path
+import re
+import sys
+
+if len(sys.argv) != 4:
+    raise SystemExit('usage: prepare.py HOST LANDING CENTER')
+
+host, landing, center = map(Path, sys.argv[1:])
+h = host.read_text(encoding='utf-8')
+
+
+def replace_once(text, old, new, label):
+    if old not in text:
+        raise SystemExit(f'无法修改 {label}')
+    return text.replace(old, new, 1)
+
+# Front-loaded installation parameters.
+h, n = re.subn(r'^DEFAULT_SNI="www\.softbank\.jp"$', 'DEFAULT_SNI="${VVV_REALITY_SNI:-www.softbank.jp}"', h, count=1, flags=re.M)
+if n != 1:
+    raise SystemExit('无法设置 REALITY 伪装域名')
+new_prompt = r'''prompt_initial_mode_and_port() {
+  local preset_mode="${VVV_PROTOCOL_MODE:-dual}" preset_port="${VVV_PROXY_PORT:-443}"
+  case "$preset_mode" in dual|vless|hy2) INSTALL_MODE="$preset_mode";; *) fail "预设协议模式无效：$preset_mode"; return 1;; esac
+  valid_port "$preset_port" || { fail "预设代理端口无效：$preset_port"; return 1; }
+  INSTALL_PORT="$((10#$preset_port))"
+  [[ "$INSTALL_MODE" == hy2 ]] || [[ "$DEFAULT_SNI" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$ ]] || { fail "REALITY 伪装域名格式无效：$DEFAULT_SNI"; return 1; }
+  echo "已选择模式：$INSTALL_MODE"
+  echo "统一监听端口：TCP/UDP ${INSTALL_PORT}（仅启用所选协议）"
+  [[ "$INSTALL_MODE" == hy2 ]] || echo "REALITY 伪装域名：$DEFAULT_SNI"
+}
+'''
+h, n = re.subn(r'(?ms)^prompt_initial_mode_and_port\(\) \{.*?^\}\n', new_prompt, h, count=1)
+if n != 1:
+    raise SystemExit('无法替换代理参数函数')
+
+# Shared SSH QR renderer and Loon Salamander compatibility.
+manager_header = '''#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+RUN_MODE='''
+manager_new = '''#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+if [[ -r /usr/local/lib/vvv/qr_helper.sh ]]; then
+  source /usr/local/lib/vvv/qr_helper.sh
+else
+  vvv_print_qr(){ qrencode -t ANSIUTF8 -m 1 "$1"; }
+fi
+
+RUN_MODE='''
+h = replace_once(h, manager_header, manager_new, '主机二维码加载器')
+h = h.replace("salamander-password={loon_q(h['obfs_password'])}", "salamander-password={h['obfs_password']}")
+h, qr_count = re.subn(r'qrencode -t ANSIUTF8 -m\s*1 "\$uri"', 'vvv_print_qr "$uri" || true', h)
+if qr_count < 1:
+    raise SystemExit('主机脚本中没有找到二维码输出')
+h = h.replace("#!/usr/bin/env bash\ncat /root/日本VPS-客户端节点.txt", "#!/usr/bin/env bash\nsource /usr/local/lib/vvv/qr_helper.sh\ncat /root/日本VPS-客户端节点.txt", 1)
+
+# Preallocate VLESS users, so adding or deleting relay routes never replaces the public REALITY inbound.
+old = '''    local key_output v_private v_public short_id uuid
+    uuid="$(new_uuid)"
+    key_output="$("$XRAY" x25519)"'''
+new = '''    local key_output v_private v_public short_id uuid reserve_json i slot_uuid slot_email
+    uuid="$(new_uuid)"
+    reserve_json='[]'
+    for i in $(seq 1 64); do
+      slot_uuid="$(new_uuid)"; slot_email="reserve-$(printf '%02d' "$i")@relay.local"
+      reserve_json="$(jq --arg slot "v$(printf '%02d' "$i")" --arg uuid "$slot_uuid" --arg email "$slot_email" '. + [{slot:$slot,uuid:$uuid,email:$email,assigned_id:null}]' <<<"$reserve_json")"
+    done
+    key_output="$("$XRAY" x25519)"'''
+h = replace_once(h, old, new, 'VLESS 预分配用户池')
+old = '''      --arg uuid "$uuid" \\
+      '{reality:{private_key:$private,public_key:$public,short_id:$sid},direct_user:{uuid:$uuid,email:"jp-direct@relay.local"}}')"'''
+new = '''      --arg uuid "$uuid" --argjson reserve "$reserve_json" \\
+      '{reality:{private_key:$private,public_key:$public,short_id:$sid},direct_user:{uuid:$uuid,email:"jp-direct@relay.local"},reserve_users:$reserve}')"'''
+h = replace_once(h, old, new, 'VLESS 状态用户池')
+old = '''clients=[{"id":v["direct_user"]["uuid"],"level":0,"email":v["direct_user"]["email"],"flow":"xtls-rprx-vision"}]
+for r in relays:
+    rv=r.get("vless")
+    if rv:
+        clients.append({"id":rv["client_uuid"],"level":0,"email":rv["client_email"],"flow":"xtls-rprx-vision"})
+for r in upstreams:
+    clients.append({"id":r["client_uuid"],"level":0,"email":r["client_email"],"flow":"xtls-rprx-vision"})'''
+new = '''clients=[{"id":v["direct_user"]["uuid"],"level":0,"email":v["direct_user"]["email"],"flow":"xtls-rprx-vision"}]
+for user in v.get("reserve_users",[]):
+    clients.append({"id":user["uuid"],"level":0,"email":user["email"],"flow":"xtls-rprx-vision"})'''
+h = replace_once(h, old, new, 'Xray 固定用户池')
+# Add the classic, proven Xray API inbound.
+needle = ''']}]
+outbounds=[{"tag":"direct","protocol":"freedom","settings":{"domainStrategy":"UseIPv4"}}]'''
+replacement = ''']}]
+inbounds.append({"tag":"api-in","listen":"127.0.0.1","port":10085,"protocol":"dokodemo-door","settings":{"address":"127.0.0.1"}})
+outbounds=[{"tag":"direct","protocol":"freedom","settings":{"domainStrategy":"UseIPv4"}}]'''
+h = replace_once(h, needle, replacement, 'Xray API 入站')
+needle = '''rules=test_rules+udp_block_rules+[
+ {"type":"field","ip":private_ips,"outboundTag":"blocked","ruleTag":"block-private"},'''
+replacement = '''rules=test_rules+udp_block_rules+[
+ {"type":"field","inboundTag":["api-in"],"outboundTag":"api","ruleTag":"api-route"},
+ {"type":"field","ip":private_ips,"outboundTag":"blocked","ruleTag":"block-private"},'''
+h = replace_once(h, needle, replacement, 'Xray API 路由')
+needle = '''cfg={"log":{"loglevel":"warning"},"inbounds":inbounds,"outbounds":outbounds,"routing":{"domainStrategy":"AsIs","rules":rules}}'''
+replacement = '''cfg={"log":{"loglevel":"warning"},"api":{"tag":"api","services":["HandlerService","RoutingService"]},"inbounds":inbounds,"outbounds":outbounds,"routing":{"domainStrategy":"AsIs","rules":rules}}'''
+h = replace_once(h, needle, replacement, 'Xray API 配置')
+
+slot_helpers = r'''vvv_event_backup() {
+  local reason="$1"
+  [[ -x /usr/local/lib/vvv/backup_manager.py && -f /etc/vvv-sub/config.json ]] || return 0
+  python3 /usr/local/lib/vvv/backup_manager.py create "$reason" --force >/dev/null || echo "警告：自动备份失败。" >&2
+}
+
+allocate_vless_slot() {
+  local slot_json
+  slot_json="$(jq -c '[.vless.reserve_users[] | select(.assigned_id==null)][0] // empty' "$STATE_FILE")"
+  [[ -n "$slot_json" ]] || fail "VLESS 动态线路已达到 64 条上限。"
+  ALLOC_VLESS_SLOT="$(jq -r '.slot' <<<"$slot_json")"
+  ALLOC_VLESS_UUID="$(jq -r '.uuid' <<<"$slot_json")"
+  ALLOC_VLESS_EMAIL="$(jq -r '.email' <<<"$slot_json")"
+}
+
+release_orphaned_vless_slots() {
+  local path="$1" tmp
+  [[ "$(jq -r '.vless // empty' "$path")" != "" ]] || return 0
+  tmp="$(mktemp --suffix=.json /tmp/vvv-slots.XXXXXX)"; TMP_FILES+=("$tmp")
+  jq '([.relays[]?.id] + [.upstream_relays[]?.id]) as $active | .vless.reserve_users |= map(if (.assigned_id != null and (($active|index(.assigned_id)) == null)) then .assigned_id=null else . end)' "$path" > "$tmp"
+  install -m600 "$tmp" "$path"
+}
+
+'''
+h = replace_once(h, 'prepare_add_or_overwrite() {', slot_helpers + 'prepare_add_or_overwrite() {', '线路用户池辅助函数')
+
+# Allocate relay users from the fixed pool.
+old = '''      local client_uuid outbound_uuid key_output private_key public_key short_id
+      test_vless="$(allocate_test_port vless)"
+      client_uuid="$(new_uuid)"
+      outbound_uuid="$(new_uuid)"'''
+new = '''      local client_uuid client_email reserve_slot outbound_uuid key_output private_key public_key short_id
+      test_vless="$(allocate_test_port vless)"
+      allocate_vless_slot
+      client_uuid="$ALLOC_VLESS_UUID"; client_email="$ALLOC_VLESS_EMAIL"; reserve_slot="$ALLOC_VLESS_SLOT"
+      outbound_uuid="$(new_uuid)"'''
+h = replace_once(h, old, new, 'VPS»中行用户分配')
+old = ''        --arg client_uuid "$client_uuid" --arg email "${relay_id}@relay.local" \\
+        --arg outbound_uuid "$outbound_uuid" --arg private "$private_key" --arg public "$public_key" --arg sid "$short_id" \\
+        --arg outtag "vless-out-${relay_id}" --arg testtag "vless-test-${relay_id}" --argjson testport "$test_vless" \\
+        '{client_uuid:$client_uuid,client_email:$email,outbound_uuid:$outbound_uuid,remote_reality:{private_key:$private,public_key:$public,short_id:$sid},outbound_tag:$outtag,test_inbound_tag:$testtag,test_socks_port:$testport}')"''
+new = ''        --arg client_uuid "$client_uuid" --arg email "$client_email" --arg reserve_slot "$reserve_slot" \\
+        --arg outbound_uuid "$outbound_uuid" --arg private "$private_key" --arg public "$public_key" --arg sid "$short_id" \\
+        --arg outtag "vless-out-${relay_id}" --arg testtag "vless-test-${relay_id}" --argjson testport "$test_vless" \\
+        '{client_uuid:$client_uuid,client_email:$email,reserve_slot:$reserve_slot,outbound_uuid:$outbound_uuid,remote_reality:{private_key:$private,public_key:$public,short_id:$sid},outbound_tag:$outtag,test_inbound_tag:$testtag,test_socks_port:$testport}')"'''
+h = replace_once(h, old, new, 'VPS 中转固定用户字段')
+old = '''      ".relays += [{id:$id,name:$name,remote_ip:$ip,remote_port:$port,vless:$vless,hy2:$hy2,created_at:$now,updated_at:$now}] | .updated_at=$now" \\
+      "$STATE_FILE" > "$candidate"'''
+new = '''      '.relays += [{id:$id,name:$name,remote_ip:$ip,remote_port:$port,vless:$vless,hy2:$hy2,created_at:$now,updated_at:$now}] |
+       (if $vless != null then (.vless.reserve_users[] | select(.slot==$vless.reserve_slot)).assigned_id=$id else . end) |
+       .updated_at=$now' \\
+      "$STATE_FILE" > "$candidate"'''
+h = replace_once(h, old, new, 'VPS 敏转用户卡用状态')
+
+# Upstream lines also use the fixed pool. Patch after the existing Python candidate generation.
+old = '''    test_port="$(allocate_test_port upstream)"
+    client_uuid="$(new_uuid)"'''
+new = '''    test_port="$(allocate_test_port upstream)"
+    allocate_vless_slot
+    client_uuid="$ALLOC_VLESS_UUID"'''
+h = replace_once(h, old, new, '动态代理用户分配')
+marker = '''PY_UPSTREAM_NEW
+  fi
+
+  local staging package_dir'''
+insert = '''PY_UPSTREAM_NEW
+    tmp_slot="$(mktemp --suffix=.json /tmp/vvv-upstream-slot.XXXXXX)"; TMP_FILES+=("$tmp_slot")
+    jq --arg id "$upstream_id" --arg email "$ALLOC_VLESS_EMAIL" --arg slot "$ALLOC_VLESS_SLOT" \\
+      '(.upstream_relays[]|select(.id==$id)).client_email=$email |
+       (.upstream_relays[]|select(.id==$id)).reserve_slot=$slot |
+       (.vless.reserve_users[]|select(.slot==$slot)).assigned_id=$id' "$candidate" > "$tmp_slot"
+    install -m600 "$tmp_slot" "$candidate"
+  fi
+
+  local staging package_dir'''
+h = replace_once(h, marker, insert, '周态代理用户匠用状态)
+
+# Embed the center registration code into the landing key when the main host owns a center.
+old = """make_pairing_key() {
+  local state_path=\"$1\" relay_id=\"$2\"
+  python3 - \"$state_path\" \"$relay_id\" <<'PY_JPR3'"""
+new = """make_pairing_key() {
+  local state_path=\"$1\" relay_id=\"$2\" registration_code=\"\"
+  [[ ! -r /etc/vvv-sub/registration.code ]] || registration_code=\"$(cat /etc/vvv-sub/registration.code)\"
+  python3 - \"$state_path\" \"$relay_id\" \"$registration_code\" <<'PY_JPR3'"""
+h = replace_once(h, old, new, '副机订阅接入码')
+old = ''' "vless":None,"hy2":None,"issued_at":datetime.now(timezone.utc).isoformat()
+}'''
+new = ''' "vless":None,"hy2":None,"subscription_registration_code":sys.argv[3] or None,
+ "issued_at":datetime.now(timezone.utc).isoformat()
+}'''
+h = replace_once(h, old, new, '副机订阅接入字段')
+
+# Replace restart-based state activation with API hot loading for Xray. sing-box restarts only when its config changed.
+hot_apply = r'''xray_dynamic_parts() {
+  local config="$1" dir="$2"
+  mkdir -p "$dir"
+  python3 - "$config" "$dir" <<'PY_PARTS'
+import json,sys
+from pathlib import Path
+cfg=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8')); out=Path(sys.argv[2])
+ins=[x for x in cfg.get('inbounds',[]) if x.get('tag') not in ('in-vless-reality','api-in')]
+outs=[x for x in cfg.get('outbounds',[]) if x.get('tag') not in ('direct','blocked')]
+(out/'in.json').write_text(json.dumps({'inbounds':ins},ensure_ascii=False),encoding='utf-8')
+(out/'out.json').write_text(json.dumps({'outbounds':outs},ensure_ascii=False),encoding='utf-8')
+(out/'in.tags').write_text('\n'.join(x.get('tag','') for x in ins if x.get('tag'))+'\n',encoding='utf-8')
+(out/'out.tags').write_text('\n'.join(x.get('tag','') for x in outs if x.get('tag'))+'\n',encoding='utf-8')
+PY_PARTS
+}
+
+xray_hot_apply() {
+  local target="$1" old="$2" dir tag count
+  dir="$(mktemp -d /tmp/vvv-xray-api.XXXXXX)"; TMP_FILES+=("$dir")
+  xray_dynamic_parts "$target" "$dir/new"; xray_dynamic_parts "$old" "$dir/old"
+  cat "$dir/old/in.tags" "$dir/new/in.tags" | sort -u | while IFS= read -r tag; do [[ -z "$tag" ]] || "$XRAY" api rmi --server=127.0.0.1:10085 "$tag" >/dev/null 2>&1 || true; done
+  cat "$dir/old/out.tags" "$dir/new/out.tags" | sort -u | while IFS= read -r tag; do [[ -z "$tag" ]] || "$XRAY" api rmo --server=127.0.0.1:10085 "$tag" >/dev/null 2>&1 || true; done
+  count="$(jq '.inbounds|length' "$dir/new/in.json")"; (( count==0 )) || "$XRAY" api adi --server=127.0.0.1:10085 "$dir/new/in.json"
+  count="$(jq '.outbounds|length' "$dir/new/out.json")"; (( count==0 )) || "$XRAY" api ado --server=127.0.0.1:10085 "$dir/new/out.json"
+  "$XRAY" api adrules --server=127.0.0.1:10085 "$target"
+}
+
+apply_candidate_with_rollback() {
+  local candidate_state="$1" delete_dir="${2:-}" old_state old_xray old_sing candidate_xray candidate_sing xray_pid="" sing_changed=0 ok=1
+  old_state="$(mktemp --suffix=.json /tmp/vvv-old-state.XXXXXX)"; old_xray="$(mktemp --suffix=.json /tmp/vvv-old-xray.XXXXXX)"; old_sing="$(mktemp --suffix=.json /tmp/vvv-old-sing.XXXXXX)"
+  candidate_xray="$(mktemp --suffix=.json /tmp/vvv-new-xray.XXXXXX)"; candidate_sing="$(mktemp --suffix=.json /tmp/vvv-new-sing.XXXXXX)"
+  TMP_FILES+=("$old_state" "$old_xray" "$old_sing" "$candidate_xray" "$candidate_sing")
+  cp -a "$STATE_FILE" "$old_state"; [[ ! -f "$XRAY_CFG" ]] || cp -a "$XRAY_CFG" "$old_xray"; [[ ! -f "$SING_CFG" ]] || cp -a "$SING_CFG" "$old_sing"
+  release_orphaned_vless_slots "$candidate_state"
+  vvv_event_backup before-line-change
+  if mode_has_vless "$(jq -r '.protocol_mode' "$candidate_state")"; then
+    build_xray_config "$candidate_state" "$candidate_xray"; "$XRAY" run -test -format=json -config "$candidate_xray"
+    xray_pid="$(systemctl show -p MainPID --value xray)"
+    "$XRAY" api inbounduser --server=127.0.0.1:10085 -tag=in-vless-reality >/dev/null
+    if ! xray_hot_apply "$candidate_xray" "$old_xray"; then xray_hot_apply "$old_xray" "$candidate_xray" || true; fail "Xray API 热更新失败，已恢复旧运行配置。"; return 1; fi
+  fi
+  if mode_has_hy2 "$(jq -r '.protocol_mode' "$candidate_state")"; then
+    build_sing_config "$candidate_state" "$candidate_sing"; "$SING_BOX" check -c "$candidate_sing"; cmp -s "$candidate_sing" "$SING_CFG" || sing_changed=1
+  fi
+  install -m600 "$candidate_state" "$STATE_FILE"
+  if mode_has_vless; then install -o root -g xray -m640 "$candidate_xray" "$XRAY_CFG"; fi
+  if (( sing_changed==1 )); then install -o root -g sing-box -m640 "$candidate_sing" "$SING_CFG"; systemctl restart sing-box >/dev/null 2>&1 || ok=0; fi
+  sleep 2
+  [[ -z "$xray_pid" || "$(systemctl show -p MainPID --value xray)" == "$xray_pid" ]] || ok=0
+  verify_xray_runtime || ok=0; verify_sing_runtime || ok=0
+  if (( ok==1 )); then
+    [[ -z "$delete_dir" ]] || rm -rf -- "$delete_dir"
+    vvv_event_backup after-line-change
+    systemctl start vvv-sync.service >/dev/null 2>&1 || true
+    return 0
+  fi
+  install -m600 "$old_state" "$STATE_FILE"
+  if mode_has_vless && [[ -s "$old_xray" ]]; then install -o root -g xray -m640 "$old_xray" "$XRAY_CFG"; xray_hot_apply "$old_xray" "$candidate_xray" || true; fi
+  if (( sing_changed==1 )) && [[ -s "$old_sing" ]]; then install -o root -g sing-box -m640 "$old_sing" "$SING_CFG"; systemctl restart sing-box >/dev/null 2>&1 || true; fi
+  fail "新配置未生效，已恢复旧配置。"
+}
+
+'''
+h, n = re.subn(r'(?ms)^apply_candidate_with_rollback\(\) \{.*?^\}\n\ngenerate_client_files\(\) \{', hot_apply + 'generate_client_files() {', h, count=1)
+if n != 1:
+    raise SystemExit('无法替换线路热更新事务')
+# Update success text: no longer claim proxy services restarted.
+h = h.replace('本次只重启了启用的代理服务，没有立即重启服务器。', '线路已通过运行时接口生效；Xray 主进程未重启。')
+
+host.write_text(h, encoding='utf-8')
+
+# Landing source: preloaded pairing key, Loon fix and complete top quiet zone.
+l = landing.read_text(encoding='utf-8')
+l, n = re.subn(r'^PAIRING_KEY=.*$', 'PAIRING_KEY="${VVV_PAIRING_KEY:-请粘贴以JPR3.开头的完整对接密钥}"', l, count=1, flags=re.M)
+if n != 1:
+    raise SystemExit('无法设置副机对接密钥')
+l = l.replace("salamander-password={loon_q(h['obfs_password'])}", "salamander-password={h['obfs_password']}")
+landing_qr = r'''print_ssh_qr() {
+  qr_value="$1"; qr_tmp="$(mktemp /tmp/vvv-landing-qr.XXXXXX)"
+  qrencode -t ANSIUTF8 -m 1 "$qr_value" > "$qr_tmp"
+  qr_width="$(python3 - "$qr_tmp" <<'PY_QRW'
+import re,sys,unicodedata
+ansi=re.compile(r'\x1b\[[0-9;?]*[ -/]*[@-~]'); w=0
+for raw in open(sys.argv[1],encoding='utf-8',errors='ignore'):
+    text=ansi.sub('',raw.rstrip('\n')); n=0
+    for c in text:
+        if unicodedata.combining(c): continue
+        n += 2 if unicodedata.east_asian_width(c) in ('W','F') else 1
+    w=max(w,n)
+print(w)
+PY_QRW
+)"
+  qr_cols="$(tput cols 2>/dev/null || echo 120)"
+  if [ "$qr_width" -gt "$qr_cols" ]; then echo "终端过窄，请放大后重新显示二维码。" >&2; rm -f "$qr_tmp"; return 1; fi
+  printf '\033[47m%*s\033[0m\n' "$qr_width" ''
+  cat "$qr_tmp"; printf '\n'; rm -f "$qr_tmp"
+}
+
+'''
+l = replace_once(l, 'retry() {', landing_qr + 'retry() {', '副机二维码函数')
+l, qn = re.subn(r'qrencode -t ANSIUTF8 -m\s*1 "\$uri"', 'print_ssh_qr "$uri" || true', l)
+if qn < 1:
+    raise SystemExit('副机脚本中没有找到二维码输出')
+landing.write_text(l, encoding='utf-8')
+
+c = center.read_text(encoding='utf-8')
+for required in ('VVV_SUB_DOMAIN', 'VVV_SUB_PORT', '--adapter caddyfile', 'backup_manager.py', '/r/${token}/c'):
+    if required not in c:
+        raise SystemExit('订阅中心源码缺少必要字段：' + required)
+ 状态用户池')
+old = '''clients=[{"id":v["direct_user"]["uuid"],"level":0,"email":v["direct_user"]["email"],"flow":"xtls-rprx-vision"}]
+for r in relays:
+    rv=r.get("vless")
+    if rv:
+        clients.append({"id":rv["client_uuid"],"level":0,"email":rv["client_email"],"flow":"xtls-rprx-vision"})
+for r in upstreams:
+    clients.append({"id":r["client_uuid"],"level":0,"email":r["client_email"],"flow":"xtls-rprx-vision"})'''
+new = '''clients=[{"id":v["direct_user"]["uuid"],"level":0,"email":v["direct_user"]["email"],"flow":"xtls-rprx-vision"}]
+for user in v.get("reserve_users",[]):
+    clients.append({"id":user["uuid"],"level":0,"email":user["email"],"flow":"xtls-rprx-vision"})'''
+h = replace_once(h, old, new, 'Xray 固定用户池')
+# Add the classic, proven Xray API inbound.
+needle = ''']}]
+outbounds=[{"tag":"direct","protocol":"freedom","settings":{"domainStrategy":"UseIPv4"}}]'''
+replacement = ''']}]
+inbounds.append({"tag":"api-in","listen":"127.0.0.1","port":10085,"protocol":"dokodemo-door","settings":{"address":"127.0.0.1"}})
+outbounds=[{"tag":"direct","protocol":"freedom","settings":{"domainStrategy":"UseIPv4"}}]'''
+h = replace_once(h, needle, replacement, 'Xray API 入站')
+needle = '''rules=test_rules+udp_block_rules+[
+ {"type":"field","ip":private_ips,"outboundTag":"blocked","ruleTag":"block-private"},'''
+replacement = '''rules=test_rules+udp_block_rules+[
+ {"type":"field","inboundTag":["api-in"],"outboundTag":"api","ruleTag":"api-route"},
+ {"type":"field","ip":private_ips,"outboundTag":"blocked","ruleTag":"block-private"},'''
+h = replace_once(h, needle, replacement, 'Xray API 路由')
+needle = '''cfg={"log":{"loglevel":"warning"},"inbounds":inbounds,"outbounds":outbounds,"routing":{"domainStrategy":"AsIs","rules":rules}}'''
+replacement = '''cfg={"log":{"loglevel":"warning"},"api":{"tag":"api","services":["HandlerService","RoutingService"]},"inbounds":inbounds,"outbounds":outbounds,"routing":{"domainStrategy":"AsIs","rules":rules}}'''
+h = replace_once(h, needle, replacement, 'Xray API 配置')
+
+slot_helpers = r'''vvv_event_backup() {
+  local reason="$1"
+  [[ -x /usr/local/lib/vvv/backup_manager.py && -f /etc/vvv-sub/config.json ]] || return 0
+  python3 /usr/local/lib/vvv/backup_manager.py create "$reason" --force >/dev/null || echo "警告：自动备份失败。" >&2
+}
+
+allocate_vless_slot() {
+  local slot_json
+  slot_json="$(jq -c '[.vless.reserve_users[] | select(.assigned_id==null)][0] // empty' "$STATE_FILE")"
+  [[ -n "$slot_json" ]] || fail "VLESS 动态线路已达到 64 条上限。"
+  ALLOC_VLESS_SLOT="$(jq -r '.slot' <<<"$slot_json")"
+  ALLOC_VLESS_UUID="$(jq -r '.uuid' <<<"$slot_json")"
+  ALLOC_VLESS_EMAIL="$(jq -r '.email' <<<"$slot_json")"
+}
+
+release_orphaned_vless_slots() {
+  local path="$1" tmp
+  [[ "$(jq -r '.vless // empty' "$path")" != "" ]] || return 0
+  tmp="$(mktemp --suffix=.json /tmp/vvv-slots.XXXXXX)"; TMP_FILES+=("$tmp")
+  jq '([.relays[]?.id] + [.upstream_relays[]?.id]) as $active | .vless.reserve_users |= map(if (.assigned_id != null and (($active|index(.assigned_id)) == null)) then .assigned_id=null else . end)' "$path" > "$tmp"
+  install -m600 "$tmp" "$path"
+}
+
+'''
+h = replace_once(h, 'prepare_add_or_overwrite() {', slot_helpers + 'prepare_add_or_overwrite() {', '线路用户池辅助函数')
+
+# Allocate relay users from the fixed pool.
+old = '''      local client_uuid outbound_uuid key_output private_key public_key short_id
+      test_vless="$(allocate_test_port vless)"
+      client_uuid="$(new_uuid)"
+      outbound_uuid="$(new_uuid)"'''
+new = '''      local client_uuid client_email reserve_slot outbound_uuid key_output private_key public_key short_id
+      test_vless="$(allocate_test_port vless)"
+      allocate_vless_slot
+      client_uuid="$ALLOC_VLESS_UUID"; client_email="$ALLOC_VLESS_EMAIL"; reserve_slot="$ALLOC_VLESS_SLOT"
+      outbound_uuid="$(new_uuid)"'''
+h = replace_once(h, old, new, 'VPS 中转用户分配')
+old = '''        --arg client_uuid "$client_uuid" --arg email "${relay_id}@relay.local" \\
+        --arg outbound_uuid "$outbound_uuid" --arg private "$private_key" --arg public "$public_key" --arg sid "$short_id" \\
+        --arg outtag "vless-out-${relay_id}" --arg testtag "vless-test-${relay_id}" --argjson testport "$test_vless" \\
+        '{client_uuid:$client_uuid,client_email:$email,outbound_uuid:$outbound_uuid,remote_reality:{private_key:$private,public_key:$public,short_id:$sid},outbound_tag:$outtag,test_inbound_tag:$testtag,test_socks_port:$testport}')"'''
+new = '''        --arg client_uuid "$client_uuid" --arg email "$client_email" --arg reserve_slot "$reserve_slot" \\
+        --arg outbound_uuid "$outbound_uuid" --arg private "$private_key" --arg public "$public_key" --arg sid "$short_id" \\
+        --arg outtag "vless-out-${relay_id}" --arg testtag "vless-test-${relay_id}" --argjson testport "$test_vless" \\
+        '{client_uuid:$client_uuid,client_email:$email,reserve_slot:$reserve_slot,outbound_uuid:$outbound_uuid,remote_reality:{private_key:$private,public_key:$public,short_id:$sid},outbound_tag:$outtag,test_inbound_tag:$testtag,test_socks_port:$testport}')"'''
+h = replace_once(h, old, new, 'VPS 中转固定用户字段')
+old = '''      '.relays += [{id:$id,name:$name,remote_ip:$ip,remote_port:$port,vless:$vless,hy2:$hy2,created_at:$now,updated_at:$now}] | .updated_at=$now' \\
+      "$STATE_FILE" > "$candidate"'''
+new = '''      '.relays += [{id:$id,name:$name,remote_ip:$ip,remote_port:$port,vless:$vless,hy2:$hy2,created_at:$now,updated_at:$now}] |
+       (if $vless != null then (.vless.reserve_users[] | select(.slot==$vless.reserve_slot)).assigned_id=$id else . end) |
+       .updated_at=$now' \\
+      "$STATE_FILE" > "$candidate"'''
+h = replace_once(h, old, new, 'VPS 中转用户占用状态')
+
+# Upstream lines also use the fixed pool. Patch after the existing Python candidate generation.
+old = '''    test_port="$(allocate_test_port upstream)"
+    client_uuid="$(new_uuid)"'''
+new = '''    test_port="$(allocate_test_port upstream)"
+    allocate_vless_slot
+    client_uuid="$ALLOC_VLESS_UUID"'''
+h = replace_once(h, old, new, '动态代理用户分配')
+marker = '''PY_UPSTREAM_NEW
+  fi
+
+  local staging package_dir'''
+insert = '''PY_UPSTREAM_NEW
+    tmp_slot="$(mktemp --suffix=.json /tmp/vvv-upstream-slot.XXXXXX)"; TMP_FILES+=("$tmp_slot")
+    jq --arg id "$upstream_id" --arg email "$ALLOC_VLESS_EMAIL" --arg slot "$ALLOC_VLESS_SLOT" \\
+      '(.upstream_relays[]|select(.id==$id)).client_email=$email |
+       (.upstream_relays[]|select(.id==$id)).reserve_slot=$slot |
+       (.vless.reserve_users[]|select(.slot==$slot)).assigned_id=$id' "$candidate" > "$tmp_slot"
+    install -m600 "$tmp_slot" "$candidate"
+  fi
+
+  local staging package_dir'''
+h = replace_once(h, marker, insert, '动态代理用户占用状态')
+
+# Embed the center registration code into the landing key when the main host owns a center.
+old = """make_pairing_key() {
+  local state_path=\"$1\" relay_id=\"$2\"
+  python3 - \"$state_path\" \"$relay_id\" <<'PY_JPR3'"""
+new = """make_pairing_key() {
+  local state_path=\"$1\" relay_id=\"$2\" registration_code=\"\"
+  [[ ! -r /etc/vvv-sub/registration.code ]] || registration_code=\"$(cat /etc/vvv-sub/registration.code)\"
+  python3 - \"$state_path\" \"$relay_id\" \"$registration_code\" <<'PY_JPR3'"""
+h = replace_once(h, old, new, '副机订阅接入码')
+old = ''' "vless":None,"hy2":None,"issued_at":datetime.now(timezone.utc).isoformat()
+}'''
+new = ''' "vless":None,"hy2":None,"subscription_registration_code":sys.argv[3] or None,
+ "issued_at":datetime.now(timezone.utc).isoformat()
+}'''
+h = replace_once(h, old, new, '副机订阅接入字段')
+
+# Replace restart-based state activation with API hot loading for Xray. sing-box restarts only when its config changed.
+hot_apply = r'''xray_dynamic_parts() {
+  local config="$1" dir="$2"
+  mkdir -p "$dir"
+  python3 - "$config" "$dir" <<'PY_PARTS'
+import json,sys
+from pathlib import Path
+cfg=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8')); out=Path(sys.argv[2])
+ins=[x for x in cfg.get('inbounds',[]) if x.get('tag') not in ('in-vless-reality','api-in')]
+outs=[x for x in cfg.get('outbounds',[]) if x.get('tag') not in ('direct','blocked')]
+(out/'in.json').write_text(json.dumps({'inbounds':ins},ensure_ascii=False),encoding='utf-8')
+(out/'out.json').write_text(json.dumps({'outbounds':outs},ensure_ascii=False),encoding='utf-8')
+(out/'in.tags').write_text('\n'.join(x.get('tag','') for x in ins if x.get('tag'))+'\n',encoding='utf-8')
+(out/'out.tags').write_text('\n'.join(x.get('tag','') for x in outs if x.get('tag'))+'\n',encoding='utf-8')
+PY_PARTS
+}
+
+xray_hot_apply() {
+  local target="$1" old="$2" dir tag count
+  dir="$(mktemp -d /tmp/vvv-xray-api.XXXXXX)"; TMP_FILES+=("$dir")
+  xray_dynamic_parts "$target" "$dir/new"; xray_dynamic_parts "$old" "$dir/old"
+  cat "$dir/old/in.tags" "$dir/new/in.tags" | sort -u | while IFS= read -r tag; do [[ -z "$tag" ]] || "$XRAY" api rmi --server=127.0.0.1:10085 "$tag" >/dev/null 2>&1 || true; done
+  cat "$dir/old/out.tags" "$dir/new/out.tags" | sort -u | while IFS= read -r tag; do [[ -z "$tag" ]] || "$XRAY" api rmo --server=127.0.0.1:10085 "$tag" >/dev/null 2>&1 || true; done
+  count="$(jq '.inbounds|length' "$dir/new/in.json")"; (( count==0 )) || "$XRAY" api adi --server=127.0.0.1:10085 "$dir/new/in.json"
+  count="$(jq '.outbounds|length' "$dir/new/out.json")"; (( count==0 )) || "$XRAY" api ado --server=127.0.0.1:10085 "$dir/new/out.json"
+  "$XRAY" api adrules --server=127.0.0.1:10085 "$target"
+}
+
+apply_candidate_with_rollback() {
+  local candidate_state="$1" delete_dir="${2:-}" old_state old_xray old_sing candidate_xray candidate_sing xray_pid="" sing_changed=0 ok=1
+  old_state="$(mktemp --suffix=.json /tmp/vvv-old-state.XXXXXX)"; old_xray="$(mktemp --suffix=.json /tmp/vvv-old-xray.XXXXXX)"; old_sing="$(mktemp --suffix=.json /tmp/vvv-old-sing.XXXXXX)"
+  candidate_xray="$(mktemp --suffix=.json /tmp/vvv-new-xray.XXXXXX)"; candidate_sing="$(mktemp --suffix=.json /tmp/vvv-new-sing.XXXXXX)"
+  TMP_FILES+=("$old_state" "$old_xray" "$old_sing" "$candidate_xray" "$candidate_sing")
+  cp -a "$STATE_FILE" "$old_state"; [[ ! -f "$XRAY_CFG" ]] || cp -a "$XRAY_CFG" "$old_xray"; [[ ! -f "$SING_CFG" ]] || cp -a "$SING_CFG" "$old_sing"
+  release_orphaned_vless_slots "$candidate_state"
+  vvv_event_backup before-line-change
+  if mode_has_vless "$(jq -r '.protocol_mode' "$candidate_state")"; then
+    build_xray_config "$candidate_state" "$candidate_xray"; "$XRAY" run -test -format=json -config "$candidate_xray"
+    xray_pid="$(systemctl show -p MainPID --value xray)"
+    "$XRAY" api inbounduser --server=127.0.0.1:10085 -tag=in-vless-reality >/dev/null
+    if ! xray_hot_apply "$candidate_xray" "$old_xray"; then xray_hot_apply "$old_xray" "$candidate_xray" || true; fail "Xray API 热更新失败，已恢复旧运行配置。"; return 1; fi
+  fi
+  if mode_has_hy2 "$(jq -r '.protocol_mode' "$candidate_state")"; then
+    build_sing_config "$candidate_state" "$candidate_sing"; "$SING_BOX" check -c "$candidate_sing"; cmp -s "$candidate_sing" "$SING_CFG" || sing_changed=1
+  fi
+  install -m600 "$candidate_state" "$STATE_FILE"
+  if mode_has_vless; then install -o root -g xray -m640 "$candidate_xray" "$XRAY_CFG"; fi
+  if (( sing_changed==1 )); then install -o root -g sing-box -m640 "$candidate_sing" "$SING_CFG"; systemctl restart sing-box >/dev/null 2>&1 || ok=0; fi
+  sleep 2
+  [[ -z "$xray_pid" || "$(systemctl show -p MainPID --value xray)" == "$xray_pid" ]] || ok=0
+  verify_xray_runtime || ok=0; verify_sing_runtime || ok=0
+  if (( ok==1 )); then
+    [[ -z "$delete_dir" ]] || rm -rf -- "$delete_dir"
+    vvv_event_backup after-line-change
+    systemctl start vvv-sync.service >/dev/null 2>&1 || true
+    return 0
+  fi
+  install -m600 "$old_state" "$STATE_FILE"
+  if mode_has_vless && [[ -s "$old_xray" ]]; then install -o root -g xray -m640 "$old_xray" "$XRAY_CFG"; xray_hot_apply "$old_xray" "$candidate_xray" || true; fi
+  if (( sing_changed==1 )) && [[ -s "$old_sing" ]]; then install -o root -g sing-box -m640 "$old_sing" "$SING_CFG"; systemctl restart sing-box >/dev/null 2>&1 || true; fi
+  fail "新配置未生效，已恢复旧配置。"
+}
+
+'''
+h, n = re.subn(r'(?ms)^apply_candidate_with_rollback\(\) \{.*?^\}\n\ngenerate_client_files\(\) \{', hot_apply + 'generate_client_files() {', h, count=1)
+if n != 1:
+    raise SystemExit('无法替换线路热更新事务')
+# Update success text: no longer claim proxy services restarted.
+h = h.replace('本次只重启了启用的代理服务，没有立即重启服务器。', '线路已通过运行时接口生效；Xray 主进程未重启。')
+
+host.write_text(h, encoding='utf-8')
+
+# Landing source: preloaded pairing key, Loon fix and complete top quiet zone.
+l = landing.read_text(encoding='utf-8')
+l, n = re.subn(r'^PAIRING_KEY=.*$', 'PAIRING_KEY="${VVV_PAIRING_KEY:-请粘贴以JPR3.开头的完整对接密钥}"', l, count=1, flags=re.M)
+if n != 1:
+    raise SystemExit('无法设置副机对接密钥')
+l = l.replace("salamander-password={loon_q(h['obfs_password'])}", "salamander-password={h['obfs_password']}")
+landing_qr = r'''print_ssh_qr() {
+  qr_value="$1"; qr_tmp="$(mktemp /tmp/vvv-landing-qr.XXXXXX)"
+  qrencode -t ANSIUTF8 -m 1 "$qr_value" > "$qr_tmp"
+  qr_width="$(python3 - "$qr_tmp" <<'PY_QRW'
+import re,sys,unicodedata
+ansi=re.compile(r'\x1b\[[0-9;?]*[ -/]*[@-~]'); w=0
+for raw in open(sys.argv[1],encoding='utf-8',errors='ignore'):
+    text=ansi.sub('',raw.rstrip('\n')); n=0
+    for c in text:
+        if unicodedata.combining(c): continue
+        n += 2 if unicodedata.east_asian_width(c) in ('W','F') else 1
+    w=max(w,n)
+print(w)
+PY_QRW
+)"
+  qr_cols="$(tput cols 2>/dev/null || echo 120)"
+  if [ "$qr_width" -gt "$qr_cols" ]; then echo "终端过窄，请放大后重新显示二维码。" >&2; rm -f "$qr_tmp"; return 1; fi
+  printf '\033[47m%*s\033[0m\n' "$qr_width" ''
+  cat "$qr_tmp"; printf '\n'; rm -f "$qr_tmp"
+}
+
+'''
+l = replace_once(l, 'retry() {', landing_qr + 'retry() {', '副机二维码函数')
+l, qn = re.subn(r'qrencode -t ANSIUTF8 -m\s*1 "\$uri"', 'print_ssh_qr "$uri" || true', l)
+if qn < 1:
+    raise SystemExit('副机脚本中没有找到二维码输出')
+landing.write_text(l, encoding='utf-8')
+
+c = center.read_text(encoding='utf-8')
+for required in ('VVV_SUB_DOMAIN', 'VVV_SUB_PORT', '--adapter caddyfile', 'backup_manager.py', '/r/${token}/c'):
+    if required not in c:
+        raise SystemExit('订阅中心源码缺少必要字段：' + required)
+if (( sing_changed==1 )); then install -o root -g sing-box -m640 "$candidate_sing" "$SING_CFG"; systemctl restart sing-box >/dev/null 2>&1 || ok=0; fi
+  sleep 2
+  [[ -z "$xray_pid" || "$(systemctl show -p MainPID --value xray)" == "$xray_pid" ]] || ok=0
+  verify_xray_runtime || ok=0; verify_sing_runtime || ok=0
+  if (( ok==1 )); then
+    [[ -z "$delete_dir" ]] || rm -rf -- "$delete_dir"
+    vvv_event_backup after-line-change
+    systemctl start vvv-sync.service >/dev/null 2>&1 || true
+    return 0
+  fi
+  install -m600 "$old_state" "$STATE_FILE"
+  if mode_has_vless && [[ -s "$old_xray" ]]; then install -o root -g xray -m640 "$old_xray" "$XRAY_CFG"; xray_hot_apply "$old_xray" "$candidate_xray" || true; fi
+  if (( sing_changed==1 )) && [[ -s "$old_sing" ]]; then install -o root -g sing-box -m640 "$old_sing" "$SING_CFG"; systemctl restart sing-box >/dev/null 2>&1 || true; fi
+  fail "新配置未生效，已恢复旧配置。"
+}
+
+'''
+h, n = re.subn(r'(?ms)^apply_candidate_with_rollback\(\) \{.*?^\}\n\ngenerate_client_files\(\) \{', hot_apply + 'generate_client_files() {', h, count=1)
+if n != 1:
+    raise SystemExit('无法替换线路热更新事务')
+# Update success text: no longer claim proxy services restarted.
+h = h.replace('本次只重启了启用的代理服务，没有立即重启服务器。', '线路已通过运行时接口生效；Xray 主进程未重启。')
+
+host.write_text(h, encoding='utf-8')
+
+# Landing source: preloaded pairing key, Loon fix and complete top quiet zone.
+l = landing.read_text(encoding='utf-8')
+l, n = re.subn(r'^PAIRING_KEY=.*$', 'PAIRING_KEY="${VVV_PAIRING_KEY:-请粘贴以JPR3.开头的完整对接密钥}"', l, count=1, flags=re.M)
+if n != 1:
+    raise SystemExit('无法设置副机对接密钥')
+l = l.replace("salamander-password={loon_q(h['obfs_password'])}", "salamander-password={h['obfs_password']}")
+landing_qr = r'''print_ssh_qr() {
+  qr_value="$1"; qr_tmp="$(mktemp /tmp/vvv-landing-qr.XXXXXX)"
+  qrencode -t ANSIUTF8 -m 1 "$qr_value" > "$qr_tmp"
+  qr_width="$(python3 - "$qr_tmp" <<'PY_QRW'
+import re,sys,unicodedata
+ansi=re.compile(r'\x1b\[[0-9;?]*[ -/]*[@-~]'); w=0
+for raw in open(sys.argv[1],encoding='utf-8',errors='ignore'):
+    text=ansi.sub('',raw.rstrip('\n')); n=0
+    for c in text:
+        if unicodedata.combining(c): continue
+        n += 2 if unicodedata.east_asian_width(c) in ('W','F') else 1
+    w=max(w,n)
+print(w)
+PY_QRW
+)"
+  qr_cols="$(tput cols 2>/dev/null || echo 120)"
+  if [ "$qr_width" -gt "$qr_cols" ]; then echo "终端过窄，请放大后重新显示二维码。" >&2; rm -f "$qr_tmp"; return 1; fi
+  printf '\033[47m%*s\033[0m\n' "$qr_width" ''
+  cat "$qr_tmp"; printf '\n'; rm -f "$qr_tmp"
+}
+
+'''
+l = replace_once(l, 'retry() {', landing_qr + 'retry() {', '副机二维码函数')
+l, qn = re.subn(r'qrencode -t ANSIUTF8 -m\s*1 "\$uri"', 'print_ssh_qr "$uri" || true', l)
+if qn < 1:
+    raise SystemExit('副机脚本中没有找到二维码输出')
+landing.write_text(l, encoding='utf-8')
+
+c = center.read_text(encoding='utf-8')
+for required in ('VVV_SUB_DOMAIN', 'VVV_SUB_PORT', '--adapter caddyfile', 'backup_manager.py', '/r/${token}/c'):
+    if required not in c:
+        raise SystemExit('订阅中心源码缺少必要字段：' + required)
+exit=0
+===== source_sha =====
+58cd633a87cf9f26fce9e66bbe83a2afef0aa5626fbdbc5d656ba9ef9c7a74c8  /tmp/gooddiag/prepare.py
+exit=0
+===== compile =====
+  File "/tmp/gooddiag/prepare.py", line 143
+    old = ''        --arg client_uuid "$client_uuid" --arg email "${relay_id}@relay.local" \\
+                          ^^^^^^^^^^^
+SyntaxError: invalid syntax
+exit=1
+===== transform =====
+  File "/tmp/gooddiag/prepare.py", line 143
+    old = ''        --arg client_uuid "$client_uuid" --arg email "${relay_id}@relay.local" \\
+                          ^^^^^^^^^^^
+SyntaxError: invalid syntax
+exit=1
+===== host_syntax =====
+exit=0
+===== landing_syntax =====
+exit=0
+===== grep:reserve_users =====
+exit=1
+===== grep:api-in =====
+exit=1
+===== grep:api adrules =====
+exit=1
+===== grep:xray 主进程未重启 =====
+exit=1
