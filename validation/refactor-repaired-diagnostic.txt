@@ -1,0 +1,26 @@
+line_count 603
+143 'old = \'\'        --arg client_uuid "$client_uuid" --arg email "${relay_id}@relay.local" \\\\'
+146 '        \'{client_uuid:$client_uuid,client_email:$email,outbound_uuid:$outbound_uuid,remote_reality:{private_key:$private,public_key:$public,short_id:$sid},outbound_tag:$outtag,test_inbound_tag:$testtag,test_socks_port:$testport}\')"\'\''
+147 'new = \'\'        --arg client_uuid "$client_uuid" --arg email "$client_email" --arg reserve_slot "$reserve_slot" \\\\'
+181 "h = replace_once(h, marker, insert, '周态代理用户匠用状态)"
+repair_exit=0
+===== compile =====
+Sorry: IndentationError: unindent does not match any outer indentation level (prepare.py, line 309)exit=1
+===== transform =====
+  File "/tmp/repaired/prepare.py", line 309
+    状态用户池')
+           ^
+IndentationError: unindent does not match any outer indentation level
+exit=1
+===== host_syntax =====
+exit=0
+===== landing_syntax =====
+exit=0
+===== grep:reserve_users =====
+exit=1
+===== grep:api-in =====
+exit=1
+===== grep:api adrules =====
+exit=1
+===== grep:xray 主进程未重启 =====
+exit=1
