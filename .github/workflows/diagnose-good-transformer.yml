@@ -1,0 +1,39 @@
+name: Diagnose validated VVV transformer
+on:
+  push:
+    paths:
+      - '.github/workflows/diagnose-good-transformer.yml'
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Capture all results
+        shell: bash
+        run: |
+          set +e
+          mkdir -p validation /tmp/gooddiag
+          report=validation/refactor-good-diagnostic.txt
+          : > "$report"
+          run(){ echo "===== $1 =====" >>"$report"; shift; "$@" >>"$report" 2>&1; echo "exit=$?" >>"$report"; }
+          cat .staging-refactor/prepare.good.part0{0,1,2,3,4} >/tmp/gooddiag/prepare.b64
+          run b64_sha sha256sum /tmp/gooddiag/prepare.b64
+          run decode base64 -d /tmp/gooddiag/prepare.b64
+          base64 -d /tmp/gooddiag/prepare.b64 >/tmp/gooddiag/prepare.py 2>>"$report"
+          run source_sha sha256sum /tmp/gooddiag/prepare.py
+          run compile python3 -m py_compile /tmp/gooddiag/prepare.py core-src/sub_center.py core-src/sync_agent.py core-src/backup_manager.py
+          cp core-src/host.sh /tmp/gooddiag/host.sh; cp core-src/landing.sh /tmp/gooddiag/landing.sh; cp core-src/center_install.sh /tmp/gooddiag/center.sh
+          run transform python3 /tmp/gooddiag/prepare.py /tmp/gooddiag/host.sh /tmp/gooddiag/landing.sh /tmp/gooddiag/center.sh
+          run host_syntax bash -n /tmp/gooddiag/host.sh
+          run landing_syntax sh -n /tmp/gooddiag/landing.sh
+          for p in reserve_users api-in 'api adrules' 'xray 主进程未重启'; do echo "===== grep:$p =====" >>"$report"; grep -n "$p" /tmp/gooddiag/host.sh|head -5 >>"$report" 2>&1; echo "exit=$?" >>"$report"; done
+      - name: Commit diagnostic
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add validation/refactor-good-diagnostic.txt
+          git commit -m 'Record validated transformer diagnostics'
+          git push
