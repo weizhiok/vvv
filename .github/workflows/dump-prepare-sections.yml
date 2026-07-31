@@ -1,0 +1,30 @@
+name: Dump VVV transformer sections
+on:
+  push:
+    paths:
+      - '.github/workflows/dump-prepare-sections.yml'
+permissions:
+  contents: write
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Capture relevant sections
+        shell: bash
+        run: |
+          mkdir -p validation
+          {
+            for p in 'reserve_users' 'api-in' 'xray_dynamic_parts' 'xray_hot_apply' 'apply_candidate_with_rollback' 'sync_hy2_slot_services' 'PY_HY2_SLOTS' 'allocate_vless_slot' 'test_vless=' 'test_port='; do
+              echo "===== $p ====="
+              grep -n -C 8 "$p" src/prepare.py || true
+            done
+          } > validation/prepare-sections.txt
+      - name: Commit dump
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add validation/prepare-sections.txt
+          git commit -m 'Dump current transformer sections'
+          git push
