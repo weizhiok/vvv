@@ -1,0 +1,34 @@
+name: Capture final validation failure
+on:
+  push:
+    paths:
+      - '.github/workflows/capture-final-failure.yml'
+permissions:
+  actions: read
+  contents: write
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Capture failed run logs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p validation
+          {
+            echo 'run_id=22493681458'
+            gh run view 22493681458 --repo weizhiok/vvv --json name,status,conclusion,jobs
+            echo
+            echo '===== failed logs ====='
+            gh run view 22493681458 --repo weizhiok/vvv --log-failed
+          } > validation/final-runtime-failure.txt 2>&1 || true
+      - name: Commit log
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add validation/final-runtime-failure.txt
+          git commit -m 'Capture final runtime validation failure'
+          git push
