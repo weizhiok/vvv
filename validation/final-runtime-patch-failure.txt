@@ -1,0 +1,19 @@
+run_id=30658160425
+===== metadata =====
+{"conclusion":"failure","jobs":[{"completedAt":"2026-07-31T19:12:04Z","conclusion":"failure","databaseId":91247646491,"name":"fix","startedAt":"2026-07-31T19:11:58Z","status":"completed","steps":[{"completedAt":"2026-07-31T19:12:00Z","conclusion":"success","name":"Set up job","number":1,"startedAt":"2026-07-31T19:11:59Z","status":"completed"},{"completedAt":"2026-07-31T19:12:00Z","conclusion":"success","name":"Run actions/checkout@v4","number":2,"startedAt":"2026-07-31T19:12:00Z","status":"completed"},{"completedAt":"2026-07-31T19:12:00Z","conclusion":"success","name":"Replace unsafe lookup","number":3,"startedAt":"2026-07-31T19:12:00Z","status":"completed"},{"completedAt":"2026-07-31T19:12:01Z","conclusion":"failure","name":"Commit fix","number":4,"startedAt":"2026-07-31T19:12:00Z","status":"completed"},{"completedAt":"2026-07-31T19:12:02Z","conclusion":"success","name":"Post Run actions/checkout@v4","number":8,"startedAt":"2026-07-31T19:12:01Z","status":"completed"},{"completedAt":"2026-07-31T19:12:02Z","conclusion":"success","name":"Complete job","number":9,"startedAt":"2026-07-31T19:12:02Z","status":"completed"}],"url":"https://github.com/weizhiok/vvv/actions/runs/30658160425/job/91247646491"}],"name":"Fix final validation lookup v2","status":"completed"}
+
+===== failed logs =====
+fix	Commit fix	﻿2026-07-31T19:12:00.9586450Z ##[group]Run git config user.name github-actions[bot]
+fix	Commit fix	2026-07-31T19:12:00.9587753Z ^[[36;1mgit config user.name github-actions[bot]^[[0m
+fix	Commit fix	2026-07-31T19:12:00.9589185Z ^[[36;1mgit config user.email 41898282+github-actions[bot]@users.noreply.github.com^[[0m
+fix	Commit fix	2026-07-31T19:12:00.9590771Z ^[[36;1mgit add .github/workflows/final-runtime-validation.yml^[[0m
+fix	Commit fix	2026-07-31T19:12:00.9592188Z ^[[36;1mgit commit -m 'Restrict sing-box lookup in final validation'^[[0m
+fix	Commit fix	2026-07-31T19:12:00.9593399Z ^[[36;1mgit push^[[0m
+fix	Commit fix	2026-07-31T19:12:00.9640867Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+fix	Commit fix	2026-07-31T19:12:00.9642049Z ##[endgroup]
+fix	Commit fix	2026-07-31T19:12:00.9901622Z [main 764d84c] Restrict sing-box lookup in final validation
+fix	Commit fix	2026-07-31T19:12:00.9904028Z  1 file changed, 4 insertions(+), 1 deletion(-)
+fix	Commit fix	2026-07-31T19:12:01.8930545Z To https://github.com/weizhiok/vvv
+fix	Commit fix	2026-07-31T19:12:01.8935038Z  ! [remote rejected] main -> main (refusing to allow a GitHub App to create or update workflow `.github/workflows/final-runtime-validation.yml` without `workflows` permission)
+fix	Commit fix	2026-07-31T19:12:01.8939074Z error: failed to push some refs to 'https://github.com/weizhiok/vvv'
+fix	Commit fix	2026-07-31T19:12:01.8960643Z ##[error]Process completed with exit code 1.
