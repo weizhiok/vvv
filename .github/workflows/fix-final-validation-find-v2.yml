@@ -1,0 +1,39 @@
+name: Fix final validation lookup v2
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-final-validation-find-v2.yml'
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Replace unsafe lookup
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/final-runtime-validation.yml')
+          s=p.read_text(encoding='utf-8')
+          old="          find /tmp -type f -name sing-box -perm -111 | head -n1 | xargs -I{} cp {} /tmp/sing-box\n"
+          new=("          sing_binary=\"$(tar -tzf /tmp/sing.tgz | awk '/\\/sing-box$/{print; exit}')\"\n"
+               "          [[ -n \"$sing_binary\" ]] || { echo \"sing-box archive has no executable\" >&2; exit 1; }\n"
+               "          tar -xzf /tmp/sing.tgz -C /tmp \"$sing_binary\"\n"
+               "          cp \"/tmp/$sing_binary\" /tmp/sing-box\n")
+          if s.count(old)!=1:
+              raise SystemExit(f'unsafe lookup occurrence count={s.count(old)}')
+          s=s.replace(old,new,1)
+          p.write_text(s,encoding='utf-8')
+          PY
+          ! grep -q 'find /tmp -type f -name sing-box' .github/workflows/final-runtime-validation.yml
+          grep -q 'sing_binary=.*tar -tzf' .github/workflows/final-runtime-validation.yml
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/final-runtime-validation.yml
+          git commit -m 'Restrict sing-box lookup in final validation'
+          git push
