@@ -1,0 +1,75 @@
+name: Probe Xray API listener config
+on:
+  push:
+    paths:
+      - '.github/workflows/probe-xray-api-config.yml'
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test Xray API listener configurations
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          api=$(curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest)
+          url=$(jq -r '.assets[] | select(.name=="Xray-linux-64.zip") | .browser_download_url' <<<"$api")
+          curl -fsSL "$url" -o /tmp/xray.zip
+          unzip -q /tmp/xray.zip xray -d /tmp
+          chmod +x /tmp/xray
+          mkdir -p validation
+          test_one() {
+            name=$1 config=$2
+            /tmp/xray run -test -format=json -config "$config" >"/tmp/${name}.test" 2>&1 || { echo "$name: syntax-failed"; cat "/tmp/${name}.test"; return 1; }
+            /tmp/xray run -format=json -config "$config" >"/tmp/${name}.log" 2>&1 &
+            pid=$!
+            ok=0
+            for i in $(seq 1 20); do
+              if /tmp/xray api inbounduser --server=127.0.0.1:10085 -tag=in-main >/tmp/${name}.api 2>&1; then ok=1; break; fi
+              sleep .2
+            done
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            if [[ $ok == 1 ]]; then echo "$name: ok"; return 0; fi
+            echo "$name: runtime-failed"
+            cat "/tmp/${name}.log" || true
+            cat "/tmp/${name}.api" || true
+            return 1
+          }
+          cat >/tmp/simple.json <<'JSON'
+          {
+            "log":{"loglevel":"warning"},
+            "api":{"tag":"api","listen":"127.0.0.1:10085","services":["HandlerService","RoutingService"]},
+            "inbounds":[{"tag":"in-main","listen":"127.0.0.1","port":18000,"protocol":"socks","settings":{"udp":false}}],
+            "outbounds":[{"tag":"direct","protocol":"freedom","settings":{}}],
+            "routing":{"rules":[]}
+          }
+          JSON
+          cat >/tmp/classic.json <<'JSON'
+          {
+            "log":{"loglevel":"warning"},
+            "api":{"tag":"api","services":["HandlerService","RoutingService"]},
+            "inbounds":[
+              {"tag":"api-in","listen":"127.0.0.1","port":10085,"protocol":"dokodemo-door","settings":{"address":"127.0.0.1"}},
+              {"tag":"in-main","listen":"127.0.0.1","port":18000,"protocol":"socks","settings":{"udp":false}}
+            ],
+            "outbounds":[{"tag":"direct","protocol":"freedom","settings":{}}],
+            "routing":{"rules":[{"type":"field","inboundTag":["api-in"],"outboundTag":"api","ruleTag":"api-route"}]}
+          }
+          JSON
+          {
+            /tmp/xray version | head -n2
+            test_one simple /tmp/simple.json || true
+            test_one classic /tmp/classic.json || true
+          } | tee validation/xray-api-config.txt
+          grep -Eq '^(simple|classic): ok$' validation/xray-api-config.txt
+      - name: Commit result
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add validation/xray-api-config.txt
+          git commit -m 'Record working Xray API listener config'
+          git push
