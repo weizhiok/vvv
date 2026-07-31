@@ -11,18 +11,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Capture failed run logs
+      - name: Capture latest final validation run
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           mkdir -p validation
+          run_id="$(gh run list --repo weizhiok/vvv --workflow final-runtime-validation.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
           {
-            echo 'run_id=22493681458'
-            gh run view 22493681458 --repo weizhiok/vvv --json name,status,conclusion,jobs
+            echo "run_id=$run_id"
+            echo '===== metadata ====='
+            gh run view "$run_id" --repo weizhiok/vvv --json name,status,conclusion,jobs
             echo
             echo '===== failed logs ====='
-            gh run view 22493681458 --repo weizhiok/vvv --log-failed
+            gh run view "$run_id" --repo weizhiok/vvv --log-failed
           } > validation/final-runtime-failure.txt 2>&1 || true
       - name: Commit log
         shell: bash
@@ -30,5 +32,5 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add validation/final-runtime-failure.txt
-          git commit -m 'Capture final runtime validation failure'
+          git commit -m 'Capture latest final runtime validation failure'
           git push
