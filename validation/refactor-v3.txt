@@ -1,0 +1,13 @@
+status=ok
+transformer_sha256=b8eb4ce5d0fea38e9b197c0d552a88f174d11247de08646c2df044e6de9f1380
+roles=center-relay,center,relay,landing,direct
+subscription_paths=c,qx,ln,sr,v2
+loon_salamander_quotes=removed
+v2rayng_hy2=separate_without_pin
+qr_top_quiet_zone=enabled
+backup=event-driven-only
+cross_host_backup=removed
+cloud_backup=rclone-optional
+xray_line_changes=api-hot-load
+shell=ok
+python=ok
