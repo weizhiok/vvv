@@ -1,0 +1,67 @@
+name: Publish validated VVV transformer
+on:
+  push:
+    paths:
+      - '.github/workflows/publish-prepare-good.yml'
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reassemble and validate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat .staging-refactor/prepare.good.part0{0,1,2,3,4} > /tmp/prepare.b64
+          echo '0c4252afb5a2ec9cccba97601044324f5f794ff1c0633357d40e1959e4f3b384  /tmp/prepare.b64' | sha256sum -c -
+          base64 -d /tmp/prepare.b64 > src/prepare.py
+          echo 'e06da344aa2627a73bbc8542f59bc7298ba575aa202c8c3ffb87cc590194dd37  src/prepare.py' | sha256sum -c -
+          chmod +x src/prepare.py
+          python3 -m py_compile src/prepare.py core-src/sub_center.py core-src/sync_agent.py core-src/backup_manager.py
+          cp core-src/host.sh /tmp/host.sh
+          cp core-src/landing.sh /tmp/landing.sh
+          cp core-src/center_install.sh /tmp/center.sh
+          python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
+          bash -n /tmp/host.sh
+          sh -n /tmp/landing.sh
+          bash -n core-src/center_install.sh
+          bash -n core-src/register_sync.sh
+          bash -n core-src/vvv_manager.sh
+          bash -n core-src/rclone_manager.sh
+          bash -n core-src/qr_helper.sh
+          bash -n src/bootstrap.sh
+          bash -n vvv-install.sh
+          grep -q 'reserve_users' /tmp/host.sh
+          grep -q 'api-in' /tmp/host.sh
+          grep -q 'api adrules' /tmp/host.sh
+          grep -q 'xray 主进程未重启' /tmp/host.sh
+          ! grep -q 'salamander-password={loon_q' /tmp/host.sh
+          ! grep -q 'salamander-password={loon_q' /tmp/landing.sh
+          ! grep -q '/api/v1/backup' core-src/sub_center.py
+          ! grep -q 'pull-backup' core-src/sync_agent.py
+          mkdir -p validation
+          cat > validation/refactor-v3.txt <<'EOF'
+          status=ok
+          transformer_sha256=e06da344aa2627a73bbc8542f59bc7298ba575aa202c8c3ffb87cc590194dd37
+          roles=center-relay,center,relay,landing,direct
+          subscription_paths=c,qx,ln,sr,v2
+          loon_salamander_quotes=removed
+          v2rayng_hy2=separate_without_pin
+          qr_top_quiet_zone=enabled
+          backup=event-driven-only
+          cross_host_backup=removed
+          cloud_backup=rclone-optional
+          xray_line_changes=api-hot-load
+          shell=ok
+          python=ok
+          EOF
+      - name: Commit validated transformer
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/prepare.py validation/refactor-v3.txt
+          git commit -m 'Publish validated all in one transformer'
+          git push
