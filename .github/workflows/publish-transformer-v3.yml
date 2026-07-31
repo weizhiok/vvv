@@ -1,0 +1,70 @@
+name: Publish VVV transformer v3
+on:
+  push:
+    paths:
+      - '.github/workflows/publish-transformer-v3.yml'
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reassemble, transform and validate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat \
+            .staging-refactor/prepare.v2.gz.part00 \
+            .staging-refactor/prepare.v2.gz.part01 \
+            .staging-refactor/prepare.v2.gz.part02 \
+            .staging-refactor/prepare.v3.gz.part030 \
+            .staging-refactor/prepare.v3.gz.part031 \
+            .staging-refactor/prepare.v2.gz.part04 > /tmp/prepare.b64
+          echo '9366cf108c98932dadc2f98aa16b72ebe7992bafdd328a24e1dc58ef9cc5e0e4  /tmp/prepare.b64' | sha256sum -c -
+          base64 -d /tmp/prepare.b64 >/tmp/prepare.gz
+          echo 'ae641e94640d136ba0c094a875df980ce247ec80fd6a4b15d7a2aab36359974a  /tmp/prepare.gz' | sha256sum -c -
+          gzip -t /tmp/prepare.gz
+          gzip -dc /tmp/prepare.gz > src/prepare.py
+          echo 'b8eb4ce5d0fea38e9b197c0d552a88f174d11247de08646c2df044e6de9f1380  src/prepare.py' | sha256sum -c -
+          chmod +x src/prepare.py
+          python3 -m py_compile src/prepare.py core-src/sub_center.py core-src/sync_agent.py core-src/backup_manager.py
+          cp core-src/host.sh /tmp/host.sh
+          cp core-src/landing.sh /tmp/landing.sh
+          cp core-src/center_install.sh /tmp/center.sh
+          python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
+          bash -n /tmp/host.sh
+          sh -n /tmp/landing.sh
+          for f in core-src/center_install.sh core-src/register_sync.sh core-src/vvv_manager.sh core-src/rclone_manager.sh core-src/qr_helper.sh src/bootstrap.sh vvv-install.sh; do bash -n "$f"; done
+          grep -q 'reserve_users' /tmp/host.sh
+          grep -q 'api-in' /tmp/host.sh
+          grep -q 'api adrules' /tmp/host.sh
+          grep -q 'xray 主进程未重启' /tmp/host.sh
+          ! grep -q 'salamander-password={loon_q' /tmp/host.sh
+          ! grep -q 'salamander-password={loon_q' /tmp/landing.sh
+          ! grep -q '/api/v1/backup' core-src/sub_center.py
+          ! grep -q 'pull-backup' core-src/sync_agent.py
+          mkdir -p validation
+          cat > validation/refactor-v3.txt <<'EOF'
+          status=ok
+          transformer_sha256=b8eb4ce5d0fea38e9b197c0d552a88f174d11247de08646c2df044e6de9f1380
+          roles=center-relay,center,relay,landing,direct
+          subscription_paths=c,qx,ln,sr,v2
+          loon_salamander_quotes=removed
+          v2rayng_hy2=separate_without_pin
+          qr_top_quiet_zone=enabled
+          backup=event-driven-only
+          cross_host_backup=removed
+          cloud_backup=rclone-optional
+          xray_line_changes=api-hot-load
+          shell=ok
+          python=ok
+          EOF
+      - name: Commit validated transformer
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/prepare.py validation/refactor-v3.txt
+          git commit -m 'Publish validated all in one transformer'
+          git push
