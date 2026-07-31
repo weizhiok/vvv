@@ -1,0 +1,27 @@
+name: Measure staging parts
+on:
+  push:
+    paths:
+      - '.github/workflows/measure-staging-parts.yml'
+permissions:
+  contents: write
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: bash
+        run: |
+          mkdir -p validation
+          {
+            wc -c .staging-refactor/prepare.good.part0{0,1,2,3,4}
+            sha256sum .staging-refactor/prepare.good.part0{0,1,2,3,4}
+            cat .staging-refactor/prepare.good.part0{0,1,2,3,4} | wc -c
+          } > validation/staging-parts.txt
+      - shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add validation/staging-parts.txt
+          git commit -m 'Record staging part sizes'
+          git push
