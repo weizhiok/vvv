@@ -42,6 +42,8 @@ python3 "$ROOT/src/prepare.py" "$WORK/host.sh" "$WORK/landing.sh" "$WORK/center.
 bash -n "$WORK/host.sh"
 sh -n "$WORK/landing.sh"
 bash -n "$WORK/center.sh"
+! grep -q '^xray_dynamic_parts()' "$WORK/host.sh"
+! grep -q '^xray_hot_apply()' "$WORK/host.sh"
 python3 "$ROOT/tests/extract_manager_library.py" "$WORK/host.sh" "$WORK/manager-lib.sh"
 bash -n "$WORK/manager-lib.sh"
 source "$WORK/manager-lib.sh"

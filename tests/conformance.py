@@ -165,8 +165,6 @@ def test_jpr3_and_slot_architecture():
         '主 sing-box PID 已保持不变',
     ):
         require(token in prepare, f'最终槽位/JPR3 转换器缺少 {token}')
-    for token in ('xray_dynamic_parts()', 'xray_hot_apply()'):
-        require(token not in prepare, f'仍保留旧 Xray API 热更新实现：{token}')
     require('python3' in landing, '落地脚本没有显式安装 Python 运行时')
     require(".schema == 3" in landing and 'JPR3' in landing, '落地脚本没有严格校验 JPR3')
 
