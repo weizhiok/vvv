@@ -24,6 +24,8 @@ jobs:
             python3 -m py_compile src/prepare.py
             python3 -m py_compile tools/repair_patch_anchor.py
             python3 tools/repair_patch_anchor.py
+            python3 -m py_compile tools/add_pid_messages_to_vless_patch.py
+            python3 tools/add_pid_messages_to_vless_patch.py
             python3 -m py_compile tools/patch_vless_slots.py
             python3 tools/patch_vless_slots.py
             python3 -m py_compile src/prepare.py
@@ -41,6 +43,9 @@ jobs:
             cp core-src/landing.sh /tmp/landing.sh
             cp core-src/center_install.sh /tmp/center.sh
             python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
+            cp /tmp/host.sh validation/generated-host-final-slots.sh
+            cp /tmp/landing.sh validation/generated-landing-final-slots.sh
+            cp /tmp/center.sh validation/generated-center-final-slots.sh
             bash -n /tmp/host.sh
             sh -n /tmp/landing.sh
             bash -n /tmp/center.sh
@@ -66,11 +71,12 @@ jobs:
           found=[item for item in forbidden if item in block]
           if found:
               raise SystemExit(f'forbidden main-service operation in transaction: {found}')
-          print('transaction block does not restart main services')
+          required=['systemctl show -p MainPID --value xray','systemctl show -p MainPID --value sing-box']
+          missing=[item for item in required if item not in block]
+          if missing:
+              raise SystemExit(f'missing main PID checks: {missing}')
+          print('transaction block preserves and verifies both main service PIDs')
           PY
-            cp /tmp/host.sh validation/generated-host-final-slots.sh
-            cp /tmp/landing.sh validation/generated-landing-final-slots.sh
-            cp /tmp/center.sh validation/generated-center-final-slots.sh
           } > validation/final-slot-render.log 2>&1
       - name: Publish diagnostic result
         if: always()
