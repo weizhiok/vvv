@@ -4,12 +4,18 @@ umask 077
 
 git config user.name github-actions[bot]
 git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+mkdir -p validation
 
 python3 -m py_compile tools/fix_ssh_log_transformer_anchor.py tools/apply_ssh_log_fixes.py
 python3 tools/fix_ssh_log_transformer_anchor.py
 python3 -m py_compile tools/apply_ssh_log_fixes.py
 python3 tools/apply_ssh_log_fixes.py
 rm -f core-src/qr_helper.sh
+
+printf '%s\n' transform-applied > validation/final-production-stage.txt
+git add validation/final-production-stage.txt
+git commit validation/final-production-stage.txt -m 'Final SSH fix: transform applied'
+git push origin HEAD:main
 
 python3 -m py_compile \
   src/prepare.py core-src/sub_center.py core-src/sync_agent.py \
@@ -24,7 +30,7 @@ bash -n core-src/vvv_manager.sh
 bash -n core-src/rclone_manager.sh
 sh -n core-src/landing.sh
 
-work="$(mktemp -d /tmp/vvv-atomic-render.XXXXXX)"
+work="$(mktemp -d /tmp/vvv-second-commit-render.XXXXXX)"
 trap 'rm -rf "$work"' EXIT
 cp core-src/host.sh "$work/host.sh"
 cp core-src/landing.sh "$work/landing.sh"
@@ -41,6 +47,7 @@ grep -q 'v2rayNG.txt' "$work/host.sh"
 grep -q 'pinSHA256' "$work/host.sh"
 grep -q 'basicConstraints=critical,CA:FALSE' "$work/host.sh"
 
-git add README.md vvv-install.sh core-src src tests .github/workflows/validate.yml
+printf '%s\n' validated-production > validation/final-production-stage.txt
+git add validation/final-production-stage.txt README.md vvv-install.sh core-src src tests .github/workflows/validate.yml
 git commit -m 'Require HTTPS, fix v2rayNG HY2, remove QR, and reorder roles'
 git push origin HEAD:main
