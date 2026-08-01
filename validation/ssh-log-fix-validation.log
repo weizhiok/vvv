@@ -1,0 +1,5 @@
++ python3 -m py_compile tools/apply_ssh_log_fixes.py
++ python3 tools/apply_ssh_log_fixes.py
+anchor not found: role execution mapping
+
+status=failure
