@@ -1,0 +1,1 @@
+Validate optional-domain HTTPS, public-IP short-lived certificates, Caddy syntax, and runtime invariants.
