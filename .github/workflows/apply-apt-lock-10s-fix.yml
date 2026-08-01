@@ -1,0 +1,71 @@
+name: Apply APT lock 10s fix
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/apply_apt_lock_10s_fix.py'
+      - 'trigger-apt-lock-10s-fix.txt'
+      - 'vvv-install.sh'
+      - 'core-src/host.sh'
+      - 'core-src/landing.sh'
+      - 'core-src/center_install.sh'
+      - 'core-src/rclone_manager.sh'
+      - 'tests/conformance.py'
+      - 'README.md'
+permissions:
+  contents: write
+concurrency:
+  group: apply-apt-lock-10s-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-apt-lock-10s-20260802
+          fetch-depth: 0
+      - name: Apply production patch
+        run: |
+          set -Eeuo pipefail
+          if [[ -f tools/apply_apt_lock_10s_fix.py ]]; then
+            python3 tools/apply_apt_lock_10s_fix.py
+          else
+            echo 'Patch already applied.'
+          fi
+      - name: Verify source and rendered installers
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile src/prepare.py tests/conformance.py
+          bash -n vvv-install.sh
+          bash -n core-src/bootstrap.sh
+          bash -n core-src/host.sh
+          sh -n core-src/landing.sh
+          bash -n core-src/center_install.sh
+          bash -n core-src/rclone_manager.sh
+          python3 tests/conformance.py
+          work="$(mktemp -d)"
+          cp core-src/host.sh "$work/host.sh"
+          cp core-src/landing.sh "$work/landing.sh"
+          cp core-src/center_install.sh "$work/center.sh"
+          python3 src/prepare.py "$work/host.sh" "$work/landing.sh" "$work/center.sh"
+          bash -n "$work/host.sh"
+          sh -n "$work/landing.sh"
+          bash -n "$work/center.sh"
+      - name: Commit production changes to branch
+        run: |
+          set -Eeuo pipefail
+          if [[ ! -f tools/apply_apt_lock_10s_fix.py ]]; then
+            exit 0
+          fi
+          git config user.name weizhiok
+          git config user.email 165847692+weizhiok@users.noreply.github.com
+          rm -f tools/apply_apt_lock_10s_fix.py trigger-apt-lock-10s-fix.txt
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          find . -type f -name '*.pyc' -delete
+          git add -A
+          git commit -m "Limit APT lock waits to 10 seconds"
+          git push origin HEAD:fix-apt-lock-10s-20260802
