@@ -1,7 +1,0 @@
-size=14887
-remainder=3
-padding_added=1
-base64=failed
-status=invalid-base64
-base64: invalid input
-validation.txt

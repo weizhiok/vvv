@@ -1,9 +1,0 @@
-status=ok
-method=DPkg::Lock::Timeout
-timeout_seconds=600
-download_retries=5
-total_new_replacements=4
-vvv-install.sh: replacements=0
-core-src/host.sh: replacements=2
-core-src/landing.sh: replacements=2
-core-src/center_install.sh: replacements=0

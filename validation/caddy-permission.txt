@@ -1,5 +1,0 @@
-status=ok
-config_owner=root:caddy
-config_mode=640
-validation_user=caddy
-shell=ok
