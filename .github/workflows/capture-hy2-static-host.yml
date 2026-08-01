@@ -13,14 +13,8 @@ jobs:
       - name: Apply static patch and render
         run: |
           set -Eeuo pipefail
-          python3 tools/decode_staged_hy2.py || true
-          python3 - <<'PY'
-          import base64,gzip
-          from pathlib import Path
-          raw=Path('.staging-refactor/patch-hy2-static.gz.b64').read_text(encoding='utf-8-sig')
-          clean=''.join(raw.split())
-          Path('/tmp/hy2-static.py').write_bytes(gzip.decompress(base64.b64decode(clean,validate=True)))
-          PY
+          python3 -m py_compile tools/decode_hy2_static.py
+          python3 tools/decode_hy2_static.py
           python3 -m py_compile /tmp/hy2-static.py
           python3 /tmp/hy2-static.py
           python3 -m py_compile src/prepare.py
