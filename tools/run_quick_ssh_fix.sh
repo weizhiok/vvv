@@ -5,6 +5,7 @@ LOG=/tmp/quick-ssh-log-fix-validation.log
 
 git config user.name github-actions[bot]
 git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+git pull --ff-only origin main
 
 set +e
 (
@@ -61,12 +62,14 @@ if [[ $rc -eq 0 ]]; then
     .github/workflows/publish-quick-ssh-fix.yml \
     .github/workflows/ssh-fix-actions-probe.yml \
     ssh-fix-actions-probe.txt \
+    ssh-fix-publisher-started.txt \
     validation/ssh-log-fix-validation.log
   git add -A
   git commit -m 'Require HTTPS, fix v2rayNG HY2, remove QR, and reorder roles'
   git push
 else
   git reset --hard HEAD
+  git pull --ff-only origin main
   mkdir -p validation
   cp "$LOG" validation/ssh-log-fix-validation.log
   printf '\nstatus=failure\n' >> validation/ssh-log-fix-validation.log
