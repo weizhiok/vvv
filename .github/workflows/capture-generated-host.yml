@@ -1,0 +1,29 @@
+name: Capture generated host script
+on:
+  push:
+    paths:
+      - '.github/workflows/capture-generated-host.yml'
+permissions:
+  contents: write
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render host
+        run: |
+          set -Eeuo pipefail
+          cp core-src/host.sh /tmp/host.sh
+          cp core-src/landing.sh /tmp/landing.sh
+          cp core-src/center_install.sh /tmp/center.sh
+          python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
+          bash -n /tmp/host.sh
+          mkdir -p validation
+          cp /tmp/host.sh validation/generated-host-current.sh
+      - name: Publish host snapshot
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add validation/generated-host-current.sh
+          git commit -m 'Capture current generated host script'
+          git push
