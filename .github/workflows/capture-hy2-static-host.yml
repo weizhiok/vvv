@@ -1,0 +1,40 @@
+name: Capture HY2 static host
+on:
+  push:
+    paths:
+      - '.github/workflows/capture-hy2-static-host.yml'
+permissions:
+  contents: write
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply static patch and render
+        run: |
+          set -Eeuo pipefail
+          python3 tools/decode_staged_hy2.py || true
+          python3 - <<'PY'
+          import base64,gzip
+          from pathlib import Path
+          raw=Path('.staging-refactor/patch-hy2-static.gz.b64').read_text(encoding='utf-8-sig')
+          clean=''.join(raw.split())
+          Path('/tmp/hy2-static.py').write_bytes(gzip.decompress(base64.b64decode(clean,validate=True)))
+          PY
+          python3 -m py_compile /tmp/hy2-static.py
+          python3 /tmp/hy2-static.py
+          python3 -m py_compile src/prepare.py
+          cp core-src/host.sh /tmp/host.sh
+          cp core-src/landing.sh /tmp/landing.sh
+          cp core-src/center_install.sh /tmp/center.sh
+          python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
+          bash -n /tmp/host.sh
+          mkdir -p validation
+          cp /tmp/host.sh validation/generated-host-hy2-static.sh
+      - name: Publish snapshot
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add validation/generated-host-hy2-static.sh
+          git commit -m 'Capture host with HY2 static slots'
+          git push
