@@ -26,6 +26,10 @@ replacements = (
         "    shadowrocket_text = base64.b64decode(shadowrocket).decode('utf-8')\n    require('hysteria2://' in shadowrocket_text, 'Shadowrocket 缺少 Hysteria 2 链接')\n",
     ),
     (
+        "    require(\"clients = ('c', 'qx', 'ln', 'sr', 'v2')\" in source, '订阅短路径集合不正确')\n",
+        "    require(\"SHORT_PATHS = {'c': 'clash', 'qx': 'quantumultx', 'ln': 'loon', 'sr': 'shadowrocket', 'v2': 'v2rayng'}\" in source, '订阅短路径集合不正确')\n",
+    ),
+    (
         "    require('rclone copyto' in backup and 'rclone sync' not in backup, '云上传必须使用 copy/copyto 而不是 sync')\n",
         "    require(\"'copyto'\" in backup and \"'sync'\" not in backup, '云上传必须使用 copy/copyto 而不是 sync')\n",
     ),
