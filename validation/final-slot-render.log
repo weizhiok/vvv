@@ -4,6 +4,12 @@
 + python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
 + bash -n /tmp/host.sh
 + sh -n /tmp/landing.sh
-+ sh -n /tmp/center.sh
-/tmp/center.sh: 10: Syntax error: "(" unexpected (expecting "}")
++ bash -n /tmp/center.sh
++ grep -q build_hy2_slot_configs /tmp/host.sh
++ grep -q sync_hy2_slot_services /tmp/host.sh
++ grep -q vvv-hy2-slot@ /tmp/host.sh
++ grep -q build_vless_slot_configs /tmp/host.sh
++ grep -q sync_vless_slot_services /tmp/host.sh
++ grep -q vvv-vless-slot@ /tmp/host.sh
++ grep -q '主 Xray PID 已保持不变' /tmp/host.sh
 status=failure
