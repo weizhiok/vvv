@@ -24,14 +24,10 @@
 .staging-refactor/prepare.v3.gz.part031
 .staging-refactor/qr_helper.sh.b64
 .staging-refactor/sources.tgz.b64
-+ cat .staging-refactor/prepare.hy2.part00 .staging-refactor/prepare.hy2.part01
-+ tr -d '\r\n\t '
-+ python3 - /tmp/prepare-hy2.b64 /tmp/prepare-hy2.gz
-chars=5973 mod4=1
-Traceback (most recent call last):
-  File "<stdin>", line 6, in <module>
-  File "/usr/lib/python3.12/base64.py", line 88, in b64decode
-    return binascii.a2b_base64(s, strict_mode=validate)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-binascii.Error: Invalid base64-encoded string: number of data characters (5973) cannot be 1 more than a multiple of 4
++ python3 -m py_compile tools/recover_hy2_transformer.py
++ python3 tools/recover_hy2_transformer.py
+.staging-refactor/prepare.hy2.part00: chars=1000
+.staging-refactor/prepare.hy2.part01: chars=4973
+total_chars=5973 mod4=1
+Combined HY2 transformer Base64 is invalid: Invalid base64-encoded string: number of data characters (5973) cannot be 1 more than a multiple of 4
 status=failure
