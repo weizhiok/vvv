@@ -30,11 +30,11 @@ def load_sub_center():
 def test_menu_and_front_loaded_parameters():
     text = read('core-src/bootstrap.sh')
     labels = [
-        '1. 安装订阅中心+中转主机（含自身代理）',
-        '2. 仅安装订阅中心（含自身代理）',
-        '3. 仅安装中转主机（含自身代理）',
-        '4. 仅安装中转副机（通过主机代理）',
-        '5. 仅安装直连代理',
+        '1. 安装订阅中心 + 中转主机 + 自身代理',
+        '2. 安装订阅中心 + 自身代理',
+        '3. 安装中转主机 + 自身代理',
+        '4. 安装中转副机（通过主机代理）',
+        '5. 安装直连代理',
         '0. 退出',
     ]
     positions = [text.index(label) for label in labels]
@@ -43,7 +43,7 @@ def test_menu_and_front_loaded_parameters():
         '========== 安装参数（全部前置设置） ==========',
         '请输入代理监听端口 [默认 443]',
         '请输入 VLESS + REALITY 伪装域名 [默认 www.softbank.jp]',
-        '请输入订阅 HTTPS 域名（必须已解析到本机）',
+        '请输入订阅 HTTPS 域名（直接回车使用本机公网 IP）',
         '请输入订阅 HTTPS 端口 [默认 8443]',
         '请输入订阅中心接入码',
         '请输入完整 JPR3 对接密钥',
@@ -56,7 +56,6 @@ def test_menu_and_front_loaded_parameters():
     collect = text.index('# 真正安装前，一次性收集该角色需要的全部参数。')
     execute = text.index('case "$choice" in', collect + 1)
     execute = text.index('install_host', execute)
-    before_install = text[collect:execute]
     require('read -r' not in text[text.index('show_parameter_summary\n', collect) if 'show_parameter_summary\n' in text[collect:] else collect:execute], '参数总览后仍存在确认输入')
     require('write_roles true true false true center-relay' in text and 'register_sync.sh" center-relay "$code"' in text, '菜单 1 没有安装订阅中心+中转主机')
     require('write_roles true true false true all' not in text, '仍保留旧 all 主角色')
@@ -120,8 +119,9 @@ def test_subscription_renderers():
     require("SHORT_PATHS = {'c': 'clash', 'qx': 'quantumultx', 'ln': 'loon', 'sr': 'shadowrocket', 'v2': 'v2rayng'}" in source, '订阅短路径集合不正确')
     require("{'c': 'clash', 'qx': 'quantumultx', 'ln': 'loon', 'sr': 'shadowrocket', 'v2': 'v2rayng'}" in source, '短路径渲染映射不正确')
     center = read('core-src/center_install.sh')
-    require('base_url="https://${domain}:${public_port}"' in center, '订阅中心没有强制 HTTPS')
-    require('http://${public_ip}' not in center and 'mode=ip' not in center, '仍保留明文 IP 订阅模式')
+    require('base_url="https://${site_host}:${public_port}"' in center, '订阅中心基础地址没有统一使用 HTTPS')
+    require('http://${public_ip}' not in center, '仍保留明文 IP 订阅地址')
+    require('mode=domain' in center and 'mode=ip' in center, '订阅中心没有同时支持域名和公网 IP HTTPS')
 
 
 def test_backup_policy():
@@ -193,9 +193,15 @@ def test_https_and_fresh_install_only():
     center = read('core-src/center_install.sh')
     manager = read('core-src/vvv_manager.sh')
     require('当前版本只支持全新安装' in installer, '网络入口没有拒绝旧安装状态')
-    require('订阅中心只提供 HTTPS' in bootstrap and '域名不能为空' in bootstrap, '订阅域名仍可留空')
-    require('mode=domain' in center and 'mode=ip' not in center, '订阅中心没有锁定 HTTPS 域名模式')
-    require('base_url="https://${domain}:${public_port}"' in center, '订阅中心基础地址不是 HTTPS')
+    require('直接回车使用本机公网 IP' in bootstrap and 'VVV_SUB_DOMAIN=""' in bootstrap, '订阅域名不能直接留空使用公网 IP')
+    require('域名不能为空' not in bootstrap, '仍强制要求输入订阅域名')
+    require('mode=domain' in center and 'mode=ip' in center, '订阅中心没有同时实现域名与 IP HTTPS 模式')
+    require('base_url="https://${site_host}:${public_port}"' in center, '订阅中心基础地址不是统一 HTTPS')
+    require("'certbot>=5.4,<6'" in center, 'IP 模式没有安装支持 IP 证书的 Certbot 5.4+')
+    for token in ('--preferred-profile shortlived', '--ip-address "$public_ip"', 'vvv-ip-cert-renew.timer', 'deploy-ip-cert.sh'):
+        require(token in center, f'IP 证书申请或续期缺少：{token}')
+    require('log { output discard }' not in center, 'Caddy log 块仍使用无效单行语法')
+    require('log {\n' not in center, 'Caddy log 块必须使用规范的多行语法')
     require('检查并升级 VVV' not in manager and 'update_vvv' not in manager, '仍保留原地升级兼容入口')
     require('sync_role' not in manager, '仍保留旧 all 角色兼容映射')
 
@@ -204,6 +210,7 @@ def test_hy2_leaf_certificate():
     host = read('core-src/host.sh')
     for token in ('basicConstraints=critical,CA:FALSE', 'keyUsage=critical,digitalSignature', 'extendedKeyUsage=serverAuth'):
         require(token in host, f'HY2 证书缺少叶子证书约束：{token}')
+
 
 def test_debian13_only():
     sources = {
@@ -222,6 +229,7 @@ def test_debian13_only():
     readme = read('README.md')
     require('仅支持全新 Debian 13' in readme, 'README 没有说明仅支持全新 Debian 13')
     require('Debian 12' in readme and '不包含' in readme, 'README 没有明确说明移除 Debian 12 兼容')
+
 
 def test_no_obsolete_role_terms():
     files = [
