@@ -1,89 +1,68 @@
-name: Publish validated Caddy fix branch
+name: Validate VVV
 on:
-  pull_request:
+  push:
     branches: [main]
-    paths:
-      - 'tools/apply_caddy_restart_progress_fix.py'
-      - 'trigger-caddy-restart-progress-fix.txt'
-      - 'core-src/bootstrap.sh'
-      - 'core-src/center_install.sh'
-      - 'tests/conformance.py'
-      - 'tests/https_frontend_validation.sh'
-      - 'README.md'
+    paths-ignore:
+      - 'tools/**'
+      - 'validation/**'
+      - 'trigger-*.txt'
+      - '.github/workflows/apply-ssh-log-fixes*.yml'
+      - '.github/workflows/run-final-ssh-fix.yml'
+      - '.github/workflows/publish-quick-ssh-fix.yml'
+      - '.github/workflows/publish-production-ssh-fix.yml'
+      - '.github/workflows/ssh-fix-actions-probe.yml'
+      - '.github/workflows/finalize-production.yml'
+      - '.github/workflows/publish-ready-branch.yml'
+  pull_request:
+  workflow_dispatch:
 concurrency:
-  group: publish-caddy-fix-${{ github.event.pull_request.number }}
+  group: validate-vvv-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 permissions:
-  contents: write
+  contents: read
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
 jobs:
-  publish:
+  final-validation:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: fix-caddy-restart-progress-20260802
-          fetch-depth: 0
-      - name: Apply production patch
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ca-certificates curl unzip jq openssl iproute2 python3-venv
+      - name: Download declared proxy cores
         run: |
           set -Eeuo pipefail
-          if [[ ! -f tools/apply_caddy_restart_progress_fix.py ]]; then
-            echo "Patch already applied; nothing to publish."
-            exit 0
-          fi
-          set +e
-          output="$(python3 tools/apply_caddy_restart_progress_fix.py 2>&1)"
-          rc=$?
-          set -e
-          printf '%s\n' "$output"
-          if (( rc != 0 )) && [[ "$output" != *"missing anchor: README progress and restart policy"* ]]; then
-            exit "$rc"
-          fi
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('README.md')
-          text = path.read_text(encoding='utf-8')
-          old = '''- IP 模式使用隔离的 Certbot 5.4+ 环境申请 Let’s Encrypt `shortlived` IP 地址证书；
-          - IP 证书有效期较短，脚本安装 systemd 定时器每天检查两次并自动续期；'''
-          new = '''- IP 模式使用隔离的 Certbot 5.4+ 环境申请 Let’s Encrypt `shortlived` IP 地址证书；
-          - IP 证书有效期较短，脚本安装 systemd 定时器每天检查两次并自动续期；
-          - 证书首次部署不会错误调用 Caddy reload；续期后只重启 Caddy，不重启整台 VPS，也不会中断 SSH；
-          - 代理部分完成后会立即显示订阅中心的分阶段进度，依赖下载和证书申请均有明确提示与超时保护；'''
-          if old not in text:
-              raise SystemExit('README fallback anchor missing')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
-          PY
-      - name: Verify source and rendered installers
+          XRAY_VERSION="$(sed -n 's/^XRAY_FALLBACK_VERSION="\([^"]*\)"/\1/p' core-src/host.sh | head -n1)"
+          SING_VERSION="$(sed -n 's/^SING_BOX_FALLBACK_VERSION="\([^"]*\)"/\1/p' core-src/host.sh | head -n1)"
+          [[ -n "$XRAY_VERSION" && -n "$SING_VERSION" ]]
+          curl -fL --retry 5 --retry-all-errors "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip" -o /tmp/xray.zip
+          unzip -q /tmp/xray.zip xray -d /tmp/xray-unpack
+          install -m755 /tmp/xray-unpack/xray /tmp/xray
+          curl -fL --retry 5 --retry-all-errors "https://github.com/SagerNet/sing-box/releases/download/v${SING_VERSION}/sing-box-${SING_VERSION}-linux-amd64.tar.gz" -o /tmp/sing-box.tgz
+          tar -xzf /tmp/sing-box.tgz -C /tmp
+          install -m755 "/tmp/sing-box-${SING_VERSION}-linux-amd64/sing-box" /tmp/sing-box
+          /tmp/xray version
+          /tmp/sing-box version
+      - name: Download Caddy and install Certbot 5.4+
         run: |
           set -Eeuo pipefail
-          if [[ ! -f tools/apply_caddy_restart_progress_fix.py ]]; then
-            echo "Patch already applied; validation will run after restoring the permanent workflow."
-            exit 0
-          fi
-          python3 -m py_compile src/prepare.py tests/conformance.py
-          bash -n core-src/bootstrap.sh
-          bash -n core-src/center_install.sh
-          bash -n tests/https_frontend_validation.sh
-          python3 tests/conformance.py
-          work="$(mktemp -d)"
-          cp core-src/host.sh "$work/host.sh"
-          cp core-src/landing.sh "$work/landing.sh"
-          cp core-src/center_install.sh "$work/center.sh"
-          python3 src/prepare.py "$work/host.sh" "$work/landing.sh" "$work/center.sh"
-          bash -n "$work/host.sh"
-          sh -n "$work/landing.sh"
-          bash -n "$work/center.sh"
-      - name: Commit only production changes
+          CADDY_API="$(curl -fsSL --retry 5 --retry-all-errors https://api.github.com/repos/caddyserver/caddy/releases/latest)"
+          CADDY_URL="$(jq -r '.assets[] | select(.name|endswith("linux_amd64.tar.gz")) | .browser_download_url' <<<"$CADDY_API" | head -n1)"
+          [[ -n "$CADDY_URL" && "$CADDY_URL" != null ]]
+          mkdir -p /tmp/caddy-unpack
+          curl -fL --retry 5 --retry-all-errors "$CADDY_URL" -o /tmp/caddy.tgz
+          tar -xzf /tmp/caddy.tgz -C /tmp/caddy-unpack caddy
+          install -m755 /tmp/caddy-unpack/caddy /tmp/caddy
+          python3 -m venv /tmp/certbot-check
+          /tmp/certbot-check/bin/pip install --disable-pip-version-check --no-cache-dir 'certbot>=5.4,<6'
+      - name: Run final conformance and live-process validation
         run: |
-          set -Eeuo pipefail
-          if [[ ! -f tools/apply_caddy_restart_progress_fix.py ]]; then
-            exit 0
-          fi
-          git config user.name weizhiok
-          git config user.email 165847692+weizhiok@users.noreply.github.com
-          rm -f tools/apply_caddy_restart_progress_fix.py
-          rm -f .github/workflows/apply-caddy-restart-progress-fix.yml
-          rm -f trigger-caddy-restart-progress-fix.txt
-          git add -A
-          git commit -m "Fix Caddy certificate deployment and expose install progress"
-          git push origin HEAD:fix-caddy-restart-progress-20260802
+          chmod +x tests/final_runtime_validation.sh
+          tests/final_runtime_validation.sh /tmp/xray /tmp/sing-box
+      - name: Validate HTTPS frontends with real tools
+        run: |
+          chmod +x tests/https_frontend_validation.sh
+          tests/https_frontend_validation.sh /tmp/caddy /tmp/certbot-check/bin/certbot
