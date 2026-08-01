@@ -68,6 +68,8 @@ vps
 - 域名留空时，自动使用本机公网 IPv4；
 - IP 模式使用隔离的 Certbot 5.4+ 环境申请 Let’s Encrypt `shortlived` IP 地址证书；
 - IP 证书有效期较短，脚本安装 systemd 定时器每天检查两次并自动续期；
+- 证书首次部署不会错误调用 Caddy reload；续期后只重启 Caddy，不重启整台 VPS，也不会中断 SSH；
+- 代理部分完成后会立即显示订阅中心的分阶段进度，依赖下载和证书申请均有明确提示与超时保护；
 - 两种模式都只提供 HTTPS，不提供明文 HTTP 订阅入口；
 - 公网必须放行 TCP/80 和订阅 HTTPS 端口。
 

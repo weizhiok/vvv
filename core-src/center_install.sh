@@ -8,7 +8,31 @@ SERVICE_PORT=18081
 ACME_WEBROOT=/var/www/vvv-acme
 CADDY_CERT_DIR=/etc/caddy/certs
 CERTBOT_DIR=/opt/vvv-certbot
+CENTER_STARTED=$SECONDS
 fail(){ echo "错误：$*" >&2; exit 1; }
+section(){ printf '\n========== %s ==========\n' "$*"; }
+service_diagnostics(){
+  local service="$1"
+  systemctl --no-pager --full status "$service" 2>/dev/null || true
+  journalctl -u "$service" -n120 --no-pager 2>/dev/null || true
+}
+ensure_service_active(){
+  local service="$1" action="${2:-restart}" wait_seconds="${3:-75}"
+  systemctl enable "$service" >/dev/null 2>&1 || true
+  systemctl reset-failed "$service" >/dev/null 2>&1 || true
+  if ! timeout "$wait_seconds" systemctl "$action" "$service"; then
+    if ! systemctl is-active --quiet "$service"; then
+      service_diagnostics "$service"
+      fail "${service} 执行 ${action} 失败。"
+    fi
+  fi
+  for _ in $(seq 1 15); do
+    systemctl is-active --quiet "$service" && return 0
+    sleep 1
+  done
+  service_diagnostics "$service"
+  fail "${service} 未进入 active 状态。"
+}
 valid_port(){ [[ "${1:-}" =~ ^[0-9]+$ ]] && ((10#$1>=1 && 10#$1<=65535)); }
 valid_domain(){ [[ "${1:-}" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]; }
 open_port(){
@@ -21,7 +45,8 @@ open_port(){
 install_caddy(){
   local arch api asset_name url digest expected actual tmp
   case "$(uname -m)" in x86_64|amd64) arch=amd64;; aarch64|arm64) arch=arm64;; *) fail "Caddy 不支持当前架构。";; esac
-  api="$(curl -fsSL --retry 5 --retry-all-errors https://api.github.com/repos/caddyserver/caddy/releases/latest)" || fail "无法查询 Caddy。"
+  echo "正在查询 Caddy 最新稳定版……"
+  api="$(curl -fsSL --retry 5 --retry-all-errors --connect-timeout 15 --max-time 90 https://api.github.com/repos/caddyserver/caddy/releases/latest)" || fail "无法查询 Caddy。"
   asset_name="$(jq -r --arg s "linux_${arch}.tar.gz" '.assets[]|select(.name|endswith($s))|.name' <<<"$api"|head -n1)"
   url="$(jq -r --arg n "$asset_name" '.assets[]|select(.name==$n)|.browser_download_url' <<<"$api"|head -n1)"
   digest="$(jq -r --arg n "$asset_name" '.assets[]|select(.name==$n)|(.digest // "")' <<<"$api"|head -n1)"
@@ -29,12 +54,14 @@ install_caddy(){
   [[ "$digest" =~ ^sha256:[0-9a-fA-F]{64}$ ]] || fail "GitHub 没有返回 Caddy 安装包 SHA256。"
   expected="${digest#sha256:}"
   tmp="$(mktemp -d)"
-  curl -fsSL --retry 5 --retry-all-errors "$url" -o "$tmp/caddy.tgz"
+  echo "正在下载 Caddy：${asset_name}"
+  curl -fL --retry 5 --retry-all-errors --connect-timeout 15 --max-time 300 "$url" -o "$tmp/caddy.tgz" || fail "下载 Caddy 失败。"
   actual="$(sha256sum "$tmp/caddy.tgz"|awk '{print $1}')"
   [[ "${expected,,}" == "${actual,,}" ]] || fail "Caddy 安装包 SHA256 校验失败。"
   tar -xzf "$tmp/caddy.tgz" -C "$tmp" caddy
   install -m755 "$tmp/caddy" /usr/local/bin/caddy
   rm -rf "$tmp"
+  echo "Caddy 安装完成：$(/usr/local/bin/caddy version)"
 }
 write_caddy_service(){
   cat > /etc/systemd/system/caddy.service <<'UNIT'
@@ -48,11 +75,14 @@ User=caddy
 Group=caddy
 Environment=HOME=/var/lib/caddy
 ExecStart=/usr/local/bin/caddy run --environ --config /etc/caddy/Caddyfile --adapter caddyfile
-ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile --force
 Restart=on-failure
 RestartSec=3
+TimeoutStartSec=45s
+TimeoutStopSec=45s
+KillSignal=SIGTERM
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ReadWritePaths=/var/lib/caddy /var/log/caddy
@@ -153,12 +183,19 @@ install_ip_certificate(){
   cert_name="vvv-ip-${public_ip//./-}"
   live_dir="/etc/letsencrypt/live/${cert_name}"
 
-  echo "正在安装 Certbot 5.4+，用于申请 Let’s Encrypt 公网 IP 短期证书……"
-  python3 -m venv "$CERTBOT_DIR"
-  "$CERTBOT_DIR/bin/pip" install --disable-pip-version-check --no-cache-dir 'certbot>=5.4,<6' >/dev/null
+  echo "正在创建独立 Certbot 环境……"
+  python3 -m venv --clear "$CERTBOT_DIR"
+  echo "正在安装 Certbot 5.4+；安装过程会显示进度，不会重启整台 VPS……"
+  timeout 600 "$CERTBOT_DIR/bin/pip" install \
+    --disable-pip-version-check \
+    --no-cache-dir \
+    --retries 5 \
+    --timeout 30 \
+    'certbot>=5.4,<6' || fail "Certbot 安装失败或超时。"
   "$CERTBOT_DIR/bin/certbot" --version
 
-  "$CERTBOT_DIR/bin/certbot" certonly \
+  echo "正在向 Let’s Encrypt 申请公网 IP 短期证书；最多等待 10 分钟……"
+  timeout 600 "$CERTBOT_DIR/bin/certbot" certonly \
     --non-interactive \
     --agree-tos \
     --register-unsafely-without-email \
@@ -168,18 +205,25 @@ install_ip_certificate(){
     --ip-address "$public_ip" \
     --cert-name "$cert_name" \
     --key-type ecdsa \
-    --elliptic-curve secp256r1
+    --elliptic-curve secp256r1 || fail "公网 IP HTTPS 证书申请失败或超时。"
 
   [[ -s "$live_dir/fullchain.pem" && -s "$live_dir/privkey.pem" ]] || fail "Certbot 没有生成完整的 IP 证书。"
 
   cat > /usr/local/lib/vvv/deploy-ip-cert.sh <<EOF_DEPLOY
 #!/usr/bin/env bash
 set -Eeuo pipefail
-install -d -o root -g caddy -m750 ${CADDY_CERT_DIR}
-install -o root -g caddy -m640 ${live_dir}/fullchain.pem ${CADDY_CERT_DIR}/ip-fullchain.pem
-install -o root -g caddy -m640 ${live_dir}/privkey.pem ${CADDY_CERT_DIR}/ip-privkey.pem
-if systemctl is-active --quiet caddy.service; then
-  systemctl reload caddy.service
+MARKER=/etc/caddy/.vvv-ip-final-active
+install -d -o caddy -g caddy -m700 ${CADDY_CERT_DIR}
+install -o caddy -g caddy -m600 ${live_dir}/fullchain.pem ${CADDY_CERT_DIR}/ip-fullchain.pem
+install -o caddy -g caddy -m600 ${live_dir}/privkey.pem ${CADDY_CERT_DIR}/ip-privkey.pem
+# 首次申请证书时，Caddy 仍在临时 HTTP 验证配置中，不能执行 reload。
+# 当前配置关闭了 admin API，Caddy reload 必然失败；续期后改为有界重启。
+if [[ -f "\$MARKER" ]] && systemctl is-active --quiet caddy.service; then
+  if ! timeout 75 systemctl restart caddy.service; then
+    systemctl --no-pager --full status caddy.service >&2 || true
+    journalctl -u caddy.service -n120 --no-pager >&2 || true
+    exit 1
+  fi
 fi
 EOF_DEPLOY
   chmod 700 /usr/local/lib/vvv/deploy-ip-cert.sh
@@ -193,6 +237,7 @@ Wants=network-online.target
 ConditionPathExists=/etc/letsencrypt/renewal/${cert_name}.conf
 [Service]
 Type=oneshot
+TimeoutStartSec=15min
 ExecStart=${CERTBOT_DIR}/bin/certbot renew --quiet --cert-name ${cert_name} --deploy-hook /usr/local/lib/vvv/deploy-ip-cert.sh
 EOF_UNIT
   cat > /etc/systemd/system/vvv-ip-cert-renew.timer <<'UNIT'
@@ -233,9 +278,23 @@ if ss -H -lnt 'sport = :80' 2>/dev/null | grep -q .; then
   fail "TCP/80 已被其他程序占用，无法申请或续期 HTTPS 证书。"
 fi
 
-apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 update >/dev/null
-DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 install -y \
-  ca-certificates curl jq openssl python3 python3-venv tar gzip >/dev/null
+section "准备订阅中心依赖"
+required_packages=(ca-certificates curl jq openssl python3 tar gzip)
+[[ "$mode" != ip ]] || required_packages+=(python3-venv)
+missing_packages=()
+for package in "${required_packages[@]}"; do
+  dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q 'install ok installed' || missing_packages+=("$package")
+done
+if ((${#missing_packages[@]})); then
+  echo "正在安装缺少的依赖：${missing_packages[*]}"
+  if ! timeout 600 env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 install -y "${missing_packages[@]}"; then
+    echo "首次安装依赖失败，正在刷新软件索引后重试……"
+    timeout 600 apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 update
+    timeout 600 env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 install -y "${missing_packages[@]}" || fail "订阅中心依赖安装失败。"
+  fi
+else
+  echo "订阅中心依赖已齐全，跳过重复 apt update。"
+fi
 open_port "$public_port"
 open_port 80
 install -d -m700 "$CFG_DIR" "$DATA_DIR" "$DATA_DIR/hosts" "$DATA_DIR/output" "$DATA_DIR/backups" /usr/local/lib/vvv
@@ -286,47 +345,62 @@ MemoryMax=192M
 WantedBy=multi-user.target
 UNIT
 
+section "安装 HTTPS 前端"
 install_caddy
 id caddy >/dev/null 2>&1 || useradd --system --home /var/lib/caddy --shell /usr/sbin/nologin caddy
 install -d -o caddy -g caddy -m750 /var/lib/caddy /var/log/caddy
-install -d -o root -g caddy -m750 "$CADDY_CERT_DIR"
+install -d -o caddy -g caddy -m700 "$CADDY_CERT_DIR"
 write_caddy_service
 systemctl daemon-reload
-systemctl enable --now vvv-sub.service
+
+section "启动订阅中心内部服务"
+ensure_service_active vvv-sub.service restart 60
 
 if [[ "$mode" == domain ]]; then
+  section "配置域名 HTTPS"
+  rm -f /etc/caddy/.vvv-ip-final-active
   write_domain_caddyfile
   validate_caddy
-  systemctl enable --now caddy.service
+  ensure_service_active caddy.service restart 75
 else
+  section "启动公网 IP 证书验证服务"
   write_ip_bootstrap_caddyfile
   validate_caddy
-  systemctl enable --now caddy.service
+  ensure_service_active caddy.service restart 75
+
+  section "申请公网 IP HTTPS 证书"
   install_ip_certificate
+
+  section "切换到公网 IP HTTPS 正式配置"
   write_ip_final_caddyfile
   validate_caddy
-  systemctl restart caddy.service
+  touch /etc/caddy/.vvv-ip-final-active
   systemctl daemon-reload
+  ensure_service_active caddy.service restart 75
   systemctl enable --now vvv-ip-cert-renew.timer
+  echo "公网 IP 证书自动续期定时器已启用。"
 fi
 
-for _ in $(seq 1 40); do
-  curl -fsS "http://127.0.0.1:${listen_port}/health" >/dev/null 2>&1 && break
+echo "正在检查订阅中心内部服务……"
+for attempt in $(seq 1 40); do
+  curl -fsS --connect-timeout 2 --max-time 4 "http://127.0.0.1:${listen_port}/health" >/dev/null 2>&1 && break
+  (( attempt % 10 != 0 )) || echo "内部服务仍在启动：已等待 ${attempt} 秒……"
   sleep 1
 done
-curl -fsS "http://127.0.0.1:${listen_port}/health" >/dev/null || {
+curl -fsS --connect-timeout 2 --max-time 4 "http://127.0.0.1:${listen_port}/health" >/dev/null || {
   journalctl -u vvv-sub -n80 --no-pager
   fail "订阅中心内部服务未就绪。"
 }
 
 echo "正在等待 HTTPS 订阅入口就绪……"
 ok=0
-for _ in $(seq 1 180); do
+for attempt in $(seq 1 180); do
   if [[ "$mode" == domain ]]; then
-    curl -fsS --resolve "${domain}:${public_port}:127.0.0.1" "https://${domain}:${public_port}/health" >/dev/null 2>&1 && { ok=1; break; }
+    curl -fsS --connect-timeout 3 --max-time 6 --resolve "${domain}:${public_port}:127.0.0.1" "https://${domain}:${public_port}/health" >/dev/null 2>&1 && { ok=1; break; }
   else
-    curl -fsS --connect-to "${public_ip}:${public_port}:127.0.0.1:${public_port}" "https://${public_ip}:${public_port}/health" >/dev/null 2>&1 && { ok=1; break; }
+    curl -fsS --connect-timeout 3 --max-time 6 --connect-to "${public_ip}:${public_port}:127.0.0.1:${public_port}" "https://${public_ip}:${public_port}/health" >/dev/null 2>&1 && { ok=1; break; }
   fi
+  (( attempt % 10 != 0 )) || echo "HTTPS 入口仍在准备：已等待 ${attempt} 秒……"
   sleep 1
 done
 [[ $ok == 1 ]] || {
@@ -407,5 +481,5 @@ esac
 SH
 chmod 700 /usr/local/sbin/vvv-center
 python3 /usr/local/lib/vvv/backup_manager.py create first-install --force >/dev/null
-printf '\n订阅中心安装成功。\nHTTPS 模式：%s\n主机接入码：%s\n' "$mode" "$registration_code"
+printf '\n订阅中心安装成功，总耗时 %s 秒。\nHTTPS 模式：%s\n主机接入码：%s\n' "$((SECONDS-CENTER_STARTED))" "$mode" "$registration_code"
 /usr/local/sbin/vvv-center urls
