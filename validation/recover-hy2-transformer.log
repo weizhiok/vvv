@@ -1,0 +1,37 @@
++ git ls-tree -r --name-only HEAD .staging-refactor
+.staging-refactor/patch-hy2-runtime.gz.b64
+.staging-refactor/patch-hy2-static.gz.b64
+.staging-refactor/patch_host.py.gz.b64
+.staging-refactor/prepare.good.part00
+.staging-refactor/prepare.good.part01
+.staging-refactor/prepare.good.part02
+.staging-refactor/prepare.good.part03
+.staging-refactor/prepare.good.part04
+.staging-refactor/prepare.gz.part00
+.staging-refactor/prepare.gz.part01
+.staging-refactor/prepare.gz.part02
+.staging-refactor/prepare.gz.part03
+.staging-refactor/prepare.gz.part04
+.staging-refactor/prepare.hy2.part00
+.staging-refactor/prepare.hy2.part01
+.staging-refactor/prepare.py.b64
+.staging-refactor/prepare.v2.gz.part00
+.staging-refactor/prepare.v2.gz.part01
+.staging-refactor/prepare.v2.gz.part02
+.staging-refactor/prepare.v2.gz.part03
+.staging-refactor/prepare.v2.gz.part04
+.staging-refactor/prepare.v3.gz.part030
+.staging-refactor/prepare.v3.gz.part031
+.staging-refactor/qr_helper.sh.b64
+.staging-refactor/sources.tgz.b64
++ cat .staging-refactor/prepare.hy2.part00 .staging-refactor/prepare.hy2.part01
++ tr -d '\r\n\t '
++ python3 - /tmp/prepare-hy2.b64 /tmp/prepare-hy2.gz
+chars=5973 mod4=1
+Traceback (most recent call last):
+  File "<stdin>", line 6, in <module>
+  File "/usr/lib/python3.12/base64.py", line 88, in b64decode
+    return binascii.a2b_base64(s, strict_mode=validate)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+binascii.Error: Invalid base64-encoded string: number of data characters (5973) cannot be 1 more than a multiple of 4
+status=failure
