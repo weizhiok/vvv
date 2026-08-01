@@ -1,0 +1,43 @@
+name: Apply repaired VLESS slot architecture
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-vless-slots-v2.yml'
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Repair and compile transformer
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile tools/repair_patch_anchor.py
+          python3 tools/repair_patch_anchor.py
+          python3 -m py_compile tools/patch_vless_slots.py
+          python3 tools/patch_vless_slots.py
+          python3 -m py_compile src/prepare.py core-src/sub_center.py core-src/sync_agent.py core-src/backup_manager.py
+      - name: Render and validate installers
+        run: |
+          set -Eeuo pipefail
+          cp core-src/host.sh /tmp/host.sh
+          cp core-src/landing.sh /tmp/landing.sh
+          cp core-src/center_install.sh /tmp/center.sh
+          python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
+          bash -n /tmp/host.sh
+          sh -n /tmp/landing.sh
+          sh -n /tmp/center.sh
+          grep -q 'build_vless_slot_configs' /tmp/host.sh
+          grep -q 'vvv-vless-slot@' /tmp/host.sh
+          grep -q 'build_hy2_slot_configs' /tmp/host.sh
+          grep -q 'vvv-hy2-slot@' /tmp/host.sh
+          grep -q '主 Xray PID 已保持不变' /tmp/host.sh
+          grep -q '主 sing-box PID 已保持不变' /tmp/host.sh
+      - name: Publish official transformer
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/prepare.py
+          git commit -m 'Use isolated VLESS and HY2 relay slots'
+          git push
