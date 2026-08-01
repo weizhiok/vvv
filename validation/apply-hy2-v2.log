@@ -1,6 +1,4 @@
-+ tr -d '\r\n\t '
-+ base64 -d
-+ tr -d '\r\n\t '
-+ base64 -d
-base64: invalid input
++ python3 -
+static: chars=2616 bytes=1960
+runtime Base64 decode failed: Invalid base64-encoded string: number of data characters (4113) cannot be 1 more than a multiple of 4; length=4115; bad=[]
 status=failure
