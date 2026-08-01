@@ -17,6 +17,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuxo pipefail
+          echo 'final-cleanup-attempt=2'
           python3 -m py_compile tools/add_debian13_conformance.py
           python3 tools/add_debian13_conformance.py
           sudo apt-get update -qq
