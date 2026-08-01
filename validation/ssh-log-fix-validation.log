@@ -1,10 +1,17 @@
-+ echo ssh-log-fixes-attempt=3
-ssh-log-fixes-attempt=3
++ echo ssh-log-fixes-attempt=4
+ssh-log-fixes-attempt=4
 + python3 -m py_compile tools/fix_ssh_log_transformer_anchor.py tools/apply_ssh_log_fixes.py
 + python3 tools/fix_ssh_log_transformer_anchor.py
 SSH log transformer anchors repaired
 + python3 -m py_compile tools/apply_ssh_log_fixes.py
 + python3 tools/apply_ssh_log_fixes.py
-forbidden QR implementation remains: qr_helper; files=['vvv-install.sh']
+SSH log fixes applied successfully
++ git rm core-src/qr_helper.sh
+rm 'core-src/qr_helper.sh'
++ python3 -m py_compile src/prepare.py core-src/sub_center.py core-src/sync_agent.py core-src/backup_manager.py tests/conformance.py tests/extract_manager_library.py tests/build_slot_fixture.py
+  File "tests/conformance.py", line 179
+    text = '
+           ^
+SyntaxError: unterminated string literal (detected at line 179)
 
 status=failure
