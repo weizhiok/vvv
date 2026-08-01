@@ -192,6 +192,24 @@ def test_https_and_fresh_install_only():
     require('sync_role' not in manager, '仍保留旧 all 角色兼容映射')
 
 
+def test_apt_lock_policy():
+    sources = {
+        'network installer': read('vvv-install.sh'),
+        'host installer': read('core-src/host.sh'),
+        'landing installer': read('core-src/landing.sh'),
+        'subscription center': read('core-src/center_install.sh'),
+        'rclone manager': read('core-src/rclone_manager.sh'),
+    }
+    for label, source in sources.items():
+        require('DPkg::Lock::Timeout=600' not in source, f'{label} 仍会等待 APT 锁 600 秒')
+        require('DPkg::Lock::Timeout=120' not in source, f'{label} 仍会等待 APT 锁 120 秒')
+        require('DPkg::Lock::Timeout=10' in source, f'{label} 没有使用 10 秒 APT 锁上限')
+    require('python3 python3-venv iproute2' in sources['host installer'], '主安装阶段没有一次性安装 python3-venv')
+    for label in ('network installer', 'host installer', 'landing installer', 'subscription center', 'rclone manager'):
+        require('Acquire::IndexTargets::deb::Sources::DefaultEnabled=false' in sources[label], f'{label} 没有关闭无用的 deb-src 索引下载')
+    require('APT/dpkg 锁等待超过 10 秒' in sources['subscription center'], '订阅中心没有明确的 10 秒锁超时错误')
+
+
 def test_hy2_leaf_certificate():
     host = read('core-src/host.sh')
     for token in ('basicConstraints=critical,CA:FALSE', 'keyUsage=critical,digitalSignature', 'extendedKeyUsage=serverAuth'):
@@ -236,6 +254,7 @@ def main():
         test_jpr3_and_slot_architecture,
         test_no_qr_output,
         test_https_and_fresh_install_only,
+        test_apt_lock_policy,
         test_hy2_leaf_certificate,
         test_debian13_only,
         test_no_obsolete_role_terms,

@@ -157,11 +157,19 @@ detect_os() {
 upgrade_system_once() {
   mkdir -p "$(dirname "$UPGRADE_MARKER")"
   export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
-  retry 5 10 apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 -o DPkg::Lock::Timeout=120 -o Acquire::PDiffs=false update
-  dpkg --configure -a >/dev/null 2>&1 || true
-  retry 3 10 apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
+  echo "APT/dpkg 锁最多等待 10 秒；超时立即报错，不删除锁，也不终止系统自动更新。"
+  apt-get \
+    -o DPkg::Lock::Timeout=10 \
+    -o Acquire::Retries=2 \
+    -o Acquire::PDiffs=false \
+    -o Acquire::IndexTargets::deb::Sources::DefaultEnabled=false \
+    update || fail "APT 更新失败。若提示锁被占用，已等待最多 10 秒，请稍后重新运行。"
+  apt-get \
+    -o DPkg::Lock::Timeout=10 \
+    -o Acquire::Retries=2 \
+    install -y --no-install-recommends \
     ca-certificates curl unzip tar gzip openssl jq iproute2 procps \
-    tzdata kmod util-linux python3
+    tzdata kmod util-linux python3 || fail "落地端依赖安装失败。若提示锁被占用，已等待最多 10 秒，请稍后重新运行。"
   update-ca-certificates >/dev/null 2>&1 || true
   echo "Debian 13 核心组件保持 VPS 镜像原版本，仅安装代理所需依赖。"
 }

@@ -13,8 +13,17 @@ backup_event(){
 }
 install_rclone(){
   if command -v rclone >/dev/null 2>&1; then return 0; fi
-  apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 update >/dev/null
-  DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 install -y curl unzip >/dev/null
+  echo "APT/dpkg 锁最多等待 10 秒；超时立即报错。"
+  apt-get \
+    -o DPkg::Lock::Timeout=10 \
+    -o Acquire::Retries=2 \
+    -o Acquire::PDiffs=false \
+    -o Acquire::IndexTargets::deb::Sources::DefaultEnabled=false \
+    update >/dev/null || { echo "错误：APT 更新失败；若锁被占用，已等待最多 10 秒。" >&2; return 1; }
+  DEBIAN_FRONTEND=noninteractive apt-get \
+    -o DPkg::Lock::Timeout=10 \
+    -o Acquire::Retries=2 \
+    install -y curl unzip >/dev/null || { echo "错误：rclone 依赖安装失败；若锁被占用，已等待最多 10 秒。" >&2; return 1; }
   curl -fsSL --retry 5 --retry-all-errors https://rclone.org/install.sh | bash
   command -v rclone >/dev/null 2>&1 || { echo "错误：rclone 安装失败。" >&2; return 1; }
 }
