@@ -1,0 +1,51 @@
+=== prepare.good: files=5 ===
+prepare.good.part00: 24328 chars
+prepare.good.part01: 5000 chars
+prepare.good.part02: 5000 chars
+prepare.good.part03: 9332 chars
+prepare.good.part04: 4332 chars
+total=47992 mod4=0
+base64=FAIL Excess data after padding
+=== prepare.gz: files=5 ===
+prepare.gz.part00: 2000 chars
+prepare.gz.part01: 2000 chars
+prepare.gz.part02: 2000 chars
+prepare.gz.part03: 2000 chars
+prepare.gz.part04: 172 chars
+total=8172 mod4=0
+base64=OK bytes=6129 magic=1f8b080000000000
+decode=gzip bytes=18247 markers={'build_hy2_slot_configs': False, 'sync_hy2_slot_services': False, 'build_vless_slot_configs': False, 'host_write': True}
+=== prepare.hy2: files=2 ===
+prepare.hy2.part00: 1000 chars
+prepare.hy2.part01: 4973 chars
+total=5973 mod4=1
+base64=FAIL Invalid base64-encoded string: number of data characters (5973) cannot be 1 more than a multiple of 4
+=== prepare.v2: files=5 ===
+prepare.v2.gz.part00: 2000 chars
+prepare.v2.gz.part01: 2000 chars
+prepare.v2.gz.part02: 2000 chars
+prepare.v2.gz.part03: 2000 chars
+prepare.v2.gz.part04: 176 chars
+total=8176 mod4=0
+base64=OK bytes=6130 magic=1f8b080000000000
+gzip=FAIL Error -3 while decompressing data: invalid distance too far back
+=== prepare.v3: files=2 ===
+prepare.v3.gz.part030: 1000 chars
+prepare.v3.gz.part031: 1000 chars
+total=2000 mod4=0
+base64=OK bytes=1500 magic=7e0d0f84b298196f
+decode=raw bytes=1500 markers={'build_hy2_slot_configs': False, 'sync_hy2_slot_services': False, 'build_vless_slot_configs': False, 'host_write': False}
+=== prepare.py.b64: files=1 ===
+prepare.py.b64: 24328 chars
+total=24328 mod4=0
+base64=OK bytes=18244 magic=23212f7573722f62
+decode=raw bytes=18244 markers={'build_hy2_slot_configs': False, 'sync_hy2_slot_services': False, 'build_vless_slot_configs': False, 'host_write': True}
+=== patch_host: files=1 ===
+patch_host.py.gz.b64: 7420 chars
+total=7420 mod4=0
+base64=OK bytes=5564 magic=1f8b08084ddc6c6a
+decode=gzip bytes=18122 markers={'build_hy2_slot_configs': False, 'sync_hy2_slot_services': False, 'build_vless_slot_configs': False, 'host_write': False}
+=== sources: files=1 ===
+sources.tgz.b64: 20021 chars
+total=20021 mod4=1
+base64=FAIL Only base64 data is allowed
