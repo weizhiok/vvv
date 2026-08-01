@@ -6,6 +6,11 @@ CLOUD_CFG=$CFG_DIR/cloud.json
 RCLONE_CFG=$CFG_DIR/rclone.conf
 BACKUP=/usr/local/lib/vvv/backup_manager.py
 
+backup_event(){
+  local reason=$1
+  [[ -x "$BACKUP" && -f /etc/vvv-sub/config.json ]] || return 0
+  python3 "$BACKUP" create "$reason" --force >/dev/null || echo "警告：自动备份失败。" >&2
+}
 install_rclone(){
   if command -v rclone >/dev/null 2>&1; then return 0; fi
   apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 update >/dev/null
@@ -26,6 +31,7 @@ enable_cloud(){
     0) return 0 ;;
     *) echo "请输入 0、1 或 2。"; return 1 ;;
   esac
+  backup_event before-cloud-backup-enabled
   install_rclone
   install -d -m700 "$CFG_DIR"
   echo
@@ -50,15 +56,16 @@ with os.fdopen(fd,'w',encoding='utf-8') as f:
 os.chmod(tmp,0o600); os.replace(tmp,path)
 PY
   chmod 600 "$RCLONE_CFG" "$CLOUD_CFG"
-  python3 "$BACKUP" create cloud-backup-enabled --force >/dev/null
+  backup_event after-cloud-backup-enabled
   python3 "$BACKUP" cloud-test
   echo "云备份已开启。以后只在数据发生变化并生成本地备份后自动上传。"
 }
 
 disable_cloud(){
   [[ -f "$CLOUD_CFG" ]] || { echo "云备份本来就是关闭状态。"; return 0; }
-  python3 "$BACKUP" create before-cloud-backup-disabled --force >/dev/null || true
+  backup_event before-cloud-backup-disabled
   rm -f "$CLOUD_CFG" "$RCLONE_CFG"
+  backup_event after-cloud-backup-disabled
   echo "云备份已关闭。本地加密备份不受影响。"
 }
 
