@@ -53,9 +53,9 @@ ask_proxy_parameters(){
     read -r -p "请输入编号 [默认 1]：" choice
     [[ -n "$choice" ]] || choice=1
     case "$choice" in
-      1) VVV_PROXY_MODE=dual; break ;;
-      2) VVV_PROXY_MODE=vless; break ;;
-      3) VVV_PROXY_MODE=hy2; break ;;
+      1) VVV_PROTOCOL_MODE=dual; break ;;
+      2) VVV_PROTOCOL_MODE=vless; break ;;
+      3) VVV_PROTOCOL_MODE=hy2; break ;;
       *) echo "请输入 1、2 或 3。" ;;
     esac
   done
@@ -66,7 +66,7 @@ ask_proxy_parameters(){
     if valid_port "$input"; then VVV_PROXY_PORT="$((10#$input))"; break; fi
     echo "端口必须是 1–65535 之间的数字。"
   done
-  export VVV_PROXY_MODE VVV_PROXY_PORT
+  export VVV_PROTOCOL_MODE VVV_PROXY_PORT
 }
 ask_center_parameters(){
   local input
