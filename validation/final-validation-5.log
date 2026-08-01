@@ -1,5 +1,5 @@
-+ echo validation-fresh-attempt=3
-validation-fresh-attempt=3
++ echo validation-fresh-attempt=4
+validation-fresh-attempt=4
 + python3 -m py_compile tools/fix_runtime_core_paths.py
 + python3 tools/fix_runtime_core_paths.py
 + sudo apt-get update -qq
@@ -31,7 +31,7 @@ Running kernel seems to be up-to-date.
 
 Restarting services...
  /etc/needrestart/restart.d/systemd-manager
- systemctl restart packagekit.service php8.3-fpm.service systemd-journald.service systemd-networkd.service systemd-resolved.service systemd-udevd.service udisks2.service
+ systemctl restart packagekit.service php8.3-fpm.service systemd-journald.service systemd-networkd.service systemd-resolved.service systemd-timedated.service systemd-udevd.service udisks2.service
 
 Service restarts being deferred:
  systemctl restart hosted-compute-agent.service
@@ -41,7 +41,7 @@ Service restarts being deferred:
 No containers need to be restarted.
 
 User sessions running outdated binaries:
- runner @ user manager service: systemd[989]
+ runner @ user manager service: systemd[1251]
 
 No VM guests are running outdated hypervisor (qemu) binaries on this host.
 ++ sed -n 's/^XRAY_FALLBACK_VERSION="\([^"]*\)"/\1/p' core-src/host.sh
@@ -54,14 +54,14 @@ No VM guests are running outdated hypervisor (qemu) binaries on this host.
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-  2 20.1M    2  495k    0     0  2181k      0  0:00:09 --:--:--  0:00:09 2181k100 20.1M  100 20.1M    0     0  54.7M      0 --:--:-- --:--:-- --:--:--  140M
+100 20.1M  100 20.1M    0     0  62.4M      0 --:--:-- --:--:-- --:--:-- 62.4M
 + unzip -q /tmp/xray.zip xray -d /tmp/xray-unpack
 + install -m755 /tmp/xray-unpack/xray /tmp/xray
 + curl -fL --retry 5 --retry-all-errors https://github.com/SagerNet/sing-box/releases/download/v1.13.12/sing-box-1.13.12-linux-amd64.tar.gz -o /tmp/sing-box.tgz
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-100 22.7M  100 22.7M    0     0  55.8M      0 --:--:-- --:--:-- --:--:-- 55.8M
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100 22.7M  100 22.7M    0     0  71.5M      0 --:--:-- --:--:-- --:--:--  195M
 + tar -xzf /tmp/sing-box.tgz -C /tmp
 + install -m755 /tmp/sing-box-1.13.12-linux-amd64/sing-box /tmp/sing-box
 + chmod +x tests/final_runtime_validation.sh
@@ -83,21 +83,21 @@ ALL CONFORMANCE TESTS PASSED
 [1;36m========== Run actual core configuration checks ==========[0m
 Xray 26.3.27 (Xray, Penetrates Everything.) d2758a0 (go1.26.1 linux/amd64)
 A unified platform for anti-censorship.
-2026/08/01 09:46:04.708192 [Info] infra/conf/serial: Reading config: &{Name:/tmp/vvv-final-test.Mse9zW/xray-active.json Format:json}
-2026/08/01 09:46:04.710659 [Warning] infra/conf: REALITY: Listening on non-443 ports may get your IP blocked by the GFW
+2026/08/01 09:46:46.525337 [Info] infra/conf/serial: Reading config: &{Name:/tmp/vvv-final-test.cKTIrQ/xray-active.json Format:json}
+2026/08/01 09:46:46.528047 [Warning] infra/conf: REALITY: Listening on non-443 ports may get your IP blocked by the GFW
 Configuration OK.
 Xray 26.3.27 (Xray, Penetrates Everything.) d2758a0 (go1.26.1 linux/amd64)
 A unified platform for anti-censorship.
-2026/08/01 09:46:04.720539 [Info] infra/conf/serial: Reading config: &{Name:/tmp/vvv-final-test.Mse9zW/vless-active/v01.json Format:json}
+2026/08/01 09:46:46.539066 [Info] infra/conf/serial: Reading config: &{Name:/tmp/vvv-final-test.cKTIrQ/vless-active/v01.json Format:json}
 Configuration OK.
 Xray 26.3.27 (Xray, Penetrates Everything.) d2758a0 (go1.26.1 linux/amd64)
 A unified platform for anti-censorship.
-2026/08/01 09:46:04.729720 [Info] infra/conf/serial: Reading config: &{Name:/tmp/vvv-final-test.Mse9zW/vless-active/v02.json Format:json}
+2026/08/01 09:46:46.549313 [Info] infra/conf/serial: Reading config: &{Name:/tmp/vvv-final-test.cKTIrQ/vless-active/v02.json Format:json}
 Configuration OK.
-1d5671a173498baa35784b50de8349c6f8c95c6848f11ac523f05ae328821a98  /tmp/vvv-final-test.Mse9zW/xray-empty.json
-1d5671a173498baa35784b50de8349c6f8c95c6848f11ac523f05ae328821a98  /tmp/vvv-final-test.Mse9zW/xray-active.json
-ef82cf6059f2793e2f4ae9e058346d711cb212eb70643f595b92bbab565d3220  /tmp/vvv-final-test.Mse9zW/sing-empty.json
-ef82cf6059f2793e2f4ae9e058346d711cb212eb70643f595b92bbab565d3220  /tmp/vvv-final-test.Mse9zW/sing-active.json
+4fb7e39491f59b2771a6845326ae558d9ee3286b5cf52aa3160125dd0e366835  /tmp/vvv-final-test.cKTIrQ/xray-empty.json
+4fb7e39491f59b2771a6845326ae558d9ee3286b5cf52aa3160125dd0e366835  /tmp/vvv-final-test.cKTIrQ/xray-active.json
+54eecf06557fd4ce6c05940cf4378708dbc176197950369be46f358454fc821c  /tmp/vvv-final-test.cKTIrQ/sing-empty.json
+54eecf06557fd4ce6c05940cf4378708dbc176197950369be46f358454fc821c  /tmp/vvv-final-test.cKTIrQ/sing-active.json
 
 [1;36m========== Verify deleted credentials are retired ==========[0m
 
@@ -108,8 +108,8 @@ ef82cf6059f2793e2f4ae9e058346d711cb212eb70643f595b92bbab565d3220  /tmp/vvv-final
 [1;36m========== Verify terminal QR renderer ==========[0m
 
 [1;36m========== Final result ==========[0m
-main_xray_pid=2880 start=7351
-main_sing_box_pid=2881 start=7351
+main_xray_pid=3102 start=4372
+main_sing_box_pid=3103 start=4372
 Main Xray and sing-box remained unchanged across slot start, stop, and replacement.
 FINAL RUNTIME VALIDATION PASSED
 status=success
