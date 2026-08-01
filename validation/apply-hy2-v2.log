@@ -1,0 +1,4 @@
++ base64 -d .staging-refactor/patch-hy2-static.gz.b64
++ base64 -d .staging-refactor/patch-hy2-runtime.gz.b64
+base64: invalid input
+status=failure
