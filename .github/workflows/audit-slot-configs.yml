@@ -19,6 +19,9 @@ jobs:
           mkdir -p validation /tmp/vvv-slot-audit
           {
             set -Eeuxo pipefail
+            python3 -m py_compile tools/fix_transform_replacement_escapes.py
+            python3 tools/fix_transform_replacement_escapes.py
+            python3 -m py_compile src/prepare.py
             cp core-src/host.sh /tmp/host.sh
             cp core-src/landing.sh /tmp/landing.sh
             cp core-src/center_install.sh /tmp/center.sh
@@ -103,6 +106,11 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           printf 'status=%s\n' "$AUDIT_OUTCOME" >> validation/slot-config-audit.log
           git add validation/slot-config-audit.log
-          git commit -m "Record isolated slot configuration audit"
+          if [[ "$AUDIT_OUTCOME" == success ]]; then
+            git add src/prepare.py
+            git commit -m "Fix generated slot config escaping and validate cores"
+          else
+            git commit -m "Record isolated slot configuration audit failure"
+          fi
           git push
           [[ "$AUDIT_OUTCOME" == success ]]
