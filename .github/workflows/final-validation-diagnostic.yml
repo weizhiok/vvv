@@ -20,7 +20,7 @@ jobs:
           mkdir -p validation
           {
             set -Eeuxo pipefail
-            echo 'validation-attempt=6'
+            echo 'validation-attempt=7'
             python3 -m py_compile tools/fix_final_conformance_tests.py
             python3 tools/fix_final_conformance_tests.py
             sudo apt-get update -qq
@@ -46,7 +46,7 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           printf 'status=%s\n' "$TEST_OUTCOME" >> validation/final-validation.log
-          git add tests/conformance.py validation/final-validation.log
+          git add core-src/center_install.sh tests/conformance.py validation/final-validation.log
           git commit -m "Record final VVV validation result"
           git push
           [[ "$TEST_OUTCOME" == success ]]
