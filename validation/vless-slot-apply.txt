@@ -1,0 +1,27 @@
+run_id=30690640722
+{"conclusion":"failure","jobs":[{"completedAt":"2026-08-01T07:53:42Z","conclusion":"failure","databaseId":91344617956,"name":"apply","startedAt":"2026-08-01T07:53:35Z","status":"completed","steps":[{"completedAt":"2026-08-01T07:53:38Z","conclusion":"success","name":"Set up job","number":1,"startedAt":"2026-08-01T07:53:36Z","status":"completed"},{"completedAt":"2026-08-01T07:53:39Z","conclusion":"success","name":"Run actions/checkout@v4","number":2,"startedAt":"2026-08-01T07:53:38Z","status":"completed"},{"completedAt":"2026-08-01T07:53:39Z","conclusion":"failure","name":"Apply and validate patch","number":3,"startedAt":"2026-08-01T07:53:39Z","status":"completed"},{"completedAt":"2026-08-01T07:53:39Z","conclusion":"skipped","name":"Commit official transformer","number":4,"startedAt":"2026-08-01T07:53:39Z","status":"completed"},{"completedAt":"2026-08-01T07:53:40Z","conclusion":"success","name":"Post Run actions/checkout@v4","number":8,"startedAt":"2026-08-01T07:53:39Z","status":"completed"},{"completedAt":"2026-08-01T07:53:40Z","conclusion":"success","name":"Complete job","number":9,"startedAt":"2026-08-01T07:53:40Z","status":"completed"}],"url":"https://github.com/weizhiok/vvv/actions/runs/30690640722/job/91344617956"}],"name":"Apply VLESS slot architecture","status":"completed"}
+===== failed logs =====
+apply	Apply and validate patch	﻿2026-08-01T07:53:39.5806632Z ##[group]Run set -Eeuo pipefail
+apply	Apply and validate patch	2026-08-01T07:53:39.5807497Z ^[[36;1mset -Eeuo pipefail^[[0m
+apply	Apply and validate patch	2026-08-01T07:53:39.5808153Z ^[[36;1mpython3 tools/patch_vless_slots.py^[[0m
+apply	Apply and validate patch	2026-08-01T07:53:39.5809058Z ^[[36;1mpython3 -m py_compile src/prepare.py core-src/sub_center.py core-src/sync_agent.py core-src/backup_manager.py^[[0m
+apply	Apply and validate patch	2026-08-01T07:53:39.5809844Z ^[[36;1mcp core-src/host.sh /tmp/host.sh^[[0m
+apply	Apply and validate patch	2026-08-01T07:53:39.5810765Z ^[[36;1mcp core-src/landing.sh /tmp/landing.sh^[[0m
+apply	Apply and validate patch	2026-08-01T07:53:39.5811409Z ^[[36;1mcp core-src/center_install.sh /tmp/center.sh^[[0m
+apply	Apply and validate patch	2026-08-01T07:53:39.5812127Z ^[[36;1mpython3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh^[[0m
+apply	Apply and validate patch	2026-08-01T07:53:39.5812832Z ^[[36;1mbash -n /tmp/host.sh^[[0m
+apply	Apply and validate patch	2026-08-01T07:53:39.5813659Z ^[[36;1msh -n /tmp/landing.sh^[[0m
+apply	Apply and validate patch	2026-08-01T07:53:39.5814285Z ^[[36;1mgrep -q 'build_vless_slot_configs' /tmp/host.sh^[[0m
+apply	Apply and validate patch	2026-08-01T07:53:39.5814913Z ^[[36;1mgrep -q 'vvv-vless-slot@' /tmp/host.sh^[[0m
+apply	Apply and validate patch	2026-08-01T07:53:39.5815530Z ^[[36;1mgrep -q 'build_hy2_slot_configs' /tmp/host.sh^[[0m
+apply	Apply and validate patch	2026-08-01T07:53:39.5816340Z ^[[36;1mgrep -q 'vvv-hy2-slot@' /tmp/host.sh^[[0m
+apply	Apply and validate patch	2026-08-01T07:53:39.5816958Z ^[[36;1mgrep -q '主 Xray PID 已保持不变' /tmp/host.sh^[[0m
+apply	Apply and validate patch	2026-08-01T07:53:39.5817649Z ^[[36;1mgrep -q '主 sing-box PID 已保持不变' /tmp/host.sh^[[0m
+apply	Apply and validate patch	2026-08-01T07:53:39.5818280Z ^[[36;1m! grep -q 'xray api ' /tmp/host.sh^[[0m
+apply	Apply and validate patch	2026-08-01T07:53:39.5853788Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+apply	Apply and validate patch	2026-08-01T07:53:39.5854551Z ##[endgroup]
+apply	Apply and validate patch	2026-08-01T07:53:39.7869285Z   File "/home/runner/work/vvv/vvv/tools/patch_vless_slots.py", line 93
+apply	Apply and validate patch	2026-08-01T07:53:39.7871105Z     Environment=GOMEMLIMIT=128MiB
+apply	Apply and validate patch	2026-08-01T07:53:39.7872094Z                              ^
+apply	Apply and validate patch	2026-08-01T07:53:39.7873236Z SyntaxError: invalid decimal literal
+apply	Apply and validate patch	2026-08-01T07:53:39.8055051Z ##[error]Process completed with exit code 1.
