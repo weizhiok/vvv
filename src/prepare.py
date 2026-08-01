@@ -34,28 +34,8 @@ h, n = re.subn(r'(?ms)^prompt_initial_mode_and_port\(\) \{.*?^\}\n', new_prompt,
 if n != 1:
     raise SystemExit('无法替换代理参数函数')
 
-# Shared SSH QR renderer and Loon Salamander compatibility.
-manager_header = '''#!/usr/bin/env bash
-set -Eeuo pipefail
-umask 077
-
-RUN_MODE='''
-manager_new = '''#!/usr/bin/env bash
-set -Eeuo pipefail
-umask 077
-if [[ -r /usr/local/lib/vvv/qr_helper.sh ]]; then
-  source /usr/local/lib/vvv/qr_helper.sh
-else
-  vvv_print_qr(){ qrencode -t ANSIUTF8 -m 1 "$1"; }
-fi
-
-RUN_MODE='''
-h = replace_once(h, manager_header, manager_new, '主机二维码加载器')
+# Loon Salamander compatibility. QR output is intentionally unsupported.
 h = h.replace("salamander-password={loon_q(h['obfs_password'])}", "salamander-password={h['obfs_password']}")
-h, qr_count = re.subn(r'qrencode -t ANSIUTF8 -m\s*1 "\$uri"', 'vvv_print_qr "$uri" || true', h)
-if qr_count < 1:
-    raise SystemExit('主机脚本中没有找到二维码输出')
-h = h.replace("#!/usr/bin/env bash\ncat /root/日本VPS-客户端节点.txt", "#!/usr/bin/env bash\nsource /usr/local/lib/vvv/qr_helper.sh\ncat /root/日本VPS-客户端节点.txt", 1)
 
 # Preallocate VLESS users, so adding or deleting relay routes never replaces the public REALITY inbound.
 old = '''    local key_output v_private v_public short_id uuid
@@ -734,32 +714,6 @@ l, n = re.subn(r'^PAIRING_KEY=.*$', 'PAIRING_KEY="${VVV_PAIRING_KEY:-请粘贴�
 if n != 1:
     raise SystemExit('无法设置副机对接密钥')
 l = l.replace("salamander-password={loon_q(h['obfs_password'])}", "salamander-password={h['obfs_password']}")
-landing_qr = r'''print_ssh_qr() {
-  qr_value="$1"; qr_tmp="$(mktemp /tmp/vvv-landing-qr.XXXXXX)"
-  qrencode -t ANSIUTF8 -m 1 "$qr_value" > "$qr_tmp"
-  qr_width="$(python3 - "$qr_tmp" <<'PY_QRW'
-import re,sys,unicodedata
-ansi=re.compile(r'\x1b\[[0-9;?]*[ -/]*[@-~]'); w=0
-for raw in open(sys.argv[1],encoding='utf-8',errors='ignore'):
-    text=ansi.sub('',raw.rstrip('\n')); n=0
-    for c in text:
-        if unicodedata.combining(c): continue
-        n += 2 if unicodedata.east_asian_width(c) in ('W','F') else 1
-    w=max(w,n)
-print(w)
-PY_QRW
-)"
-  qr_cols="$(tput cols 2>/dev/null || echo 120)"
-  if [ "$qr_width" -gt "$qr_cols" ]; then echo "终端过窄，请放大后重新显示二维码。" >&2; rm -f "$qr_tmp"; return 1; fi
-  printf '\033[47m%*s\033[0m\n' "$qr_width" ''
-  cat "$qr_tmp"; printf '\n'; rm -f "$qr_tmp"
-}
-
-'''
-l = replace_once(l, 'retry() {', landing_qr + 'retry() {', '副机二维码函数')
-l, qn = re.subn(r'qrencode -t ANSIUTF8 -m\s*1 "\$uri"', 'print_ssh_qr "$uri" || true', l)
-if qn < 1:
-    raise SystemExit('副机脚本中没有找到二维码输出')
 landing.write_text(l, encoding='utf-8')
 
 c = center.read_text(encoding='utf-8')

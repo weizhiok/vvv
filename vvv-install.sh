@@ -10,6 +10,9 @@ fail(){ echo "错误：$*" >&2; exit 1; }
 # shellcheck disable=SC1091
 source /etc/os-release
 [[ "${ID:-}" == debian && "${VERSION_ID:-}" == 13 ]] || fail "VVV 仅支持 Debian 13。当前系统：${PRETTY_NAME:-未知}"
+for old_path in /etc/vvv /etc/jp-relay /etc/vvv-sub /usr/local/lib/vvv-source; do
+  [[ ! -e "$old_path" ]] || fail "检测到已有 VVV 或代理状态。当前版本只支持全新安装，请重装 Debian 13 后再执行。"
+done
 if ! command -v curl >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
   apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 update
   DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 install -y curl ca-certificates bash python3
@@ -18,7 +21,7 @@ nonce="$(date +%s)-$$"; mkdir -p "$TMP/app"
 echo "正在下载 VVV 普通源码……"
 curl -fsSL --retry 5 --retry-all-errors "$RAW/core-src/bootstrap.sh?v=$nonce" -o "$TMP/app/bootstrap.sh" || fail "下载 bootstrap.sh 失败。"
 curl -fsSL --retry 5 --retry-all-errors "$RAW/src/prepare.py?v=$nonce" -o "$TMP/prepare.py" || fail "下载 prepare.py 失败。"
-files=(host.sh landing.sh center_install.sh register_sync.sh vvv_manager.sh sub_center.py sync_agent.py backup_manager.py rclone_manager.sh qr_helper.sh)
+files=(host.sh landing.sh center_install.sh register_sync.sh vvv_manager.sh sub_center.py sync_agent.py backup_manager.py rclone_manager.sh)
 for file in "${files[@]}"; do
   printf '  下载 %s\n' "$file"
   curl -fsSL --retry 5 --retry-all-errors "$RAW/core-src/$file?v=$nonce-$file" -o "$TMP/app/$file" || fail "下载 $file 失败。"
@@ -26,7 +29,7 @@ for file in "${files[@]}"; do
 done
 python3 -m py_compile "$TMP/prepare.py"
 python3 "$TMP/prepare.py" "$TMP/app/host.sh" "$TMP/app/landing.sh" "$TMP/app/center_install.sh" || fail "源码参数化处理失败。"
-for file in bootstrap.sh center_install.sh register_sync.sh vvv_manager.sh rclone_manager.sh qr_helper.sh host.sh; do bash -n "$TMP/app/$file" || fail "$file 语法检查失败。"; done
+for file in bootstrap.sh center_install.sh register_sync.sh vvv_manager.sh rclone_manager.sh host.sh; do bash -n "$TMP/app/$file" || fail "$file 语法检查失败。"; done
 sh -n "$TMP/app/landing.sh" || fail "landing.sh 语法检查失败。"
 python3 -m py_compile "$TMP/app/sub_center.py" "$TMP/app/sync_agent.py" "$TMP/app/backup_manager.py" || fail "Python 模块语法检查失败。"
 install -d -m700 /usr/local/lib/vvv-source

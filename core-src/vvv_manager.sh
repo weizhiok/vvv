@@ -12,23 +12,13 @@ show_roles(){
   role_has landing && echo "✓ 中转副机" || echo "✗ 中转副机"
 }
 primary(){ jq -r .primary_role "$ROLE_FILE"; }
-sync_role(){
-  case "$(primary)" in
-    all) echo center-relay ;;
-    *) primary ;;
-  esac
-}
 register_center(){
   read -r -p "请输入 VVV 主机接入码：" code
   [[ -n $code ]] || { echo "接入码不能为空。"; return; }
-  /usr/local/lib/vvv/register_sync.sh "$(sync_role)" "$code"
+  /usr/local/lib/vvv/register_sync.sh "$(primary)" "$code"
 }
 show_sync(){
   [[ -f /etc/vvv/client.json ]] && jq '{base_url,host_id,role,registered_at,last_sync,last_result}' /etc/vvv/client.json || echo "尚未注册订阅中心。"
-}
-update_vvv(){
-  role_has center && python3 /usr/local/lib/vvv/backup_manager.py create before-vvv-upgrade --force >/dev/null || true
-  curl -fsSL --retry 5 "https://raw.githubusercontent.com/weizhiok/vvv/install/vvv-install.sh?$(date +%s)" | bash
 }
 landing_menu(){
   [[ -x /usr/local/sbin/vvv-landing-original ]] && exec /usr/local/sbin/vvv-landing-original
@@ -49,7 +39,6 @@ while true; do
     echo "$n. 注册或更换订阅中心"; act[$n]=register; ((n++))
   fi
   role_has center && { echo "$n. 查看已注册副机"; act[$n]=hosts; ((n++)); }
-  echo "$n. 检查并升级 VVV"; act[$n]=update
   echo "0. 退出"
   read -r -p "请输入编号：" x
   [[ $x == 0 ]] && exit 0
@@ -61,7 +50,6 @@ while true; do
     status) show_sync; systemctl --no-pager status vvv-sync.timer vvv-sync.path 2>/dev/null || true; pause;;
     register) register_center; pause;;
     hosts) /usr/local/sbin/vvv-center hosts; pause;;
-    update) update_vvv; exit;;
     *) echo "请输入有效编号。";;
   esac
 done

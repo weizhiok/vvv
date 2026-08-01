@@ -16,12 +16,18 @@ open_port(){
   fi
 }
 install_caddy(){
-  local arch api url tmp
+  local arch api asset_name url digest expected actual tmp
   case "$(uname -m)" in x86_64|amd64) arch=amd64;; aarch64|arm64) arch=arm64;; *) fail "Caddy 不支持当前架构。";; esac
   api="$(curl -fsSL --retry 5 --retry-all-errors https://api.github.com/repos/caddyserver/caddy/releases/latest)" || fail "无法查询 Caddy。"
-  url="$(jq -r --arg s "linux_${arch}.tar.gz" '.assets[]|select(.name|endswith($s))|.browser_download_url' <<<"$api"|head -n1)"
+  asset_name="$(jq -r --arg s "linux_${arch}.tar.gz" '.assets[]|select(.name|endswith($s))|.name' <<<"$api"|head -n1)"
+  url="$(jq -r --arg n "$asset_name" '.assets[]|select(.name==$n)|.browser_download_url' <<<"$api"|head -n1)"
+  digest="$(jq -r --arg n "$asset_name" '.assets[]|select(.name==$n)|(.digest // "")' <<<"$api"|head -n1)"
   [[ -n "$url" && "$url" != null ]] || fail "找不到 Caddy 安装包。"
+  [[ "$digest" =~ ^sha256:[0-9a-fA-F]{64}$ ]] || fail "GitHub 没有返回 Caddy 安装包 SHA256。"
+  expected="${digest#sha256:}"
   tmp="$(mktemp -d)"; curl -fsSL --retry 5 --retry-all-errors "$url" -o "$tmp/caddy.tgz"
+  actual="$(sha256sum "$tmp/caddy.tgz"|awk '{print $1}')"
+  [[ "${expected,,}" == "${actual,,}" ]] || fail "Caddy 安装包 SHA256 校验失败。"
   tar -xzf "$tmp/caddy.tgz" -C "$tmp" caddy; install -m755 "$tmp/caddy" /usr/local/bin/caddy; rm -rf "$tmp"
 }
 [[ $(id -u) -eq 0 ]] || fail "请使用 root 用户运行。"
@@ -29,23 +35,20 @@ public_ip="$(jq -r '.public_ip // empty' /etc/jp-relay/state.json 2>/dev/null ||
 [[ "$public_ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || fail "无法读取本机公网 IPv4。"
 domain="${VVV_SUB_DOMAIN:-}"; domain="${domain,,}"; domain="${domain%.}"
 public_port="${VVV_SUB_PORT:-8443}"
+valid_domain "$domain" || fail "订阅中心只提供 HTTPS，必须填写有效域名。"
 valid_port "$public_port" || fail "订阅端口无效。"
 [[ "$public_port" != 443 ]] || fail "订阅端口不能占用 443。"
-mode=ip
-if [[ -n "$domain" ]]; then
-  valid_domain "$domain" || fail "订阅域名格式不正确。"
-  mapfile -t resolved < <(getent ahostsv4 "$domain"|awk '{print $1}'|sort -u)
-  ((${#resolved[@]})) || fail "订阅域名尚未解析到 IPv4。"
-  printf '%s\n' "${resolved[@]}"|grep -Fxq "$public_ip" || fail "订阅域名没有解析到本机 IP $public_ip。"
-  mode=domain
-fi
+mapfile -t resolved < <(getent ahostsv4 "$domain"|awk '{print $1}'|sort -u)
+((${#resolved[@]})) || fail "订阅域名尚未解析到 IPv4。"
+printf '%s\n' "${resolved[@]}"|grep -Fxq "$public_ip" || fail "订阅域名没有解析到本机 IP $public_ip。"
+mode=domain
 apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 update >/dev/null
-DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 install -y ca-certificates curl jq openssl python3 tar gzip qrencode >/dev/null
-open_port "$public_port"; [[ "$mode" != domain ]] || open_port 80
+DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 install -y ca-certificates curl jq openssl python3 tar gzip >/dev/null
+open_port "$public_port"; open_port 80
 install -d -m700 "$CFG_DIR" "$DATA_DIR" "$DATA_DIR/hosts" "$DATA_DIR/output" "$DATA_DIR/backups" /usr/local/lib/vvv
-for f in sub_center.py sync_agent.py backup_manager.py rclone_manager.sh qr_helper.sh; do install -m755 "$BASE_DIR/$f" "/usr/local/lib/vvv/$f"; done
+for f in sub_center.py sync_agent.py backup_manager.py rclone_manager.sh; do install -m755 "$BASE_DIR/$f" "/usr/local/lib/vvv/$f"; done
 subscription_token="$(openssl rand -hex 32)"; master_token="$(openssl rand -hex 32)"; recovery_password="$(openssl rand -base64 36|tr -d '\n')"
-if [[ "$mode" == domain ]]; then base_url="https://${domain}:${public_port}"; listen_host=127.0.0.1; listen_port=$SERVICE_PORT; else base_url="http://${public_ip}:${public_port}"; listen_host=0.0.0.0; listen_port=$public_port; fi
+base_url="https://${domain}:${public_port}"; listen_host=127.0.0.1; listen_port=$SERVICE_PORT
 python3 - "$CFG_DIR/config.json" "$mode" "$domain" "$public_ip" "$public_port" "$base_url" "$listen_host" "$listen_port" "$subscription_token" "$master_token" "$recovery_password" <<'PY'
 import json,sys,os,tempfile
 (path,mode,domain,ip,pport,base,lhost,lport,sub,master,recovery)=sys.argv[1:]
@@ -75,8 +78,7 @@ MemoryMax=192M
 [Install]
 WantedBy=multi-user.target
 UNIT
-if [[ "$mode" == domain ]]; then
-  install_caddy
+install_caddy
   id caddy >/dev/null 2>&1 || useradd --system --home /var/lib/caddy --shell /usr/sbin/nologin caddy
   install -d -o caddy -g caddy -m750 /var/lib/caddy /var/log/caddy
   install -d -m755 /etc/caddy
@@ -121,16 +123,12 @@ ReadWritePaths=/var/lib/caddy /var/log/caddy
 [Install]
 WantedBy=multi-user.target
 UNIT
-fi
-systemctl daemon-reload; systemctl enable --now vvv-sub.service
-[[ "$mode" != domain ]] || systemctl enable --now caddy.service
+systemctl daemon-reload; systemctl enable --now vvv-sub.service caddy.service
 for _ in $(seq 1 40); do curl -fsS "http://127.0.0.1:${listen_port}/health" >/dev/null 2>&1 && break; sleep 1; done
 curl -fsS "http://127.0.0.1:${listen_port}/health" >/dev/null || { journalctl -u vvv-sub -n80 --no-pager; fail "订阅中心内部服务未就绪。"; }
-if [[ "$mode" == domain ]]; then
-  echo "正在等待 HTTPS 证书签发……"; ok=0
-  for _ in $(seq 1 180); do curl -fsS --resolve "${domain}:${public_port}:127.0.0.1" "https://${domain}:${public_port}/health" >/dev/null 2>&1 && { ok=1; break; }; sleep 1; done
-  [[ $ok == 1 ]] || { journalctl -u caddy -n120 --no-pager; fail "HTTPS 订阅入口未就绪，请检查 TCP/80 和 TCP/${public_port}。"; }
-fi
+echo "正在等待 HTTPS 证书签发……"; ok=0
+for _ in $(seq 1 180); do curl -fsS --resolve "${domain}:${public_port}:127.0.0.1" "https://${domain}:${public_port}/health" >/dev/null 2>&1 && { ok=1; break; }; sleep 1; done
+[[ $ok == 1 ]] || { journalctl -u caddy -n120 --no-pager; fail "HTTPS 订阅入口未就绪，请检查 TCP/80 和 TCP/${public_port}。"; }
 registration_json="$(jq -nc --arg base "$base_url" --arg token "$master_token" '{base_url:$base,master_token:$token}')"
 registration_code="VVV1.$(printf %s "$registration_json"|base64 -w0|tr '+/' '-_'|tr -d '=')"
 printf '%s' "$registration_code" > "$CFG_DIR/registration.code"; chmod 600 "$CFG_DIR/registration.code"
@@ -149,7 +147,6 @@ chmod 600 /root/VVV-订阅中心恢复信息.txt
 cat > /usr/local/sbin/vvv-center <<'SH'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-source /usr/local/lib/vvv/qr_helper.sh
 cfg=/etc/vvv-sub/config.json
 base="$(jq -r .base_url "$cfg")"; token="$(jq -r .subscription_token "$cfg")"; master="$(jq -r .master_token "$cfg")"
 show_urls(){
@@ -159,26 +156,21 @@ show_urls(){
   echo "Shadowrocket：${base}/r/${token}/sr"
   echo "v2rayNG：${base}/r/${token}/v2"
 }
-show_qr(){
-  for item in "Shadowrocket|${base}/r/${token}/sr" "v2rayNG|${base}/r/${token}/v2"; do
-    name="${item%%|*}"; url="${item#*|}"; echo; echo "【$name】"; echo "$url"; vvv_print_qr "$url" || true
-  done
-}
 show_hosts(){ curl -fsS -H "Authorization: Bearer $master" "http://127.0.0.1:$(jq -r .listen_port "$cfg")/api/v1/hosts" | jq .; }
 case "${1:-menu}" in
-  urls) show_urls;; qr) show_urls; show_qr;; hosts) show_hosts;;
+  urls) show_urls;; hosts) show_hosts;;
   *) while true; do
     echo; echo "========== 订阅中心管理 =========="
-    echo "1. 查看订阅地址"; echo "2. 显示订阅二维码"; echo "3. 查看本地备份"
-    echo "4. 开启云备份功能"; echo "5. 查看并测试云备份"; echo "6. 关闭或重新配置云备份"
-    echo "7. 查看已注册主机"; echo "8. 查看服务状态"; echo "9. 查看恢复信息"; echo "0. 返回"
+    echo "1. 查看订阅地址"; echo "2. 查看本地备份"
+    echo "3. 开启云备份功能"; echo "4. 查看并测试云备份"; echo "5. 关闭或重新配置云备份"
+    echo "6. 查看已注册主机"; echo "7. 查看服务状态"; echo "8. 查看恢复信息"; echo "0. 返回"
     read -r -p "请输入编号：" x
     case "$x" in
-      1) show_urls;; 2) show_urls; show_qr;; 3) python3 /usr/local/lib/vvv/backup_manager.py list;;
-      4) /usr/local/lib/vvv/rclone_manager.sh enable;; 5) /usr/local/lib/vvv/rclone_manager.sh status;;
-      6) echo "1. 关闭云备份"; echo "2. 重新配置云备份"; read -r -p "请选择：" y; [[ $y == 1 ]] && /usr/local/lib/vvv/rclone_manager.sh disable || [[ $y == 2 ]] && /usr/local/lib/vvv/rclone_manager.sh reconfigure;;
-      7) show_hosts;; 8) systemctl --no-pager --full status vvv-sub.service caddy.service 2>/dev/null || true;;
-      9) cat /root/VVV-订阅中心恢复信息.txt;; 0) exit 0;; *) echo "请输入有效编号。";;
+      1) show_urls;; 2) python3 /usr/local/lib/vvv/backup_manager.py list;;
+      3) /usr/local/lib/vvv/rclone_manager.sh enable;; 4) /usr/local/lib/vvv/rclone_manager.sh status;;
+      5) echo "1. 关闭云备份"; echo "2. 重新配置云备份"; read -r -p "请选择：" y; [[ $y == 1 ]] && /usr/local/lib/vvv/rclone_manager.sh disable || [[ $y == 2 ]] && /usr/local/lib/vvv/rclone_manager.sh reconfigure;;
+      6) show_hosts;; 7) systemctl --no-pager --full status vvv-sub.service caddy.service 2>/dev/null || true;;
+      8) cat /root/VVV-订阅中心恢复信息.txt;; 0) exit 0;; *) echo "请输入有效编号。";;
     esac
   done;;
 esac
@@ -186,4 +178,4 @@ SH
 chmod 700 /usr/local/sbin/vvv-center
 python3 /usr/local/lib/vvv/backup_manager.py create first-install --force >/dev/null
 printf '\n订阅中心安装成功。\n主机接入码：%s\n' "$registration_code"
-/usr/local/sbin/vvv-center qr
+/usr/local/sbin/vvv-center urls

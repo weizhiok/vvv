@@ -161,7 +161,7 @@ upgrade_system_once() {
   dpkg --configure -a >/dev/null 2>&1 || true
   retry 3 10 apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
     ca-certificates curl unzip tar gzip openssl jq iproute2 procps \
-    tzdata kmod qrencode util-linux python3
+    tzdata kmod util-linux python3
   update-ca-certificates >/dev/null 2>&1 || true
   echo "Debian 13 核心组件保持 VPS 镜像原版本，仅安装代理所需依赖。"
 }
@@ -882,9 +882,8 @@ generate_client_files() {
   : > "$CLIENT_DIR/Quantumult-X.conf"
   : > "$CLIENT_DIR/Loon.conf"
   : > "$CLIENT_DIR/Loon-Shadowrocket.txt"
-  : > "$CLIENT_DIR/Loon-Shadowrocket-二维码索引.tsv"
   : > "$CLIENT_DIR/Shadowrocket.txt"
-  : > "$CLIENT_DIR/Shadowrocket-二维码索引.tsv"
+  : > "$CLIENT_DIR/v2rayNG.txt"
   echo 'proxies:' > "$CLIENT_DIR/Clash-Verge-Rev.yaml"
   {
     echo "中转客户端节点"
@@ -905,9 +904,8 @@ generate_client_files() {
     printf '%s\n' "$qx" >> "$CLIENT_DIR/Quantumult-X.conf"
     printf '%s\n' "$loon" >> "$CLIENT_DIR/Loon.conf"
     printf '%s\n' "$vless_uri" >> "$CLIENT_DIR/Loon-Shadowrocket.txt"
-    printf '%s\t%s\n' "$vless_name" "$vless_uri" >> "$CLIENT_DIR/Loon-Shadowrocket-二维码索引.tsv"
     printf '%s\n' "$vless_uri" >> "$CLIENT_DIR/Shadowrocket.txt"
-    printf '%s\t%s\n' "$vless_name" "$vless_uri" >> "$CLIENT_DIR/Shadowrocket-二维码索引.tsv"
+    printf '%s\n' "$vless_uri" >> "$CLIENT_DIR/v2rayNG.txt"
     cat >> "$CLIENT_DIR/Clash-Verge-Rev.yaml" <<EOF_CLASH_VLESS
   - name: "${vless_name}"
     type: vless
@@ -934,7 +932,7 @@ EOF_CLASH_VLESS
       echo "【Loon / Shadowrocket：${vless_name}】"
       echo "Loon 原生配置："
       echo "$loon"
-      echo "扫码链接："
+      echo "分享链接："
       echo "$vless_uri"
     } >> "$CLIENT_DIR/客户端节点.txt"
   fi
@@ -943,12 +941,12 @@ EOF_CLASH_VLESS
     hy2_name="$(protocol_name "$NODE_NAME" HY2)"
     encoded_hy2_name="$(urlencode "$hy2_name")"
     hy2_uri="hysteria2://$(urlencode "$JAPAN_HY2_PASSWORD")@${JAPAN_PUBLIC_IP}:${JAPAN_PORT}/?obfs=salamander&obfs-password=$(urlencode "$JAPAN_HY2_OBFS")&sni=$(urlencode "$JAPAN_HY2_SERVER_NAME")&insecure=1&pinSHA256=$(urlencode "$JAPAN_HY2_PIN_HEX")#${encoded_hy2_name}"
+    v2rayng_hy2_uri="hysteria2://$(urlencode "$JAPAN_HY2_PASSWORD")@${JAPAN_PUBLIC_IP}:${JAPAN_PORT}/?obfs=salamander&obfs-password=$(urlencode "$JAPAN_HY2_OBFS")&sni=$(urlencode "$JAPAN_HY2_SERVER_NAME")&pinSHA256=$(urlencode "$JAPAN_HY2_PIN_HEX")#${encoded_hy2_name}"
     loon="${hy2_name} = Hysteria2,${JAPAN_PUBLIC_IP},${JAPAN_PORT},\"${JAPAN_HY2_PASSWORD}\",skip-cert-verify=true,sni=${JAPAN_HY2_SERVER_NAME},udp=true,fast-open=true,salamander-password=\"${JAPAN_HY2_OBFS}\""
     printf '%s\n' "$loon" >> "$CLIENT_DIR/Loon.conf"
     printf '%s\n' "$hy2_uri" >> "$CLIENT_DIR/Loon-Shadowrocket.txt"
-    printf '%s\t%s\n' "$hy2_name" "$hy2_uri" >> "$CLIENT_DIR/Loon-Shadowrocket-二维码索引.tsv"
     printf '%s\n' "$hy2_uri" >> "$CLIENT_DIR/Shadowrocket.txt"
-    printf '%s\t%s\n' "$hy2_name" "$hy2_uri" >> "$CLIENT_DIR/Shadowrocket-二维码索引.tsv"
+    printf '%s\n' "$v2rayng_hy2_uri" >> "$CLIENT_DIR/v2rayNG.txt"
     cat >> "$CLIENT_DIR/Clash-Verge-Rev.yaml" <<EOF_CLASH_HY2
   - name: "${hy2_name}"
     type: hysteria2
@@ -974,8 +972,11 @@ EOF_CLASH_HY2
       echo "【Loon / Shadowrocket：${hy2_name}】"
       echo "Loon 原生配置："
       echo "$loon"
-      echo "扫码链接："
+      echo "分享链接："
       echo "$hy2_uri"
+      echo
+      echo "【v2rayNG 2.2.6+：${hy2_name}】"
+      echo "$v2rayng_hy2_uri"
     } >> "$CLIENT_DIR/客户端节点.txt"
   fi
 
@@ -988,23 +989,6 @@ EOF_CLASH_HY2
   cp "$CLIENT_DIR/客户端节点.txt" "$CLIENT_NODES_FILE"
   chmod 700 "$CLIENT_DIR"
   chmod 600 "$CLIENT_DIR"/* "$CLIENT_NODES_FILE"
-}
-
-show_loon_shadowrocket_qr() {
-  index_file="$CLIENT_DIR/Loon-Shadowrocket-二维码索引.tsv"
-  [ -s "$index_file" ] || return 0
-  echo
-  echo "================ Loon / Shadowrocket 二维码 ================"
-  tab="$(printf '\t')"
-  while IFS="$tab" read -r name uri; do
-    [ -n "$uri" ] || continue
-    echo
-    echo "【${name}】"
-    echo "$uri"
-    echo
-    qrencode -t ANSIUTF8 -m 1 "$uri"
-  done < "$index_file"
-  echo "============================================================="
 }
 
 save_state() {
@@ -1031,22 +1015,10 @@ install_shortcuts() {
 set -u
 state=/etc/jp-relay/landing-state.json
 nodes=/root/中转客户端节点.txt
-index=/root/中转客户端配置/Loon-Shadowrocket-二维码索引.tsv
 [ -f "$state" ] || { echo "尚未安装落地节点。"; exit 1; }
 
 show_nodes() {
   cat "$nodes"
-  if [ -s "$index" ]; then
-    tab="$(printf '\t')"
-    while IFS="$tab" read -r name uri; do
-      [ -n "$uri" ] || continue
-      echo
-      echo "【${name}】"
-      echo "$uri"
-      echo
-      qrencode -t ANSIUTF8 -m 1 "$uri"
-    done < "$index"
-  fi
 }
 
 valid_ipv4() {
@@ -1239,7 +1211,7 @@ if ! verify_runtime; then
   fail "代理服务未完整启动或监听端口不完整。"
 fi
 
-CURRENT_STEP="生成客户端配置和二维码"
+CURRENT_STEP="生成客户端配置"
 log "$CURRENT_STEP"
 generate_client_files
 
@@ -1261,11 +1233,10 @@ mode_has_hy2 && echo "sing-box：v${SING_BOX_VERSION}（${SING_BOX_VERSION_SOURC
 echo "BBR：${BBR_STATUS} / 队列=${BBR_QDISC}"
 echo "时区：Asia/Shanghai"
 echo "每天北京时间 06:00 自动重启"
-echo "以后输入 vps，可重新显示客户端配置、二维码和实时在线状态。"
+echo "以后输入 vps，可重新显示客户端配置和实时在线状态。"
 echo "本次没有立即重启服务器，只重启了启用的代理服务。"
 echo
 cat "$CLIENT_NODES_FILE"
-show_loon_shadowrocket_qr
 
 CURRENT_STEP="执行真实双向闭环检测"
 run_probe_summary

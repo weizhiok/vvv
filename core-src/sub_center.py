@@ -152,8 +152,8 @@ def hy2_uri_shadowrocket(node):
 
 
 def hy2_uri_v2rayng(node):
-    params=[('obfs','salamander'),('obfs-password',node['obfs_password']),('sni',node['sni']),('insecure','1')]
-    return f"hy2://{quote(node['password'],safe='')}@{node['server']}:{node['port']}?{urlencode(params)}#{quote(node['name'],safe='')}"
+    params=[('obfs','salamander'),('obfs-password',node['obfs_password']),('sni',node['sni']),('pinSHA256',node['pin'])]
+    return f"hysteria2://{quote(node['password'],safe='')}@{node['server']}:{node['port']}/?{urlencode(params)}#{quote(node['name'],safe='')}"
 
 
 def render_qx(nodes):

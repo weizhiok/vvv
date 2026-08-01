@@ -318,7 +318,7 @@ upgrade_system_once() {
   dpkg --configure -a >/dev/null 2>&1 || true
   retry 3 10 apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
     ca-certificates curl unzip tar gzip openssl jq python3 iproute2 procps \
-    tzdata kmod util-linux qrencode
+    tzdata kmod util-linux
   update-ca-certificates >/dev/null 2>&1 || true
   echo "系统核心组件保持 VPS 镜像原版本，仅安装代理所需依赖。"
 }
@@ -759,6 +759,9 @@ generate_certificate() {
     -sha256 -nodes -days 3650 \
     -subj "/CN=${server_name}" \
     -addext "subjectAltName=DNS:${server_name}" \
+    -addext "basicConstraints=critical,CA:FALSE" \
+    -addext "keyUsage=critical,digitalSignature" \
+    -addext "extendedKeyUsage=serverAuth" \
     -keyout "$key" -out "$cert" >/dev/null 2>&1
   chmod 640 "$cert" "$key"
 }
@@ -1213,7 +1216,7 @@ elif kind=="upstream":
 else:
     raise SystemExit(f"unknown client kind: {kind}")
 
-qx_lines=[]; share_links=[]; loon_lines=[]; clash_entries=[]
+qx_lines=[]; share_links=[]; v2rayng_links=[]; loon_lines=[]; clash_entries=[]
 
 if enabled_vless:
     v=state["vless"]
@@ -1243,14 +1246,16 @@ if enabled_vless:
       public-key: {v["reality"]["public_key"]}
       short-id: "{v["reality"]["short_id"]}"
 '''
-    qx_lines.append(qx); share_links.append((name,uri)); loon_lines.append(loon); clash_entries.append(clash)
+    qx_lines.append(qx); share_links.append((name,uri)); v2rayng_links.append((name,uri)); loon_lines.append(loon); clash_entries.append(clash)
 
 if enabled_hy2:
     h=state["hy2"]
     password=h["direct_user"]["password"] if kind=="direct" else relay["hy2"]["client_password"]
     name=protocol_name(base,"HY2")
-    params=[("obfs","salamander"),("obfs-password",h["obfs_password"]),("sni",h["server_name"]),("insecure","1"),("pinSHA256",h["certificate_pin_hex"])]
-    uri=f"hysteria2://{quote(password,safe='')}@{ip}:{port}/?{urlencode(params)}#{quote(name,safe='')}"
+    share_params=[("obfs","salamander"),("obfs-password",h["obfs_password"]),("sni",h["server_name"]),("insecure","1"),("pinSHA256",h["certificate_pin_hex"])]
+    uri=f"hysteria2://{quote(password,safe='')}@{ip}:{port}/?{urlencode(share_params)}#{quote(name,safe='')}"
+    v2_params=[("obfs","salamander"),("obfs-password",h["obfs_password"]),("sni",h["server_name"]),("pinSHA256",h["certificate_pin_hex"])]
+    v2_uri=f"hysteria2://{quote(password,safe='')}@{ip}:{port}/?{urlencode(v2_params)}#{quote(name,safe='')}"
     loon=f"{loon_name(name)} = Hysteria2,{ip},{port},{loon_q(password)},skip-cert-verify=true,sni={h['server_name']},udp=true,fast-open=true,salamander-password={loon_q(h['obfs_password'])}"
     clash=f'''  - name: "{name}"
     type: hysteria2
@@ -1268,11 +1273,11 @@ if enabled_hy2:
       - h3
     udp: true
 '''
-    share_links.append((name,uri)); loon_lines.append(loon); clash_entries.append(clash)
+    share_links.append((name,uri)); v2rayng_links.append((name,v2_uri)); loon_lines.append(loon); clash_entries.append(clash)
 
 qx_text="\n".join(qx_lines)
 share_text="\n".join(uri for _,uri in share_links)
-qr_index="\n".join(f"{name}\t{uri}" for name,uri in share_links)
+v2rayng_text="\n".join(uri for _,uri in v2rayng_links)
 loon_text="\n".join(loon_lines)
 clash_text="proxies:\n"+"".join(clash_entries)
 
@@ -1285,8 +1290,11 @@ if kind=="upstream":
     lines += [f"上游代理：{upstream['protocol_label']} {upstream['host']}:{upstream['port']}","UDP：服务器端拒绝，防止绕过上游出口"]
 if qx_lines: lines += ["","【Quantumult X】",qx_text]
 if share_links:
-    lines += ["","【Loon / Shadowrocket】","Loon 原生配置：",loon_text,"","扫码链接："]
+    lines += ["","【Loon / Shadowrocket】","Loon 原生配置：",loon_text,"","分享链接："]
     for name,uri in share_links: lines += [f"[{name}]",uri]
+if v2rayng_links:
+    lines += ["","【v2rayNG 2.2.6+】"]
+    for name,uri in v2rayng_links: lines += [f"[{name}]",uri]
 if clash_entries: lines += ["","【Clash Verge Rev / Mihomo】",clash_text]
 summary="\n".join(lines).rstrip()+"\n"
 
@@ -1294,10 +1302,9 @@ summary="\n".join(lines).rstrip()+"\n"
 (out/"Quantumult-X.conf").write_text((qx_text+"\n") if qx_text else "",encoding="utf-8")
 (out/"Loon.conf").write_text((loon_text+"\n") if loon_text else "",encoding="utf-8")
 (out/"Loon-Shadowrocket.txt").write_text((share_text+"\n") if share_text else "",encoding="utf-8")
-(out/"Loon-Shadowrocket-二维码索引.tsv").write_text((qr_index+"\n") if qr_index else "",encoding="utf-8")
 # 同时保留旧文件名，便于已有运维习惯和第三方工具读取。
 (out/"Shadowrocket.txt").write_text((share_text+"\n") if share_text else "",encoding="utf-8")
-(out/"Shadowrocket-二维码索引.tsv").write_text((qr_index+"\n") if qr_index else "",encoding="utf-8")
+(out/"v2rayNG.txt").write_text((v2rayng_text+"\n") if v2rayng_text else "",encoding="utf-8")
 (out/"Clash-Verge-Rev.yaml").write_text(clash_text,encoding="utf-8")
 print(summary,end="")
 PY_CLIENTS
@@ -1305,28 +1312,11 @@ PY_CLIENTS
   chmod 600 "$out_dir"/*
 }
 
-show_loon_shadowrocket_qr() {
-  local index_file="$1" name uri
-  [[ -s "$index_file" ]] || return 0
-  echo
-  echo "================ Loon / Shadowrocket 二维码 ================"
-  while IFS=$'\t' read -r name uri; do
-    [[ -n "$uri" ]] || continue
-    echo
-    echo "【${name}】"
-    echo "$uri"
-    echo
-    qrencode -t ANSIUTF8 -m 1 "$uri"
-  done < "$index_file"
-  echo "============================================================="
-}
-
 generate_direct_client_files() {
   local dir="/root/日本VPS-直连客户端配置"
   generate_client_files "$STATE_FILE" "" "$dir" direct
   cp -f "$dir/客户端节点.txt" /root/日本VPS-客户端节点.txt
   chmod 600 /root/日本VPS-客户端节点.txt
-  show_loon_shadowrocket_qr "$dir/Loon-Shadowrocket-二维码索引.tsv"
 }
 
 allocate_test_port() {
@@ -1842,7 +1832,6 @@ show_client_config() {
   echo "==================== 客户端配置 ===================="
   cat "$dir/客户端节点.txt"
   echo "===================================================="
-  show_loon_shadowrocket_qr "$dir/Loon-Shadowrocket-二维码索引.tsv"
   echo "配置目录：$dir"
 }
 
@@ -1853,7 +1842,6 @@ show_upstream_client_config() {
   echo "==================== 客户端配置 ===================="
   cat "$dir/客户端节点.txt"
   echo "===================================================="
-  show_loon_shadowrocket_qr "$dir/Loon-Shadowrocket-二维码索引.tsv"
   echo "配置目录：$dir"
 }
 
@@ -2133,16 +2121,6 @@ EOF_VPS_CMD
   cat > /usr/local/sbin/jp-show-nodes <<'EOF_SHOW'
 #!/usr/bin/env bash
 cat /root/日本VPS-客户端节点.txt
-if [[ -s /root/日本VPS-直连客户端配置/Loon-Shadowrocket-二维码索引.tsv ]]; then
-  while IFS=$'\t' read -r name uri; do
-    [[ -n "$uri" ]] || continue
-    echo
-    echo "【${name}】"
-    echo "$uri"
-    echo
-    qrencode -t ANSIUTF8 -m 1 "$uri"
-  done < /root/日本VPS-直连客户端配置/Loon-Shadowrocket-二维码索引.tsv
-fi
 EOF_SHOW
   chmod 700 /usr/local/sbin/jp-show-nodes
 }
@@ -2150,7 +2128,7 @@ EOF_SHOW
 check_runtime_environment() {
   [[ -f "$STATE_FILE" ]] || fail "尚未完成日本 VPS 初始化。"
   jq -e '.schema==3 and .role=="japan-hub" and (.relays|type=="array") and ((.upstream_relays // [])|type=="array")' "$STATE_FILE" >/dev/null || fail "JPR3 状态文件损坏。"
-  command -v qrencode >/dev/null || fail "缺少 qrencode。"
+  command -v  >/dev/null || fail "缺少 。"
   if mode_has_vless; then
     [[ -x "$XRAY" && -f "$XRAY_CFG" ]] || fail "VLESS 已启用，但 Xray 文件不完整。"
     systemctl is-active --quiet xray || { systemctl restart xray >/dev/null 2>&1 || true; sleep 2; }
@@ -2204,7 +2182,7 @@ bootstrap() {
   fi
   CURRENT_STEP="生成并启动代理服务"; log "$CURRENT_STEP"; activate_initial_state_with_fallback
   CURRENT_STEP="安装 vps 管理命令"; log "$CURRENT_STEP"; install_shortcuts
-  CURRENT_STEP="生成日本直连节点和二维码"; log "$CURRENT_STEP"; generate_direct_client_files
+  CURRENT_STEP="生成日本直连节点"; log "$CURRENT_STEP"; generate_direct_client_files
 
   apt-get clean
   rm -rf /var/lib/apt/lists/*
@@ -2218,7 +2196,7 @@ bootstrap() {
   mode_has_hy2 && echo "Hysteria 2：UDP/$(jq -r '.listen_port' "$STATE_FILE")，sing-box=$(systemctl is-active sing-box)"
   echo "时区：Asia/Shanghai"
   systemctl is-active --quiet daily-reboot.timer 2>/dev/null && echo "每天北京时间 06:00 自动重启" || echo "自动重启：当前环境未启用"
-  echo "以后重新显示日本直连节点与二维码：jp-show-nodes"
+  echo "以后重新显示日本直连节点：jp-show-nodes"
   echo "如需新建或管理中转线路：vps"
   echo "本次没有立即重启服务器，只重启了启用的代理服务。"
 }

@@ -30,11 +30,11 @@ def load_sub_center():
 def test_menu_and_front_loaded_parameters():
     text = read('core-src/bootstrap.sh')
     labels = [
-        '1. 安装订阅中心（含自身代理）',
-        '2. 安装中转主机（含自身代理）',
-        '3. 安装中转副机',
-        '4. 安装直连代理',
-        '5. 以上全部安装（不含副机）',
+        '1. 安装订阅中心+中转主机（含自身代理）',
+        '2. 仅安装订阅中心（含自身代理）',
+        '3. 仅安装中转主机（含自身代理）',
+        '4. 仅安装中转副机（通过主机代理）',
+        '5. 仅安装直连代理',
         '0. 退出',
     ]
     positions = [text.index(label) for label in labels]
@@ -43,8 +43,8 @@ def test_menu_and_front_loaded_parameters():
         '========== 安装参数（全部前置设置） ==========',
         '请输入代理监听端口 [默认 443]',
         '请输入 VLESS + REALITY 伪装域名 [默认 www.softbank.jp]',
-        '请输入订阅域名（直接回车使用本机 IP）',
-        '请输入订阅服务端口 [默认 8443]',
+        '请输入订阅 HTTPS 域名（必须已解析到本机）',
+        '请输入订阅 HTTPS 端口 [默认 8443]',
         '请输入订阅中心接入码',
         '请输入完整 JPR3 对接密钥',
         '========== 安装参数总览 ==========',
@@ -58,8 +58,8 @@ def test_menu_and_front_loaded_parameters():
     execute = text.index('install_host', execute)
     before_install = text[collect:execute]
     require('read -r' not in text[text.index('show_parameter_summary\n', collect) if 'show_parameter_summary\n' in text[collect:] else collect:execute], '参数总览后仍存在确认输入')
-    require('register_sync.sh" center-relay "$code"' in text, 'All in One 没有映射为 center-relay 同步角色')
-    require('register_sync.sh" all ' not in text, '仍使用 sync_agent 不支持的 all 角色')
+    require('write_roles true true false true center-relay' in text and 'register_sync.sh" center-relay "$code"' in text, '菜单 1 没有安装订阅中心+中转主机')
+    require('write_roles true true false true all' not in text, '仍保留旧 all 主角色')
     require('register_sync.sh" landing "$code"' in text, '中转副机没有使用 JPR3 中的接入码自动注册')
 
 
@@ -109,18 +109,19 @@ def test_subscription_renderers():
     require('salamander-password="' not in loon, 'Loon HY2 混淆密码仍带双引号')
     shadowrocket_text = base64.b64decode(shadowrocket).decode('utf-8')
     require('hysteria2://' in shadowrocket_text, 'Shadowrocket 缺少 Hysteria 2 链接')
-    hy2 = next((line for line in v2_lines if line.startswith('hy2://')), '')
-    require(hy2, 'v2rayNG 没有独立 hy2:// 链接')
-    require('pinSHA256' not in hy2, 'v2rayNG HY2 不应携带 pinSHA256')
-    for token in ('sni=', 'insecure=1', 'obfs=salamander', 'obfs-password='):
+    hy2 = next((line for line in v2_lines if line.startswith('hysteria2://')), '')
+    require(hy2, 'v2rayNG 没有独立 hysteria2:// 链接')
+    require('pinSHA256=' in hy2, 'v2rayNG HY2 缺少 pinSHA256 证书指纹')
+    require('insecure=' not in hy2, 'v2rayNG 2.2.6 HY2 不应继续依赖 insecure')
+    for token in ('sni=', 'pinSHA256=', 'obfs=salamander', 'obfs-password='):
         require(token in hy2, f'v2rayNG HY2 缺少 {token}')
 
     source = read('core-src/sub_center.py')
     require("SHORT_PATHS = {'c': 'clash', 'qx': 'quantumultx', 'ln': 'loon', 'sr': 'shadowrocket', 'v2': 'v2rayng'}" in source, '订阅短路径集合不正确')
     require("{'c': 'clash', 'qx': 'quantumultx', 'ln': 'loon', 'sr': 'shadowrocket', 'v2': 'v2rayng'}" in source, '短路径渲染映射不正确')
     center = read('core-src/center_install.sh')
-    require("Shadowrocket|${base}/r/${token}/sr" in center and "v2rayNG|${base}/r/${token}/v2" in center, '订阅二维码应只显示 Shadowrocket 和 v2rayNG')
-    require("Quantumult X|${base}/r/${token}/qx" not in center and "Loon|${base}/r/${token}/ln" not in center, 'QX 或 Loon 不应生成订阅二维码')
+    require('base_url="https://${domain}:${public_port}"' in center, '订阅中心没有强制 HTTPS')
+    require('http://${public_ip}' not in center and 'mode=ip' not in center, '仍保留明文 IP 订阅模式')
 
 
 def test_backup_policy():
@@ -169,12 +170,40 @@ def test_jpr3_and_slot_architecture():
     require('.schema==3' in landing and '.type=="jp-relay-landing"' in landing and 'actual_checksum' in landing and 'expected_checksum' in landing, '落地脚本没有严格校验 JPR3 schema、类型和摘要')
 
 
-def test_qr_helper():
-    qr = read('core-src/qr_helper.sh')
-    require('qrencode -t ANSIUTF8 -m 1' in qr, 'SSH 二维码没有启用终端白边')
-    require("\\033[47m%*s\\033[0m" in qr, '二维码顶部没有额外白边')
-    require('download' not in qr.lower(), '二维码辅助脚本包含不需要的文件下载逻辑')
+def test_no_qr_output():
+    files = [
+        'vvv-install.sh', 'core-src/bootstrap.sh', 'core-src/host.sh', 'core-src/landing.sh',
+        'core-src/center_install.sh', 'core-src/vvv_manager.sh', 'src/prepare.py',
+        'tests/final_runtime_validation.sh', '.github/workflows/validate.yml', 'README.md',
+    ]
+    text = '\n'.join(read(path) for path in files)
+    for token in ('qrencode', 'qr_helper'):
+        require(token not in text, f'仍保留二维码实现：{token}')
+    implementation = '\n'.join(read(path) for path in (
+        'vvv-install.sh', 'core-src/bootstrap.sh', 'core-src/host.sh', 'core-src/landing.sh',
+        'core-src/center_install.sh', 'core-src/vvv_manager.sh', 'src/prepare.py',
+    ))
+    require('二维码' not in implementation, '生产脚本仍保留二维码菜单、文件或提示')
+    require(not (ROOT / 'core-src/qr_helper.sh').exists(), '二维码辅助文件仍存在')
 
+
+def test_https_and_fresh_install_only():
+    installer = read('vvv-install.sh')
+    bootstrap = read('core-src/bootstrap.sh')
+    center = read('core-src/center_install.sh')
+    manager = read('core-src/vvv_manager.sh')
+    require('当前版本只支持全新安装' in installer, '网络入口没有拒绝旧安装状态')
+    require('订阅中心只提供 HTTPS' in bootstrap and '域名不能为空' in bootstrap, '订阅域名仍可留空')
+    require('mode=domain' in center and 'mode=ip' not in center, '订阅中心没有锁定 HTTPS 域名模式')
+    require('base_url="https://${domain}:${public_port}"' in center, '订阅中心基础地址不是 HTTPS')
+    require('检查并升级 VVV' not in manager and 'update_vvv' not in manager, '仍保留原地升级兼容入口')
+    require('sync_role' not in manager, '仍保留旧 all 角色兼容映射')
+
+
+def test_hy2_leaf_certificate():
+    host = read('core-src/host.sh')
+    for token in ('basicConstraints=critical,CA:FALSE', 'keyUsage=critical,digitalSignature', 'extendedKeyUsage=serverAuth'):
+        require(token in host, f'HY2 证书缺少叶子证书约束：{token}')
 
 def test_debian13_only():
     sources = {
@@ -211,7 +240,9 @@ def main():
         test_subscription_renderers,
         test_backup_policy,
         test_jpr3_and_slot_architecture,
-        test_qr_helper,
+        test_no_qr_output,
+        test_https_and_fresh_install_only,
+        test_hy2_leaf_certificate,
         test_debian13_only,
         test_no_obsolete_role_terms,
     ]

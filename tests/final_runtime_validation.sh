@@ -31,7 +31,6 @@ bash -n "$ROOT/core-src/center_install.sh"
 bash -n "$ROOT/core-src/register_sync.sh"
 bash -n "$ROOT/core-src/vvv_manager.sh"
 bash -n "$ROOT/core-src/rclone_manager.sh"
-bash -n "$ROOT/core-src/qr_helper.sh"
 sh -n "$ROOT/core-src/landing.sh"
 
 log 'Render final installers'
@@ -60,7 +59,10 @@ HY2_LIMIT_MBPS=50
 log 'Build fixed main and isolated slot fixtures'
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 -nodes -days 7 \
   -subj '/CN=jp-hy2.jp-relay.local' -addext 'subjectAltName=DNS:jp-hy2.jp-relay.local' \
+  -addext 'basicConstraints=critical,CA:FALSE' -addext 'keyUsage=critical,digitalSignature' \
+  -addext 'extendedKeyUsage=serverAuth' \
   -keyout "$WORK/server.key" -out "$WORK/server.crt" >/dev/null 2>&1
+openssl x509 -in "$WORK/server.crt" -noout -text | grep -q 'CA:FALSE'
 parse_x25519_keys "$($XRAY x25519)"
 export VVV_AUDIT_REALITY_PRIVATE="$GENERATED_PRIVATE_KEY"
 export VVV_AUDIT_REALITY_PUBLIC="$GENERATED_PUBLIC_KEY"
@@ -82,6 +84,13 @@ build_vless_slot_configs "$WORK/state-empty.json" "$WORK/vless-empty"
 build_vless_slot_configs "$WORK/state-active.json" "$WORK/vless-active"
 build_hy2_slot_configs "$WORK/state-empty.json" "$WORK/hy2-empty"
 build_hy2_slot_configs "$WORK/state-active.json" "$WORK/hy2-active"
+mkdir -p "$WORK/client-files"
+generate_client_files "$WORK/state-active.json" "" "$WORK/client-files" direct >/dev/null
+[[ -s "$WORK/client-files/v2rayNG.txt" ]]
+grep -q '^hysteria2://' "$WORK/client-files/v2rayNG.txt"
+grep -q 'pinSHA256=' "$WORK/client-files/v2rayNG.txt"
+! grep -q 'insecure=' "$WORK/client-files/v2rayNG.txt"
+! find "$WORK/client-files" -type f -name '*二维码*' | grep -q .
 [[ "$(find "$WORK/vless-empty" -type f | wc -l)" -eq 0 ]]
 [[ "$(find "$WORK/hy2-empty" -type f | wc -l)" -eq 0 ]]
 [[ "$(find "$WORK/vless-active" -name '*.json' | wc -l)" -eq 2 ]]
@@ -146,12 +155,6 @@ sleep 3
 kill -0 "$V1_NEW_PID"; kill -0 "$H1_NEW_PID"
 [[ "$(awk '{print $22}' "/proc/${XRAY_MAIN_PID}/stat")" == "$XRAY_START" ]]
 [[ "$(awk '{print $22}' "/proc/${SING_MAIN_PID}/stat")" == "$SING_START" ]]
-
-log 'Verify terminal QR renderer'
-source "$ROOT/core-src/qr_helper.sh"
-vvv_print_qr 'https://example.invalid/r/audit/sr' > "$WORK/qr.txt"
-[[ "$(wc -l < "$WORK/qr.txt")" -gt 10 ]]
-grep -q $'\033\[47m' "$WORK/qr.txt"
 
 log 'Final result'
 echo "main_xray_pid=${XRAY_MAIN_PID} start=${XRAY_START}"
