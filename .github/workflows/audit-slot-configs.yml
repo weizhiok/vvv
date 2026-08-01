@@ -19,14 +19,13 @@ jobs:
           mkdir -p validation /tmp/vvv-slot-audit
           {
             set -Eeuxo pipefail
-            python3 -m py_compile tools/fix_transform_replacement_escapes.py
-            python3 tools/fix_transform_replacement_escapes.py
-            python3 -m py_compile src/prepare.py
+            python3 -m py_compile tools/retire_deleted_slot_credentials.py
+            python3 tools/retire_deleted_slot_credentials.py
+            python3 -m py_compile src/prepare.py tools/extract_manager_library.py tools/build_slot_audit_fixture.py
             cp core-src/host.sh /tmp/host.sh
             cp core-src/landing.sh /tmp/landing.sh
             cp core-src/center_install.sh /tmp/center.sh
             python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
-            python3 -m py_compile tools/extract_manager_library.py tools/build_slot_audit_fixture.py
             python3 tools/extract_manager_library.py /tmp/host.sh /tmp/jp-relay-manager-lib.sh
             bash -n /tmp/jp-relay-manager-lib.sh
 
@@ -74,26 +73,34 @@ jobs:
             [[ "$(find /tmp/vvv-slot-audit/hy2-empty -type f | wc -l)" -eq 0 ]]
             [[ "$(find /tmp/vvv-slot-audit/vless-active -name '*.json' | wc -l)" -eq 2 ]]
             [[ "$(find /tmp/vvv-slot-audit/hy2-active -name '*.json' | wc -l)" -eq 1 ]]
-            [[ -f /tmp/vvv-slot-audit/vless-active/v01.json ]]
-            [[ -f /tmp/vvv-slot-audit/vless-active/v02.json ]]
-            [[ -f /tmp/vvv-slot-audit/hy2-active/h01.json ]]
 
             /tmp/xray run -test -format=json -config /tmp/vvv-slot-audit/xray-active.json
-            for cfg in /tmp/vvv-slot-audit/vless-active/*.json; do
-              /tmp/xray run -test -format=json -config "$cfg"
-            done
+            for cfg in /tmp/vvv-slot-audit/vless-active/*.json; do /tmp/xray run -test -format=json -config "$cfg"; done
             /tmp/sing-box check -c /tmp/vvv-slot-audit/sing-active.json
-            for cfg in /tmp/vvv-slot-audit/hy2-active/*.json; do
-              /tmp/sing-box check -c "$cfg"
-            done
+            for cfg in /tmp/vvv-slot-audit/hy2-active/*.json; do /tmp/sing-box check -c "$cfg"; done
+
+            jq '.relays=[] | .upstream_relays=[]' /tmp/vvv-slot-audit/state-active.json > /tmp/vvv-slot-audit/state-deleted.json
+            release_orphaned_vless_slots /tmp/vvv-slot-audit/state-deleted.json
+            release_orphaned_hy2_slots /tmp/vvv-slot-audit/state-deleted.json
+            [[ "$(jq -r '.vless.reserve_users[0].assigned_id' /tmp/vvv-slot-audit/state-deleted.json)" == relay-audit ]]
+            [[ "$(jq -r '.vless.reserve_users[1].assigned_id' /tmp/vvv-slot-audit/state-deleted.json)" == upstream-audit ]]
+            [[ "$(jq -r '.hy2.reserve_users[0].assigned_id' /tmp/vvv-slot-audit/state-deleted.json)" == relay-audit ]]
+            STATE_FILE=/tmp/vvv-slot-audit/state-deleted.json
+            allocate_vless_slot
+            [[ "$ALLOC_VLESS_SLOT" == v03 ]]
+            allocate_hy2_slot
+            [[ "$ALLOC_HY2_SLOT" == h02 ]]
+            mkdir -p /tmp/vvv-slot-audit/vless-deleted /tmp/vvv-slot-audit/hy2-deleted
+            build_vless_slot_configs "$STATE_FILE" /tmp/vvv-slot-audit/vless-deleted
+            build_hy2_slot_configs "$STATE_FILE" /tmp/vvv-slot-audit/hy2-deleted
+            [[ "$(find /tmp/vvv-slot-audit/vless-deleted -type f | wc -l)" -eq 0 ]]
+            [[ "$(find /tmp/vvv-slot-audit/hy2-deleted -type f | wc -l)" -eq 0 ]]
 
             printf 'xray_version=%s\n' "$XRAY_VERSION"
             printf 'sing_box_version=%s\n' "$SING_VERSION"
             sha256sum /tmp/vvv-slot-audit/xray-empty.json /tmp/vvv-slot-audit/xray-active.json
             sha256sum /tmp/vvv-slot-audit/sing-empty.json /tmp/vvv-slot-audit/sing-active.json
-            jq -c '{inbounds:(.inbounds|length),outbounds:(.outbounds|length),rules:(.routing.rules|length)}' /tmp/vvv-slot-audit/xray-active.json
-            jq -c '{inbounds:(.inbounds|length),outbounds:(.outbounds|length),rules:(.route.rules|length)}' /tmp/vvv-slot-audit/sing-active.json
-            find /tmp/vvv-slot-audit/vless-active /tmp/vvv-slot-audit/hy2-active -maxdepth 1 -type f -printf '%p\n' | sort
+            echo 'deleted credentials retired; next slots: v03 and h02'
           } > validation/slot-config-audit.log 2>&1
       - name: Publish audit
         if: always()
@@ -108,9 +115,9 @@ jobs:
           git add validation/slot-config-audit.log
           if [[ "$AUDIT_OUTCOME" == success ]]; then
             git add src/prepare.py
-            git commit -m "Fix generated slot config escaping and validate cores"
+            git commit -m "Retire deleted relay credentials and validate cores"
           else
-            git commit -m "Record isolated slot configuration audit failure"
+            git commit -m "Record retired slot credential audit failure"
           fi
           git push
           [[ "$AUDIT_OUTCOME" == success ]]
