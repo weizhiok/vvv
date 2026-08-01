@@ -1,1 +1,1 @@
-finalize-production-ssh-fix=1
+finalize-production-ssh-fix=2
