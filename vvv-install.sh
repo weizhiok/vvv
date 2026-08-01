@@ -12,7 +12,7 @@ if ! command -v curl >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; th
 fi
 nonce="$(date +%s)-$$"; mkdir -p "$TMP/app"
 echo "正在下载 VVV 普通源码……"
-curl -fsSL --retry 5 --retry-all-errors "$RAW/src/bootstrap.sh?v=$nonce" -o "$TMP/app/bootstrap.sh" || fail "下载 bootstrap.sh 失败。"
+curl -fsSL --retry 5 --retry-all-errors "$RAW/core-src/bootstrap.sh?v=$nonce" -o "$TMP/app/bootstrap.sh" || fail "下载 bootstrap.sh 失败。"
 curl -fsSL --retry 5 --retry-all-errors "$RAW/src/prepare.py?v=$nonce" -o "$TMP/prepare.py" || fail "下载 prepare.py 失败。"
 files=(host.sh landing.sh center_install.sh register_sync.sh vvv_manager.sh sub_center.py sync_agent.py backup_manager.py rclone_manager.sh qr_helper.sh)
 for file in "${files[@]}"; do
