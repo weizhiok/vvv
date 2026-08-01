@@ -1,0 +1,17 @@
+name: Publish production SSH fixes
+on:
+  push:
+    paths:
+      - '.github/workflows/publish-production-ssh-fix.yml'
+concurrency:
+  group: publish-production-ssh-fix-v2
+  cancel-in-progress: true
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tools/publish_production_ssh_fix.sh
