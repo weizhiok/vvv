@@ -53,7 +53,6 @@ grep -q 'basicConstraints=critical,CA:FALSE' "$work/host.sh"
 rm -rf "$work"
 stage stage-3-render
 
-rm -f validation/final-production-stage.txt validation/production-commit-started.txt validation/ssh-fix-publisher-stage.txt direct-publisher-started.txt ssh-fix-publisher-started.txt ssh-fix-actions-probe.txt
-git add README.md vvv-install.sh core-src src tests .github/workflows/validate.yml validation
+git add README.md vvv-install.sh core-src src tests .github/workflows/validate.yml
 git commit -m 'Require HTTPS, fix v2rayNG HY2, remove QR, and reorder roles'
 git push
