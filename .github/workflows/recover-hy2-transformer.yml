@@ -22,19 +22,8 @@ jobs:
           {
             set -Eeuxo pipefail
             git ls-tree -r --name-only HEAD .staging-refactor
-            cat .staging-refactor/prepare.hy2.part* | tr -d '\r\n\t ' > /tmp/prepare-hy2.b64
-            python3 - /tmp/prepare-hy2.b64 /tmp/prepare-hy2.gz <<'PY'
-          import base64,sys
-          from pathlib import Path
-          raw=Path(sys.argv[1]).read_text(encoding='utf-8-sig')
-          clean=''.join(raw.split())
-          print(f'chars={len(clean)} mod4={len(clean)%4}')
-          data=base64.b64decode(clean,validate=True)
-          Path(sys.argv[2]).write_bytes(data)
-          print(f'bytes={len(data)}')
-          PY
-            gzip -t /tmp/prepare-hy2.gz
-            gzip -dc /tmp/prepare-hy2.gz > /tmp/recovered-prepare.py
+            python3 -m py_compile tools/recover_hy2_transformer.py
+            python3 tools/recover_hy2_transformer.py
             python3 -m py_compile /tmp/recovered-prepare.py
             grep -n 'build_hy2_slot_configs\|sync_hy2_slot_services\|vvv-hy2-slot@' /tmp/recovered-prepare.py | head -30
             sha256sum /tmp/recovered-prepare.py
