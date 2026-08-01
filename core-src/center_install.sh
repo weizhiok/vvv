@@ -56,9 +56,6 @@ os.chmod(tmp,0o600); os.replace(tmp,path)
 PY
 printf '%s\n' '{"hosts":[]}' > "$DATA_DIR/registry.json"; chmod 600 "$DATA_DIR/registry.json"
 rm -f "$CFG_DIR/cloud.json" "$CFG_DIR/rclone.conf"
-systemctl disable --now vvv-backup-pull.timer vvv-backup-pull.service >/dev/null 2>&1 || true
-rm -f /etc/systemd/system/vvv-backup-pull.timer /etc/systemd/system/vvv-backup-pull.service
-rm -rf /var/backups/vvv-remote
 cat > /etc/systemd/system/vvv-sub.service <<'UNIT'
 [Unit]
 Description=VVV Subscription Center
@@ -187,6 +184,6 @@ case "${1:-menu}" in
 esac
 SH
 chmod 700 /usr/local/sbin/vvv-center
-python3 /usr/local/lib/vvv/backup_manager.py create initial-center-install --force >/dev/null
+python3 /usr/local/lib/vvv/backup_manager.py create first-install --force >/dev/null
 printf '\n订阅中心安装成功。\n主机接入码：%s\n' "$registration_code"
 /usr/local/sbin/vvv-center qr

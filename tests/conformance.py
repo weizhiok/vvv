@@ -119,8 +119,8 @@ def test_subscription_renderers():
     require("SHORT_PATHS = {'c': 'clash', 'qx': 'quantumultx', 'ln': 'loon', 'sr': 'shadowrocket', 'v2': 'v2rayng'}" in source, '订阅短路径集合不正确')
     require("{'c': 'clash', 'qx': 'quantumultx', 'ln': 'loon', 'sr': 'shadowrocket', 'v2': 'v2rayng'}" in source, '短路径渲染映射不正确')
     center = read('core-src/center_install.sh')
-    require('for client in sr v2' in center, '订阅二维码应只显示 Shadowrocket 和 v2rayNG')
-    require('for client in qx ln' not in center, 'QX 或 Loon 不应生成订阅二维码')
+    require("Shadowrocket|${base}/r/${token}/sr" in center and "v2rayNG|${base}/r/${token}/v2" in center, '订阅二维码应只显示 Shadowrocket 和 v2rayNG')
+    require("Quantumult X|${base}/r/${token}/qx" not in center and "Loon|${base}/r/${token}/ln" not in center, 'QX 或 Loon 不应生成订阅二维码')
 
 
 def test_backup_policy():
@@ -137,7 +137,7 @@ def test_backup_policy():
         require(token not in production, f'仍保留旧远程备份逻辑：{token}')
     require('backup.timer' not in production and 'backup-pull.timer' not in production, '仍存在备份定时器')
     require('立即生成本地备份' not in center and '手动本地备份' not in center, '仍存在手动备份菜单')
-    require("'enabled': False" in center, '云备份默认值不是关闭')
+    require('rm -f "$CFG_DIR/cloud.json" "$CFG_DIR/rclone.conf"' in center, '云备份默认状态不是关闭')
     require('rclone.org/install.sh' not in center, '订阅中心首次安装不应安装 rclone')
     require('first-install' in center, '首次安装没有自动备份')
     for token in ('before-line-change', 'after-line-change'):
