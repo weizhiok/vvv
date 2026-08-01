@@ -1,0 +1,60 @@
+name: Apply Debian 13 only sources
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-debian13-only.yml'
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply Debian 13 cleanup
+        id: validate
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p validation
+          {
+            set -Eeuxo pipefail
+            python3 -m py_compile tools/enforce_debian13_only.py
+            python3 tools/enforce_debian13_only.py
+            bash -n core-src/host.sh
+            sh -n core-src/landing.sh
+            bash -n core-src/bootstrap.sh
+            bash -n vvv-install.sh
+            grep -q '仅支持 Debian 13' core-src/host.sh
+            grep -q '仅支持 Debian 13' core-src/landing.sh
+            grep -q 'VVV 仅支持 Debian 13' core-src/bootstrap.sh
+            grep -q 'VVV 仅支持 Debian 13' vvv-install.sh
+            ! grep -Eqi 'Debian 12|Alpine|OpenRC|rc-service|rc-update|/etc/init.d|apk (add|update|upgrade)' core-src/landing.sh
+            cp core-src/host.sh /tmp/host.sh
+            cp core-src/landing.sh /tmp/landing.sh
+            cp core-src/center_install.sh /tmp/center.sh
+            python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
+            bash -n /tmp/host.sh
+            sh -n /tmp/landing.sh
+            bash -n /tmp/center.sh
+            ! grep -Eqi 'Debian 12|Alpine|OpenRC|rc-service|rc-update|/etc/init.d|apk (add|update|upgrade)' /tmp/landing.sh
+          } > validation/debian13-only.log 2>&1
+      - name: Publish result
+        if: always()
+        shell: bash
+        env:
+          VALIDATE_OUTCOME: ${{ steps.validate.outcome }}
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          printf 'status=%s\n' "$VALIDATE_OUTCOME" >> validation/debian13-only.log
+          git add validation/debian13-only.log
+          if [[ "$VALIDATE_OUTCOME" == success ]]; then
+            git add core-src/host.sh core-src/landing.sh core-src/bootstrap.sh vvv-install.sh
+            git commit -m 'Support Debian 13 only'
+          else
+            git commit -m 'Record Debian 13 source cleanup failure'
+          fi
+          git push
+          [[ "$VALIDATE_OUTCOME" == success ]]
