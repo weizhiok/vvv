@@ -172,7 +172,7 @@ def test_jpr3_and_slot_architecture():
 def test_qr_helper():
     qr = read('core-src/qr_helper.sh')
     require('qrencode -t ANSIUTF8 -m 1' in qr, 'SSH 二维码没有启用终端白边')
-    require("printf '\033[47m" in qr, '二维码顶部没有额外白边')
+    require("\\033[47m%*s\\033[0m" in qr, '二维码顶部没有额外白边')
     require('download' not in qr.lower(), '二维码辅助脚本包含不需要的文件下载逻辑')
 
 
