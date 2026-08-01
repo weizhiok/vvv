@@ -1,0 +1,14 @@
+name: Run final SSH fix
+on:
+  push:
+    paths:
+      - '.github/workflows/run-final-ssh-fix.yml'
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tools/run_final_ssh_fix.sh
