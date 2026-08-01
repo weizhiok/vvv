@@ -1,4 +1,5 @@
-+ python3 -
++ python3 -m py_compile tools/decode_staged_hy2.py
++ python3 tools/decode_staged_hy2.py
 static: chars=2616 bytes=1960
-runtime Base64 decode failed: Invalid base64-encoded string: number of data characters (4113) cannot be 1 more than a multiple of 4; length=4115; bad=[]
+runtime Base64 decode failed: Invalid base64-encoded string: number of data characters (4113) cannot be 1 more than a multiple of 4; length=4115; invalid=[]
 status=failure
