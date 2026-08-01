@@ -1,0 +1,267 @@
+=== branches ===
+* main
+  remotes/origin/final-v2
+  remotes/origin/install
+  remotes/origin/install-v2
+  remotes/origin/main
+  remotes/origin/patch-v2
+  remotes/origin/release-v2
+  remotes/origin/staging-v2
+  remotes/origin/v2-work
+=== root ===
+./.staging-refactor/patch-hy2-runtime.gz.b64
+./.staging-refactor/patch-hy2-static.gz.b64
+./.staging-refactor/patch_host.py.gz.b64
+./.staging-refactor/prepare.good.part00
+./.staging-refactor/prepare.good.part01
+./.staging-refactor/prepare.good.part02
+./.staging-refactor/prepare.good.part03
+./.staging-refactor/prepare.good.part04
+./.staging-refactor/prepare.gz.part00
+./.staging-refactor/prepare.gz.part01
+./.staging-refactor/prepare.gz.part02
+./.staging-refactor/prepare.gz.part03
+./.staging-refactor/prepare.gz.part04
+./.staging-refactor/prepare.hy2.part00
+./.staging-refactor/prepare.hy2.part01
+./.staging-refactor/prepare.py.b64
+./.staging-refactor/prepare.v2.gz.part00
+./.staging-refactor/prepare.v2.gz.part01
+./.staging-refactor/prepare.v2.gz.part02
+./.staging-refactor/prepare.v2.gz.part03
+./.staging-refactor/prepare.v2.gz.part04
+./.staging-refactor/prepare.v3.gz.part030
+./.staging-refactor/prepare.v3.gz.part031
+./.staging-refactor/qr_helper.sh.b64
+./.staging-refactor/sources.tgz.b64
+./README.md
+./bundle/vvv-bundle.sha256
+./core-src/backup_manager.py
+./core-src/bootstrap.sh
+./core-src/center_install.sh
+./core-src/host.sh
+./core-src/landing.sh
+./core-src/qr_helper.sh
+./core-src/rclone_manager.sh
+./core-src/register_sync.sh
+./core-src/sub_center.py
+./core-src/sync_agent.py
+./core-src/validation.txt
+./core-src/vvv_manager.sh
+./install.sh
+./install/vvv-install.sh
+./payload/vvv.part01
+./payload/vvv.part02
+./payload/vvv.part03
+./payload/vvv.part04
+./payload/vvv.part05
+./payload/vvv.part06
+./payload/vvv.part07
+./payload/vvv.part08
+./payload/vvv.part09
+./payload/vvv.part10
+./payload/vvv.part11
+./payload/vvv.part12
+./payload/vvv.part13
+./payload/vvv.part14
+./payload/vvv.part15
+./payload/vvv.part16
+./sha256.txt
+./src-v2/validation.txt
+./src/bootstrap.sh
+./src/prepare.py
+./tests/final_runtime_validation.sh
+./tools/add_pid_messages_to_vless_patch.py
+./tools/build_slot_audit_fixture.py
+./tools/decode_hy2_static.py
+./tools/decode_staged_hy2.py
+./tools/extract_manager_library.py
+./tools/fix_transform_replacement_escapes.py
+./tools/index_shell_functions.py
+./tools/patch_hy2_slots_clean.py
+./tools/patch_vless_slots.py
+./tools/recover_hy2_transformer.py
+./tools/repair_patch_anchor.py
+./tools/retire_deleted_slot_credentials.py
+./tools/scan_staged_transformers.py
+./v2/CHANGELOG.md
+./v2/modules.b64
+./validation/actions-probe.txt
+./validation/apply-hy2-v2.log
+./validation/apply-vless-v2.log
+./validation/apt-lock.txt
+./validation/caddy-permission.txt
+./validation/compressed-transformer-diagnostic.txt
+./validation/compressed-transformer-text.txt
+./validation/final-install-fix.txt
+./validation/final-runtime-failure.txt
+./validation/final-runtime-patch-failure.txt
+./validation/final-slot-render.log
+./validation/final-slot-transform.log
+./validation/fix-apply-vless.txt
+./validation/generated-center-final-slots.sh
+./validation/generated-host-current.sh
+./validation/generated-host-final-slots.sh
+./validation/generated-host-functions.txt
+./validation/generated-landing-final-slots.sh
+./validation/hy2-static-render.log
+./validation/ordinary-source.txt
+./validation/prepare-history-scan.log
+./validation/prepare-sections.txt
+./validation/recover-hy2-transformer.log
+./validation/refactor-diagnostic.txt
+./validation/refactor-good-diagnostic.txt
+./validation/refactor-repaired-diagnostic.txt
+./validation/refactor-v3.txt
+./validation/repo-inventory.txt
+./validation/runtime-slot-pid-audit.log
+./validation/slot-config-audit.log
+./validation/staged-transformers-scan.log
+./validation/transformed-host-sections.txt
+./validation/transformer-v2-diagnostic.txt
+./validation/transformer-v2-parts.txt
+./validation/transformer-v3-diagnostic.txt
+./validation/vless-slot-apply.txt
+./validation/xray-api-generated.json
+./validation/xray-api-help.txt
+./version.txt
+./vvv-install.sh
+=== workflows ===
+apply-hy2-slots-v2.yml
+apply-vless-slot-patch.yml
+apply-vless-slots-v2.yml
+apply-vvv-refactor-v2.yml
+audit-slot-configs.yml
+capture-final-failure.yml
+capture-fix-apply-vless.yml
+capture-generated-host.yml
+capture-hy2-static-host.yml
+capture-vless-slot-apply.yml
+diagnose-compressed-transformer-text.yml
+diagnose-compressed-transformer.yml
+diagnose-good-transformer.yml
+diagnose-refactor.yml
+diagnose-repaired-transformer.yml
+diagnose-transformer-v2.yml
+diagnose-transformer-v3.yml
+dump-prepare-sections.yml
+dump-transformed-host-sections.yml
+dump-xray-api-config.yml
+extract-core.yml
+extract-hy2-static-patch.yml
+extract-modules.yml
+final-runtime-validation-v2.yml
+final-runtime-validation-v3.yml
+final-runtime-validation.yml
+fix-and-apply-vless-slots.yml
+fix-final-validation-find-v2.yml
+fix-final-validation-find.yml
+fix-local-center-and-confirm.yml
+fix-runtime-test-user.yml
+index-generated-host.yml
+measure-staging-parts.yml
+measure-transformer-v2-parts.yml
+probe-actions.yml
+probe-xray-api-config.yml
+probe-xray-api-order.yml
+probe-xray-api.yml
+publish-compressed-transformer.yml
+publish-hy2-slot-transformer.yml
+publish-prepare-good.yml
+publish-prepare-refactor.yml
+publish-transformer-v2.yml
+publish-transformer-v3.yml
+publish-transformer-v4.yml
+recover-hy2-transformer.yml
+recover-vvv.yml
+refactor-host-runtime.yml
+refine-event-backups.yml
+repair-and-publish-transformer.yml
+repo-inventory.yml
+runtime-slot-pid-audit.yml
+scan-prepare-history.yml
+scan-staged-transformers.yml
+validate-final-slot-architecture.yml
+validate-ordinary.yml
+=== staging ===
+.staging-refactor/patch-hy2-runtime.gz.b64 4115 bytes
+.staging-refactor/patch-hy2-static.gz.b64 2616 bytes
+.staging-refactor/patch_host.py.gz.b64 7420 bytes
+.staging-refactor/prepare.good.part00 24328 bytes
+.staging-refactor/prepare.good.part01 5000 bytes
+.staging-refactor/prepare.good.part02 5000 bytes
+.staging-refactor/prepare.good.part03 9332 bytes
+.staging-refactor/prepare.good.part04 4332 bytes
+.staging-refactor/prepare.gz.part00 2000 bytes
+.staging-refactor/prepare.gz.part01 2000 bytes
+.staging-refactor/prepare.gz.part02 2000 bytes
+.staging-refactor/prepare.gz.part03 2000 bytes
+.staging-refactor/prepare.gz.part04 172 bytes
+.staging-refactor/prepare.hy2.part00 1000 bytes
+.staging-refactor/prepare.hy2.part01 4973 bytes
+.staging-refactor/prepare.py.b64 24328 bytes
+.staging-refactor/prepare.v2.gz.part00 2000 bytes
+.staging-refactor/prepare.v2.gz.part01 2000 bytes
+.staging-refactor/prepare.v2.gz.part02 2000 bytes
+.staging-refactor/prepare.v2.gz.part03 2000 bytes
+.staging-refactor/prepare.v2.gz.part04 176 bytes
+.staging-refactor/prepare.v3.gz.part030 1000 bytes
+.staging-refactor/prepare.v3.gz.part031 1000 bytes
+.staging-refactor/qr_helper.sh.b64 1804 bytes
+.staging-refactor/sources.tgz.b64 20023 bytes
+=== tools ===
+tools/add_pid_messages_to_vless_patch.py
+tools/build_slot_audit_fixture.py
+tools/decode_hy2_static.py
+tools/decode_staged_hy2.py
+tools/extract_manager_library.py
+tools/fix_transform_replacement_escapes.py
+tools/index_shell_functions.py
+tools/patch_hy2_slots_clean.py
+tools/patch_vless_slots.py
+tools/recover_hy2_transformer.py
+tools/repair_patch_anchor.py
+tools/retire_deleted_slot_credentials.py
+tools/scan_staged_transformers.py
+=== validation ===
+validation/actions-probe.txt 56 bytes
+validation/apply-hy2-v2.log 385 bytes
+validation/apply-vless-v2.log 540 bytes
+validation/apt-lock.txt 244 bytes
+validation/caddy-permission.txt 81 bytes
+validation/compressed-transformer-diagnostic.txt 7011 bytes
+validation/compressed-transformer-text.txt 529 bytes
+validation/final-install-fix.txt 134 bytes
+validation/final-runtime-failure.txt 5694 bytes
+validation/final-runtime-patch-failure.txt 2830 bytes
+validation/final-slot-render.log 1021 bytes
+validation/final-slot-transform.log 485 bytes
+validation/fix-apply-vless.txt 3631 bytes
+validation/generated-center-final-slots.sh 10119 bytes
+validation/generated-host-current.sh 99744 bytes
+validation/generated-host-final-slots.sh 106895 bytes
+validation/generated-host-functions.txt 2366 bytes
+validation/generated-landing-final-slots.sh 56709 bytes
+validation/hy2-static-render.log 541 bytes
+validation/ordinary-source.txt 81 bytes
+validation/prepare-history-scan.log 483 bytes
+validation/prepare-sections.txt 23265 bytes
+validation/recover-hy2-transformer.log 1380 bytes
+validation/refactor-diagnostic.txt 19785 bytes
+validation/refactor-good-diagnostic.txt 36936 bytes
+validation/refactor-repaired-diagnostic.txt 1095 bytes
+validation/refactor-v3.txt 394 bytes
+validation/repo-inventory.txt 7294 bytes
+validation/runtime-slot-pid-audit.log 10630 bytes
+validation/slot-config-audit.log 38646 bytes
+validation/staged-transformers-scan.log 2172 bytes
+validation/transformed-host-sections.txt 43451 bytes
+validation/transformer-v2-diagnostic.txt 602 bytes
+validation/transformer-v2-parts.txt 784 bytes
+validation/transformer-v3-diagnostic.txt 451 bytes
+validation/vless-slot-apply.txt 4021 bytes
+validation/xray-api-generated.json 634 bytes
+validation/xray-api-help.txt 3191 bytes
+=== Python compile ===
+=== current HEAD ===
+55e262f041010f5ec2ff5fa0d9a07ad0d4d61eb3 2026-08-01T17:01:53+08:00 Inventory repository before final cleanup
