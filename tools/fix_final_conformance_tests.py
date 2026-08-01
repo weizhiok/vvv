@@ -4,18 +4,37 @@ from pathlib import Path
 path = Path('tests/conformance.py')
 text = path.read_text(encoding='utf-8')
 
-old_host = "    host = {'role': 'center-relay', 'state': sample_host_state()}\n"
-new_host = "    host = {'host_id': 'audit-host-001', 'role': 'center-relay', 'state': sample_host_state()}\n"
-if old_host in text:
-    text = text.replace(old_host, new_host, 1)
-elif new_host not in text:
-    raise SystemExit('host fixture not found')
+replacements = (
+    (
+        "    host = {'role': 'center-relay', 'state': sample_host_state()}\n",
+        "    host = {'host_id': 'audit-host-001', 'role': 'center-relay', 'state': sample_host_state()}\n",
+    ),
+    (
+        "    require({n['protocol'] for n in nodes} == {'vless', 'hy2'}, '双协议直连节点没有同时进入订阅')\n",
+        "    require({n['protocol'] for n in nodes} == {'vless', 'hysteria2'}, '双协议直连节点没有同时进入订阅')\n",
+    ),
+    (
+        "    raw = module.render_client('v2', nodes)\n",
+        "    raw = module.render_v2rayng(nodes)\n",
+    ),
+    (
+        "    clash = module.render_client('c', nodes)\n    qx = module.render_client('qx', nodes)\n    loon = module.render_client('ln', nodes)\n    shadowrocket = module.render_client('sr', nodes)\n",
+        "    clash = module.render_clash(nodes)\n    qx = module.render_qx(nodes)\n    loon = module.render_loon(nodes)\n    shadowrocket = module.render_shadowrocket(nodes)\n",
+    ),
+    (
+        "    require('rclone copyto' in backup and 'rclone sync' not in backup, '云上传必须使用 copy/copyto 而不是 sync')\n",
+        "    require(\"'copyto'\" in backup and \"'sync'\" not in backup, '云上传必须使用 copy/copyto 而不是 sync')\n",
+    ),
+    (
+        "    require('AESGCM' in backup and '.enc' in backup, '本地备份没有使用加密容器')\n",
+        "    require('-aes-256-cbc' in backup and '-pbkdf2' in backup and '.enc' in backup, '本地备份没有使用 AES-256-CBC + PBKDF2 加密容器')\n",
+    ),
+)
 
-old_protocols = "    require({n['protocol'] for n in nodes} == {'vless', 'hy2'}, '双协议直连节点没有同时进入订阅')\n"
-new_protocols = "    require({n['protocol'] for n in nodes} == {'vless', 'hysteria2'}, '双协议直连节点没有同时进入订阅')\n"
-if old_protocols in text:
-    text = text.replace(old_protocols, new_protocols, 1)
-elif new_protocols not in text:
-    raise SystemExit('protocol assertion not found')
+for old, new in replacements:
+    if old in text:
+        text = text.replace(old, new, 1)
+    elif new not in text:
+        raise SystemExit(f'conformance test anchor not found: {old[:80]!r}')
 
 path.write_text(text, encoding='utf-8')
