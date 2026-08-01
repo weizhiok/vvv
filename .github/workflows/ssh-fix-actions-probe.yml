@@ -4,7 +4,7 @@ on:
     paths:
       - '.github/workflows/ssh-fix-actions-probe.yml'
 concurrency:
-  group: ssh-fix-minimal-production-publisher
+  group: ssh-fix-direct-publisher-v3
   cancel-in-progress: true
 permissions:
   contents: write
@@ -14,4 +14,4 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - run: bash tools/publish_production_ssh_fix.sh
+      - run: bash tools/direct_publish_ssh_fix.sh
