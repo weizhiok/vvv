@@ -1,0 +1,1 @@
+ssh-fix-publisher-started=1
