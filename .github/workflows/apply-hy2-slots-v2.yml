@@ -19,21 +19,8 @@ jobs:
           mkdir -p validation
           {
             set -Eeuxo pipefail
-            python3 - <<'PY'
-          import base64
-          from pathlib import Path
-          for name in ('static', 'runtime'):
-              src = Path(f'.staging-refactor/patch-hy2-{name}.gz.b64')
-              raw = src.read_text(encoding='utf-8-sig')
-              clean = ''.join(raw.split())
-              try:
-                  data = base64.b64decode(clean, validate=True)
-              except Exception as exc:
-                  bad = sorted({f'U+{ord(ch):04X}' for ch in clean if ch not in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/='})
-                  raise SystemExit(f'{name} Base64 decode failed: {exc}; length={len(clean)}; bad={bad[:20]}')
-              Path(f'/tmp/hy2-{name}.gz').write_bytes(data)
-              print(f'{name}: chars={len(clean)} bytes={len(data)}')
-          PY
+            python3 -m py_compile tools/decode_staged_hy2.py
+            python3 tools/decode_staged_hy2.py
             gzip -t /tmp/hy2-static.gz
             gzip -t /tmp/hy2-runtime.gz
             gzip -dc /tmp/hy2-static.gz > /tmp/hy2-static.py
