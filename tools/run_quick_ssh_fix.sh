@@ -5,7 +5,6 @@ LOG=/tmp/quick-ssh-log-fix-validation.log
 
 git config user.name github-actions[bot]
 git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-git pull --ff-only origin main
 
 set +e
 (
@@ -69,7 +68,6 @@ if [[ $rc -eq 0 ]]; then
   git push
 else
   git reset --hard HEAD
-  git pull --ff-only origin main
   mkdir -p validation
   cp "$LOG" validation/ssh-log-fix-validation.log
   printf '\nstatus=failure\n' >> validation/ssh-log-fix-validation.log
