@@ -1,0 +1,26 @@
+name: Extract HY2 static patch source
+on:
+  push:
+    paths:
+      - '.github/workflows/extract-hy2-static-patch.yml'
+permissions:
+  contents: write
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode patch
+        run: |
+          set -Eeuo pipefail
+          python3 tools/decode_hy2_static.py
+          python3 -m py_compile /tmp/hy2-static.py
+          mkdir -p validation
+          cp /tmp/hy2-static.py validation/hy2-static-patch.py
+      - name: Publish patch source
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add validation/hy2-static-patch.py
+          git commit -m 'Extract HY2 static patch source'
+          git push
