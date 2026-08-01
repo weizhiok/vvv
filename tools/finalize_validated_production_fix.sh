@@ -1,10 +1,28 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
+LOG=/tmp/vvv-final-production.log
+exec > >(tee "$LOG") 2>&1
 
 git config user.name github-actions[bot]
 git config user.email 41898282+github-actions[bot]@users.noreply.github.com
 mkdir -p validation
+
+record_failure(){
+  local rc=$? line=${BASH_LINENO[0]:-unknown}
+  trap - ERR
+  set +e
+  {
+    printf 'failure_line=%s rc=%s\n' "$line" "$rc"
+    cat "$LOG"
+  } > validation/final-production-error.log
+  git add validation/final-production-error.log
+  git commit validation/final-production-error.log -m 'Record exact production finalization failure'
+  git push origin HEAD:main
+  exit "$rc"
+}
+trap record_failure ERR
+set -x
 
 stage(){
   local value="$1"
@@ -60,6 +78,7 @@ for attempt in 1 2 3 4 5 6; do
   git fetch origin main
   git rebase origin/main
   if git push origin HEAD:main; then
+    rm -f validation/final-production-error.log
     exit 0
   fi
   sleep 2
