@@ -1,0 +1,85 @@
++ echo validation-fresh-attempt=1
+validation-fresh-attempt=1
++ python3 -m py_compile tools/fix_final_conformance_tests.py
++ python3 tools/fix_final_conformance_tests.py
++ sudo apt-get update -qq
++ sudo apt-get install -y -qq curl unzip jq openssl iproute2 qrencode
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 202954 files and directories currently installed.)
+Preparing to unpack .../libssl-dev_3.0.13-0ubuntu3.12_amd64.deb ...
+Unpacking libssl-dev:amd64 (3.0.13-0ubuntu3.12) over (3.0.13-0ubuntu3.11) ...
+Preparing to unpack .../libssl3t64_3.0.13-0ubuntu3.12_amd64.deb ...
+Unpacking libssl3t64:amd64 (3.0.13-0ubuntu3.12) over (3.0.13-0ubuntu3.11) ...
+Setting up libssl3t64:amd64 (3.0.13-0ubuntu3.12) ...
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 202954 files and directories currently installed.)
+Preparing to unpack .../openssl_3.0.13-0ubuntu3.12_amd64.deb ...
+Unpacking openssl (3.0.13-0ubuntu3.12) over (3.0.13-0ubuntu3.11) ...
+Selecting previously unselected package libqrencode4:amd64.
+Preparing to unpack .../libqrencode4_4.1.1-1build2_amd64.deb ...
+Unpacking libqrencode4:amd64 (4.1.1-1build2) ...
+Selecting previously unselected package qrencode.
+Preparing to unpack .../qrencode_4.1.1-1build2_amd64.deb ...
+Unpacking qrencode (4.1.1-1build2) ...
+Setting up libqrencode4:amd64 (4.1.1-1build2) ...
+Setting up qrencode (4.1.1-1build2) ...
+Setting up libssl-dev:amd64 (3.0.13-0ubuntu3.12) ...
+Setting up openssl (3.0.13-0ubuntu3.12) ...
+Processing triggers for man-db (2.12.0-4build2) ...
+Not building database; man-db/auto-update is not 'true'.
+Processing triggers for libc-bin (2.39-0ubuntu8.7) ...
+
+Running kernel seems to be up-to-date.
+
+Restarting services...
+ /etc/needrestart/restart.d/systemd-manager
+ systemctl restart packagekit.service php8.3-fpm.service systemd-journald.service systemd-networkd.service systemd-resolved.service systemd-udevd.service udisks2.service
+
+Service restarts being deferred:
+ systemctl restart hosted-compute-agent.service
+ systemctl restart systemd-logind.service
+ systemctl restart walinuxagent.service
+
+No containers need to be restarted.
+
+User sessions running outdated binaries:
+ runner @ user manager service: systemd[1220]
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+++ sed -n 's/^XRAY_FALLBACK_VERSION="\([^"]*\)"/\1/p' core-src/host.sh
+++ head -n1
++ XRAY_VERSION=26.3.27
+++ sed -n 's/^SING_BOX_FALLBACK_VERSION="\([^"]*\)"/\1/p' core-src/host.sh
+++ head -n1
++ SING_VERSION=1.13.12
++ curl -fL --retry 5 --retry-all-errors https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip -o /tmp/xray.zip
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+100 20.1M  100 20.1M    0     0  67.8M      0 --:--:-- --:--:-- --:--:-- 67.8M
++ unzip -q /tmp/xray.zip xray -d /tmp/xray-unpack
++ install -m755 /tmp/xray-unpack/xray /tmp/xray
++ curl -fL --retry 5 --retry-all-errors https://github.com/SagerNet/sing-box/releases/download/v1.13.12/sing-box-1.13.12-linux-amd64.tar.gz -o /tmp/sing-box.tgz
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+100 22.7M  100 22.7M    0     0  74.2M      0 --:--:-- --:--:-- --:--:-- 74.2M
++ tar -xzf /tmp/sing-box.tgz -C /tmp
++ install -m755 /tmp/sing-box-1.13.12-linux-amd64/sing-box /tmp/sing-box
++ chmod +x tests/final_runtime_validation.sh
++ tests/final_runtime_validation.sh /tmp/xray /tmp/sing-box
+
+===== Source conformance and syntax =====
+PASS test_menu_and_front_loaded_parameters
+PASS test_subscription_renderers
+PASS test_backup_policy
+PASS test_jpr3_and_slot_architecture
+Traceback (most recent call last):
+  File "/home/runner/work/vvv/vvv/tests/conformance.py", line 206, in <module>
+    main()
+  File "/home/runner/work/vvv/vvv/tests/conformance.py", line 200, in main
+    test()
+  File "/home/runner/work/vvv/vvv/tests/conformance.py", line 175, in test_qr_helper
+    require("printf '\033[47m" in qr, '二维码顶部没有额外白边')
+  File "/home/runner/work/vvv/vvv/tests/conformance.py", line 18, in require
+    raise AssertionError(message)
+AssertionError: 二维码顶部没有额外白边
+status=failure
