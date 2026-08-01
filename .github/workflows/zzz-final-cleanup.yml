@@ -1,0 +1,40 @@
+name: ZZZ final repository cleanup
+on:
+  push:
+    paths:
+      - '.github/workflows/zzz-final-cleanup.yml'
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply permanent tests
+        run: |
+          set -Eeuo pipefail
+          python3 tools/add_debian13_conformance.py
+          python3 -m py_compile tests/conformance.py
+          python3 tests/conformance.py
+          bash -n vvv-install.sh core-src/bootstrap.sh core-src/host.sh core-src/center_install.sh core-src/register_sync.sh core-src/vvv_manager.sh core-src/rclone_manager.sh core-src/qr_helper.sh
+          sh -n core-src/landing.sh
+      - name: Delete obsolete artifacts
+        run: |
+          set -Eeuo pipefail
+          git rm -rf --ignore-unmatch .staging-refactor bundle install payload src-v2 tools v2 validation
+          git rm -f --ignore-unmatch install.sh sha256.txt version.txt src/bootstrap.sh core-src/validation.txt
+          find .github/workflows -maxdepth 1 -type f ! -name validate.yml -print0 | xargs -0 -r git rm -f --
+      - name: Commit clean tree
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile src/prepare.py core-src/sub_center.py core-src/sync_agent.py core-src/backup_manager.py tests/conformance.py tests/extract_manager_library.py tests/build_slot_fixture.py
+          python3 tests/conformance.py
+          test "$(find .github/workflows -maxdepth 1 -type f -printf '%f\n')" = validate.yml
+          test ! -e tools
+          test ! -e validation
+          test ! -e .staging-refactor
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add README.md vvv-install.sh core-src src tests .github/workflows/validate.yml
+          git commit -m 'Finalize validated VVV Debian 13 release'
+          git push
