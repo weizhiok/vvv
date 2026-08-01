@@ -1,10 +1,10 @@
-+ echo ssh-log-fixes-attempt=2
-ssh-log-fixes-attempt=2
++ echo ssh-log-fixes-attempt=3
+ssh-log-fixes-attempt=3
 + python3 -m py_compile tools/fix_ssh_log_transformer_anchor.py tools/apply_ssh_log_fixes.py
 + python3 tools/fix_ssh_log_transformer_anchor.py
 SSH log transformer anchors repaired
 + python3 -m py_compile tools/apply_ssh_log_fixes.py
 + python3 tools/apply_ssh_log_fixes.py
-forbidden QR implementation remains: qr_helper
+forbidden QR implementation remains: qr_helper; files=['vvv-install.sh']
 
 status=failure
