@@ -3,6 +3,9 @@ on:
   push:
     paths:
       - '.github/workflows/publish-quick-ssh-fix.yml'
+concurrency:
+  group: publish-ssh-fixes-main
+  cancel-in-progress: true
 permissions:
   contents: write
 jobs:
