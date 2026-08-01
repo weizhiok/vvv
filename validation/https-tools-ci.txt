@@ -1,0 +1,1 @@
+Validate generated domain and public-IP HTTPS frontends with real Caddy and Certbot 5.4+.
