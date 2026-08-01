@@ -5,7 +5,7 @@ VVV 使用一个固定安装入口，在全新的 **Debian 13 + systemd** VPS �
 ## 永久固定安装地址
 
 ```bash
-curl -fsSL --retry 5 https://raw.githubusercontent.com/weizhiok/vvv/install/vvv-install.sh | bash
+curl -fsSL --retry 5 "https://raw.githubusercontent.com/weizhiok/vvv/install/vvv-install.sh?$(date +%s)" | bash
 ```
 
 `install` 是固定入口分支，会自动取得 `main` 分支经过验证的最新安装程序。安装完成后统一输入：
@@ -17,11 +17,11 @@ vps
 ## 安装角色
 
 ```text
-1. 安装订阅中心+中转主机（含自身代理）
-2. 仅安装订阅中心（含自身代理）
-3. 仅安装中转主机（含自身代理）
-4. 仅安装中转副机（通过主机代理）
-5. 仅安装直连代理
+1. 安装订阅中心 + 中转主机 + 自身代理
+2. 安装订阅中心 + 自身代理
+3. 安装中转主机 + 自身代理
+4. 安装中转副机（通过主机代理）
+5. 安装直连代理
 0. 退出
 ```
 
@@ -30,10 +30,10 @@ vps
 - VLESS、Hysteria 2 或双协议；
 - 统一代理端口，默认 `443`；
 - REALITY 伪装域名，默认 `www.softbank.jp`；
-- 订阅域名与订阅端口，默认 TCP `8443`；
+- 可选订阅域名与订阅 HTTPS 端口，端口默认 TCP `8443`；
 - 订阅中心接入码或 JPR3 对接密钥。
 
-参数总览显示后直接开始安装，不再要求输入 `Y`，安装过程中也不会穿插新的问题。
+订阅域名可以直接按回车留空。留空时自动使用本机公网 IPv4，并申请 Let’s Encrypt 短期公网 IP 证书。参数总览显示后直接开始安装，不再要求输入 `Y`，安装过程中也不会穿插新的问题。
 
 ## 代理与中转架构
 
@@ -62,10 +62,17 @@ vps
 - Loon 使用无多余引号的 Salamander 混淆密码；
 - v2rayNG 2.2.6 使用独立 `hysteria2://` 链接，并写入 `pinSHA256` 证书指纹，不再依赖 `insecure`。
 
+## 订阅中心与 HTTPS
+
+- 输入域名时，Caddy 自动申请和续期域名证书，并检查域名 IPv4 A 记录是否指向本机；
+- 域名留空时，自动使用本机公网 IPv4；
+- IP 模式使用隔离的 Certbot 5.4+ 环境申请 Let’s Encrypt `shortlived` IP 地址证书；
+- IP 证书有效期较短，脚本安装 systemd 定时器每天检查两次并自动续期；
+- 两种模式都只提供 HTTPS，不提供明文 HTTP 订阅入口；
+- 公网必须放行 TCP/80 和订阅 HTTPS 端口。
+
 ## 订阅中心与备份
 
-- 订阅中心强制使用域名 HTTPS，并检查域名 IPv4 A 记录是否指向本机；
-- 不提供本机 IP + HTTP 订阅模式；
 - 节点变化后立即同步完整快照；
 - 本地备份使用加密容器，只在首次安装或数据变化前后自动创建；
 - 不设置定时备份，不提供手动备份菜单；
