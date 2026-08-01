@@ -310,9 +310,9 @@ path.write_text(text, encoding="utf-8")
 
 path = ROOT / "tests/conformance.py"
 text = path.read_text(encoding="utf-8")
-anchor = '''    require('base_url="https://${site_host}:${public_port}"' in center, '订阅中心基础地址不是 HTTPS')
+anchor = '''    require('log {\\n    output discard\\n  }' in center, 'Caddy log 块没有使用规范多行语法')
     require('检查并升级 VVV' not in manager and 'update_vvv' not in manager, '仍保留原地升级兼容入口')'''
-replacement = '''    require('base_url="https://${site_host}:${public_port}"' in center, '订阅中心基础地址不是 HTTPS')
+replacement = '''    require('log {\\n    output discard\\n  }' in center, 'Caddy log 块没有使用规范多行语法')
     require('systemctl reload caddy.service' not in center, 'admin off 模式仍错误调用 Caddy reload')
     require('ExecReload=/usr/local/bin/caddy reload' not in center, 'Caddy 服务仍配置依赖 admin API 的 reload')
     require('.vvv-ip-final-active' in center, 'IP 证书首次部署和续期部署没有使用状态标记分流')
