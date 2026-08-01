@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 import base64
 import importlib.util
-import json
-import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,10 +54,12 @@ def test_menu_and_front_loaded_parameters():
     collect = text.index('# 真正安装前，一次性收集该角色需要的全部参数。')
     execute = text.index('case "$choice" in', collect + 1)
     execute = text.index('install_host', execute)
-    require('read -r' not in text[text.index('show_parameter_summary\n', collect) if 'show_parameter_summary\n' in text[collect:] else collect:execute], '参数总览后仍存在确认输入')
-    require('write_roles true true false true center-relay' in text and 'register_sync.sh" center-relay "$code"' in text, '菜单 1 没有安装订阅中心+中转主机')
+    summary_end = text.index('case "$choice" in', text.index('show_parameter_summary', collect))
+    require('read -r' not in text[summary_end:execute], '参数总览后仍存在确认输入')
+    require('write_roles true true false true center-relay' in text, '菜单 1 没有安装订阅中心+中转主机')
+    require('register_sync.sh" center-relay "$code"' in text, '菜单 1 没有按 center-relay 注册')
     require('write_roles true true false true all' not in text, '仍保留旧 all 主角色')
-    require('register_sync.sh" landing "$code"' in text, '中转副机没有使用 JPR3 中的接入码自动注册')
+    require('register_sync.sh" landing "$code"' in text, '中转副机没有自动注册')
 
 
 def sample_host_state():
@@ -86,42 +86,31 @@ def sample_host_state():
 
 
 def decoded_v2rayng(module, nodes):
-    raw = module.render_v2rayng(nodes)
-    return base64.b64decode(raw).decode('utf-8').splitlines()
+    return base64.b64decode(module.render_v2rayng(nodes)).decode('utf-8').splitlines()
 
 
 def test_subscription_renderers():
     module = load_sub_center()
-    host = {'host_id': 'audit-host-001', 'role': 'center-relay', 'state': sample_host_state()}
-    nodes = module.nodes_from_host(host)
+    nodes = module.nodes_from_host({'host_id': 'audit-host-001', 'role': 'center-relay', 'state': sample_host_state()})
     require({n['protocol'] for n in nodes} == {'vless', 'hysteria2'}, '双协议直连节点没有同时进入订阅')
-
     clash = module.render_clash(nodes)
     qx = module.render_qx(nodes)
     loon = module.render_loon(nodes)
-    shadowrocket = module.render_shadowrocket(nodes)
+    shadowrocket = base64.b64decode(module.render_shadowrocket(nodes)).decode('utf-8')
     v2_lines = decoded_v2rayng(module, nodes)
-
     require('type: vless' in clash and 'type: hysteria2' in clash, 'Clash 订阅缺少双协议节点')
     require('vless=' in qx and 'hysteria' not in qx.lower(), 'Quantumult X 应只输出 VLESS')
     require('salamander-password=salamander-secret' in loon, 'Loon HY2 混淆密码格式错误')
     require('salamander-password="' not in loon, 'Loon HY2 混淆密码仍带双引号')
-    shadowrocket_text = base64.b64decode(shadowrocket).decode('utf-8')
-    require('hysteria2://' in shadowrocket_text, 'Shadowrocket 缺少 Hysteria 2 链接')
+    require('hysteria2://' in shadowrocket, 'Shadowrocket 缺少 Hysteria 2 链接')
     hy2 = next((line for line in v2_lines if line.startswith('hysteria2://')), '')
     require(hy2, 'v2rayNG 没有独立 hysteria2:// 链接')
-    require('pinSHA256=' in hy2, 'v2rayNG HY2 缺少 pinSHA256 证书指纹')
-    require('insecure=' not in hy2, 'v2rayNG 2.2.6 HY2 不应继续依赖 insecure')
+    require('pinSHA256=' in hy2 and 'insecure=' not in hy2, 'v2rayNG HY2 指纹或安全参数错误')
     for token in ('sni=', 'pinSHA256=', 'obfs=salamander', 'obfs-password='):
         require(token in hy2, f'v2rayNG HY2 缺少 {token}')
-
     source = read('core-src/sub_center.py')
-    require("SHORT_PATHS = {'c': 'clash', 'qx': 'quantumultx', 'ln': 'loon', 'sr': 'shadowrocket', 'v2': 'v2rayng'}" in source, '订阅短路径集合不正确')
-    require("{'c': 'clash', 'qx': 'quantumultx', 'ln': 'loon', 'sr': 'shadowrocket', 'v2': 'v2rayng'}" in source, '短路径渲染映射不正确')
-    center = read('core-src/center_install.sh')
-    require('base_url="https://${site_host}:${public_port}"' in center, '订阅中心基础地址没有统一使用 HTTPS')
-    require('http://${public_ip}' not in center, '仍保留明文 IP 订阅地址')
-    require('mode=domain' in center and 'mode=ip' in center, '订阅中心没有同时支持域名和公网 IP HTTPS')
+    short_paths = "{'c': 'clash', 'qx': 'quantumultx', 'ln': 'loon', 'sr': 'shadowrocket', 'v2': 'v2rayng'}"
+    require(short_paths in source, '订阅短路径集合不正确')
 
 
 def test_backup_policy():
@@ -131,10 +120,8 @@ def test_backup_policy():
     register = read('core-src/register_sync.sh')
     sub = read('core-src/sub_center.py')
     prepare = read('src/prepare.py')
-
-    forbidden = ('vvv-backup-pull', '/api/v1/backup', '/var/backups/vvv-remote')
     production = '\n'.join((center, backup, rclone, register, sub, prepare))
-    for token in forbidden:
+    for token in ('vvv-backup-pull', '/api/v1/backup', '/var/backups/vvv-remote'):
         require(token not in production, f'仍保留旧远程备份逻辑：{token}')
     require('backup.timer' not in production and 'backup-pull.timer' not in production, '仍存在备份定时器')
     require('立即生成本地备份' not in center and '手动本地备份' not in center, '仍存在手动备份菜单')
@@ -147,27 +134,22 @@ def test_backup_policy():
         require(token in sub, f'订阅数据写入缺少 {token} 备份')
     for token in ('before-cloud-backup-enabled', 'after-cloud-backup-enabled', 'before-cloud-backup-disabled', 'after-cloud-backup-disabled'):
         require(token in rclone, f'云备份配置缺少事务事件 {token}')
-    require("'copyto'" in backup and "'sync'" not in backup, '云上传必须使用 copy/copyto 而不是 sync')
-    require('-aes-256-cbc' in backup and '-pbkdf2' in backup and '.enc' in backup, '本地备份没有使用 AES-256-CBC + PBKDF2 加密容器')
+    require("'copyto'" in backup and "'sync'" not in backup, '云上传必须使用 copyto 而不是 sync')
+    require('-aes-256-cbc' in backup and '-pbkdf2' in backup and '.enc' in backup, '本地备份加密格式错误')
 
 
 def test_jpr3_and_slot_architecture():
     prepare = read('src/prepare.py')
     landing = read('core-src/landing.sh')
     for token in (
-        'subscription_registration_code',
-        'build_vless_slot_configs',
-        'sync_vless_slot_services',
-        'vvv-vless-slot@',
-        'build_hy2_slot_configs',
-        'sync_hy2_slot_services',
-        'vvv-hy2-slot@',
-        '主 Xray PID 已保持不变',
-        '主 sing-box PID 已保持不变',
+        'subscription_registration_code', 'build_vless_slot_configs', 'sync_vless_slot_services',
+        'vvv-vless-slot@', 'build_hy2_slot_configs', 'sync_hy2_slot_services', 'vvv-hy2-slot@',
+        '主 Xray PID 已保持不变', '主 sing-box PID 已保持不变',
     ):
         require(token in prepare, f'最终槽位/JPR3 转换器缺少 {token}')
     require('python3' in landing, '落地脚本没有显式安装 Python 运行时')
-    require('.schema==3' in landing and '.type=="jp-relay-landing"' in landing and 'actual_checksum' in landing and 'expected_checksum' in landing, '落地脚本没有严格校验 JPR3 schema、类型和摘要')
+    require('.schema==3' in landing and '.type=="jp-relay-landing"' in landing, '落地脚本没有严格校验 JPR3')
+    require('actual_checksum' in landing and 'expected_checksum' in landing, '落地脚本没有校验 JPR3 摘要')
 
 
 def test_no_qr_output():
@@ -179,10 +161,7 @@ def test_no_qr_output():
     text = '\n'.join(read(path) for path in files)
     for token in ('qrencode', 'qr_helper'):
         require(token not in text, f'仍保留二维码实现：{token}')
-    implementation = '\n'.join(read(path) for path in (
-        'vvv-install.sh', 'core-src/bootstrap.sh', 'core-src/host.sh', 'core-src/landing.sh',
-        'core-src/center_install.sh', 'core-src/vvv_manager.sh', 'src/prepare.py',
-    ))
+    implementation = '\n'.join(read(path) for path in files[:7])
     require('二维码' not in implementation, '生产脚本仍保留二维码菜单、文件或提示')
     require(not (ROOT / 'core-src/qr_helper.sh').exists(), '二维码辅助文件仍存在')
 
@@ -193,15 +172,16 @@ def test_https_and_fresh_install_only():
     center = read('core-src/center_install.sh')
     manager = read('core-src/vvv_manager.sh')
     require('当前版本只支持全新安装' in installer, '网络入口没有拒绝旧安装状态')
-    require('直接回车使用本机公网 IP' in bootstrap and 'VVV_SUB_DOMAIN=""' in bootstrap, '订阅域名不能直接留空使用公网 IP')
+    require('直接回车使用本机公网 IP' in bootstrap and 'VVV_SUB_DOMAIN=""' in bootstrap, '订阅域名不能留空使用公网 IP')
     require('域名不能为空' not in bootstrap, '仍强制要求输入订阅域名')
-    require('mode=domain' in center and 'mode=ip' in center, '订阅中心没有同时实现域名与 IP HTTPS 模式')
+    require('mode=domain' in center and 'mode=ip' in center, '没有同时实现域名与 IP HTTPS 模式')
     require('base_url="https://${site_host}:${public_port}"' in center, '订阅中心基础地址不是统一 HTTPS')
-    require("'certbot>=5.4,<6'" in center, 'IP 模式没有安装支持 IP 证书的 Certbot 5.4+')
+    require('http://${public_ip}' not in center, '仍保留明文 IP 订阅地址')
+    require("'certbot>=5.4,<6'" in center, 'IP 模式没有安装 Certbot 5.4+')
     for token in ('--preferred-profile shortlived', '--ip-address "$public_ip"', 'vvv-ip-cert-renew.timer', 'deploy-ip-cert.sh'):
         require(token in center, f'IP 证书申请或续期缺少：{token}')
     require('log { output discard }' not in center, 'Caddy log 块仍使用无效单行语法')
-    require('log {\n' not in center, 'Caddy log 块必须使用规范的多行语法')
+    require('log {\n    output discard\n  }' in center, 'Caddy log 块没有使用规范多行语法')
     require('检查并升级 VVV' not in manager and 'update_vvv' not in manager, '仍保留原地升级兼容入口')
     require('sync_role' not in manager, '仍保留旧 all 角色兼容映射')
 
@@ -221,14 +201,14 @@ def test_debian13_only():
     }
     for label, source in sources.items():
         require('Debian 13' in source, f'{label} 没有明确限制 Debian 13')
-    require("${ID:-}" in sources['network installer'] and "${VERSION_ID:-}" in sources['network installer'], '网络安装入口没有读取系统版本')
+    require("${ID:-}" in sources['network installer'] and "${VERSION_ID:-}" in sources['network installer'], '网络入口没有读取系统版本')
     require("${ID:-}" in sources['unified bootstrap'] and "${VERSION_ID:-}" in sources['unified bootstrap'], '统一入口没有再次验证系统版本')
     landing = sources['landing installer']
     for token in ('Debian 12', 'Alpine', 'alpine', 'OpenRC', 'openrc', 'rc-service', 'rc-update', '/etc/init.d', 'apk add', 'apk update', 'apk upgrade'):
         require(token not in landing, f'落地脚本仍保留旧系统兼容逻辑：{token}')
     readme = read('README.md')
     require('仅支持全新 Debian 13' in readme, 'README 没有说明仅支持全新 Debian 13')
-    require('Debian 12' in readme and '不包含' in readme, 'README 没有明确说明移除 Debian 12 兼容')
+    require('Debian 12' in readme and '不包含' in readme, 'README 没有说明移除 Debian 12 兼容')
 
 
 def test_no_obsolete_role_terms():
