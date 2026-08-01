@@ -19,8 +19,8 @@ jobs:
           mkdir -p validation
           {
             set -Eeuxo pipefail
-            base64 -d .staging-refactor/patch-hy2-static.gz.b64 > /tmp/hy2-static.gz
-            base64 -d .staging-refactor/patch-hy2-runtime.gz.b64 > /tmp/hy2-runtime.gz
+            tr -d '\r\n\t ' < .staging-refactor/patch-hy2-static.gz.b64 | base64 -d > /tmp/hy2-static.gz
+            tr -d '\r\n\t ' < .staging-refactor/patch-hy2-runtime.gz.b64 | base64 -d > /tmp/hy2-runtime.gz
             gzip -t /tmp/hy2-static.gz
             gzip -t /tmp/hy2-runtime.gz
             gzip -dc /tmp/hy2-static.gz > /tmp/hy2-static.py
