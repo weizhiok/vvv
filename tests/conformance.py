@@ -93,7 +93,7 @@ def decoded_v2rayng(module, nodes):
 
 def test_subscription_renderers():
     module = load_sub_center()
-    host = {'role': 'center-relay', 'state': sample_host_state()}
+    host = {'host_id': 'audit-host-001', 'role': 'center-relay', 'state': sample_host_state()}
     nodes = module.nodes_from_host(host)
     require({n['protocol'] for n in nodes} == {'vless', 'hy2'}, '双协议直连节点没有同时进入订阅')
 
