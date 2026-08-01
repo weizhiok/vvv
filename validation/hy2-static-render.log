@@ -1,0 +1,11 @@
++ python3 -m py_compile tools/decode_hy2_static.py
++ python3 tools/decode_hy2_static.py
+Traceback (most recent call last):
+  File "/home/runner/work/vvv/vvv/tools/decode_hy2_static.py", line 10, in <module>
+    script = gzip.decompress(compressed)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/gzip.py", line 632, in decompress
+    decompressed = do.decompress(data[fp.tell():])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+zlib.error: Error -3 while decompressing data: invalid bit length repeat
+status=failure
