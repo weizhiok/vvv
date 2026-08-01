@@ -14,28 +14,47 @@ jobs:
         with:
           fetch-depth: 0
       - name: Apply permanent conformance and run final validation
+        id: validate
+        continue-on-error: true
         shell: bash
         run: |
-          set -Eeuxo pipefail
-          echo 'final-cleanup-attempt=2'
-          python3 -m py_compile tools/add_debian13_conformance.py
-          python3 tools/add_debian13_conformance.py
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq curl unzip jq openssl iproute2 qrencode
-          XRAY_VERSION="$(sed -n 's/^XRAY_FALLBACK_VERSION="\([^"]*\)"/\1/p' core-src/host.sh | head -n1)"
-          SING_VERSION="$(sed -n 's/^SING_BOX_FALLBACK_VERSION="\([^"]*\)"/\1/p' core-src/host.sh | head -n1)"
-          [[ -n "$XRAY_VERSION" && -n "$SING_VERSION" ]]
-          curl -fL --retry 5 --retry-all-errors "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip" -o /tmp/xray.zip
-          unzip -q /tmp/xray.zip xray -d /tmp/xray-unpack
-          install -m755 /tmp/xray-unpack/xray /tmp/xray
-          curl -fL --retry 5 --retry-all-errors "https://github.com/SagerNet/sing-box/releases/download/v${SING_VERSION}/sing-box-${SING_VERSION}-linux-amd64.tar.gz" -o /tmp/sing-box.tgz
-          tar -xzf /tmp/sing-box.tgz -C /tmp
-          install -m755 "/tmp/sing-box-${SING_VERSION}-linux-amd64/sing-box" /tmp/sing-box
-          chmod +x tests/final_runtime_validation.sh
-          tests/final_runtime_validation.sh /tmp/xray /tmp/sing-box | tee /tmp/vvv-final-cleanup-validation.log
-          grep -q 'ALL CONFORMANCE TESTS PASSED' /tmp/vvv-final-cleanup-validation.log
-          grep -q 'FINAL RUNTIME VALIDATION PASSED' /tmp/vvv-final-cleanup-validation.log
+          set -o pipefail
+          mkdir -p validation
+          {
+            set -Eeuxo pipefail
+            echo 'final-cleanup-attempt=3'
+            python3 -m py_compile tools/add_debian13_conformance.py
+            python3 tools/add_debian13_conformance.py
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq curl unzip jq openssl iproute2 qrencode
+            XRAY_VERSION="$(sed -n 's/^XRAY_FALLBACK_VERSION="\([^"]*\)"/\1/p' core-src/host.sh | head -n1)"
+            SING_VERSION="$(sed -n 's/^SING_BOX_FALLBACK_VERSION="\([^"]*\)"/\1/p' core-src/host.sh | head -n1)"
+            [[ -n "$XRAY_VERSION" && -n "$SING_VERSION" ]]
+            curl -fL --retry 5 --retry-all-errors "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip" -o /tmp/xray.zip
+            unzip -q /tmp/xray.zip xray -d /tmp/xray-unpack
+            install -m755 /tmp/xray-unpack/xray /tmp/xray
+            curl -fL --retry 5 --retry-all-errors "https://github.com/SagerNet/sing-box/releases/download/v${SING_VERSION}/sing-box-${SING_VERSION}-linux-amd64.tar.gz" -o /tmp/sing-box.tgz
+            tar -xzf /tmp/sing-box.tgz -C /tmp
+            install -m755 "/tmp/sing-box-${SING_VERSION}-linux-amd64/sing-box" /tmp/sing-box
+            chmod +x tests/final_runtime_validation.sh
+            tests/final_runtime_validation.sh /tmp/xray /tmp/sing-box
+          } > validation/final-cleanup-validation.log 2>&1
+          grep -q 'ALL CONFORMANCE TESTS PASSED' validation/final-cleanup-validation.log
+          grep -q 'FINAL RUNTIME VALIDATION PASSED' validation/final-cleanup-validation.log
+      - name: Publish failure log
+        if: steps.validate.outcome != 'success'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          printf 'status=failure\n' >> validation/final-cleanup-validation.log
+          git add tests/conformance.py validation/final-cleanup-validation.log
+          git commit -m 'Record final cleanup validation failure'
+          git push
+          exit 1
       - name: Remove obsolete artifacts
+        if: steps.validate.outcome == 'success'
         shell: bash
         run: |
           set -Eeuxo pipefail
@@ -44,6 +63,7 @@ jobs:
             install.sh sha256.txt version.txt src/bootstrap.sh core-src/validation.txt
           find .github/workflows -maxdepth 1 -type f ! -name validate.yml -print0 | xargs -0 -r git rm -f --
       - name: Verify clean production tree
+        if: steps.validate.outcome == 'success'
         shell: bash
         run: |
           set -Eeuxo pipefail
@@ -64,9 +84,10 @@ jobs:
           [[ ! -e payload && ! -e bundle && ! -e v2 && ! -e src-v2 ]]
           find . -maxdepth 2 -type f -not -path './.git/*' -printf '%p\n' | sort
       - name: Commit final clean repository
+        if: steps.validate.outcome == 'success'
         shell: bash
         run: |
-          set -Eeuo pipefail
+          set -Eeuxo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add README.md vvv-install.sh core-src src tests .github/workflows/validate.yml
