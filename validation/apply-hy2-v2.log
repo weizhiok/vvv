@@ -1,3 +1,4 @@
++ git show c4c0dcf793a1158f3d5829775de95185876db6b9:.staging-refactor/patch-hy2-runtime.gz.b64
 + python3 -m py_compile tools/decode_staged_hy2.py
 + python3 tools/decode_staged_hy2.py
 static: chars=2616 bytes=1960
