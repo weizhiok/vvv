@@ -183,6 +183,9 @@ show_parameter_summary
 case "$choice" in
   1)
     install_host; enable_relay
+    echo
+    echo "========== 继续安装订阅中心 =========="
+    echo "不会重启整台 VPS；只会按需启动或重启 Caddy、订阅中心等服务，当前 SSH 不受影响。"
     write_roles true true false true center-relay
     bash "$BASE_DIR/center_install.sh"
     code="$(cat /etc/vvv-sub/registration.code)"
@@ -190,6 +193,9 @@ case "$choice" in
     ;;
   2)
     install_host
+    echo
+    echo "========== 继续安装订阅中心 =========="
+    echo "不会重启整台 VPS；只会按需启动或重启 Caddy、订阅中心等服务，当前 SSH 不受影响。"
     write_roles true false false true center
     bash "$BASE_DIR/center_install.sh"
     code="$(cat /etc/vvv-sub/registration.code)"

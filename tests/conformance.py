@@ -182,6 +182,12 @@ def test_https_and_fresh_install_only():
         require(token in center, f'IP 证书申请或续期缺少：{token}')
     require('log { output discard }' not in center, 'Caddy log 块仍使用无效单行语法')
     require('log {\n    output discard\n  }' in center, 'Caddy log 块没有使用规范多行语法')
+    require('systemctl reload caddy.service' not in center, 'admin off 模式仍错误调用 Caddy reload')
+    require('ExecReload=/usr/local/bin/caddy reload' not in center, 'Caddy 服务仍配置依赖 admin API 的 reload')
+    require('.vvv-ip-final-active' in center, 'IP 证书首次部署和续期部署没有使用状态标记分流')
+    require('timeout 75 systemctl restart caddy.service' in center, 'IP 证书续期没有使用有界 Caddy 重启')
+    require('跳过重复 apt update' in center, '订阅中心仍可能静默重复刷新软件源')
+    require('继续安装订阅中心' in bootstrap and '当前 SSH 不受影响' in bootstrap, '代理安装后没有明确显示订阅中心进度')
     require('检查并升级 VVV' not in manager and 'update_vvv' not in manager, '仍保留原地升级兼容入口')
     require('sync_role' not in manager, '仍保留旧 all 角色兼容映射')
 
