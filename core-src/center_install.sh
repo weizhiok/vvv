@@ -33,6 +33,22 @@ ensure_service_active(){
   service_diagnostics "$service"
   fail "${service} 未进入 active 状态。"
 }
+apt_run(){
+  local label="$1" log
+  shift
+  log="$(mktemp /tmp/vvv-apt.XXXXXX)"
+  if "$@" 2>&1 | tee "$log"; then
+    rm -f "$log"
+    return 0
+  fi
+  if grep -Eqi 'Could not get lock|Unable to acquire.*lock|Waiting for cache lock' "$log"; then
+    rm -f "$log"
+    fail "APT/dpkg 锁等待超过 10 秒。请等待系统自动更新结束后重新运行；脚本不会删除锁文件，也不会强行终止系统更新。"
+  fi
+  echo "${label}失败。" >&2
+  rm -f "$log"
+  return 1
+}
 valid_port(){ [[ "${1:-}" =~ ^[0-9]+$ ]] && ((10#$1>=1 && 10#$1<=65535)); }
 valid_domain(){ [[ "${1:-}" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]; }
 open_port(){
@@ -287,10 +303,25 @@ for package in "${required_packages[@]}"; do
 done
 if ((${#missing_packages[@]})); then
   echo "正在安装缺少的依赖：${missing_packages[*]}"
-  if ! timeout 600 env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 install -y "${missing_packages[@]}"; then
-    echo "首次安装依赖失败，正在刷新软件索引后重试……"
-    timeout 600 apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 update
-    timeout 600 env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 install -y "${missing_packages[@]}" || fail "订阅中心依赖安装失败。"
+  echo "APT/dpkg 锁最多等待 10 秒；超时立即报错。"
+  if ! apt_run "订阅中心依赖安装" \
+    env DEBIAN_FRONTEND=noninteractive apt-get \
+      -o DPkg::Lock::Timeout=10 \
+      -o Acquire::Retries=2 \
+      install -y "${missing_packages[@]}"; then
+    echo "依赖安装失败，刷新软件索引后只再尝试一次……"
+    apt_run "APT 索引刷新" \
+      apt-get \
+        -o DPkg::Lock::Timeout=10 \
+        -o Acquire::Retries=2 \
+        -o Acquire::PDiffs=false \
+        -o Acquire::IndexTargets::deb::Sources::DefaultEnabled=false \
+        update || fail "APT 索引刷新失败。"
+    apt_run "订阅中心依赖安装" \
+      env DEBIAN_FRONTEND=noninteractive apt-get \
+        -o DPkg::Lock::Timeout=10 \
+        -o Acquire::Retries=2 \
+        install -y "${missing_packages[@]}" || fail "订阅中心依赖安装失败。"
   fi
 else
   echo "订阅中心依赖已齐全，跳过重复 apt update。"

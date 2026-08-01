@@ -14,8 +14,17 @@ for old_path in /etc/vvv /etc/jp-relay /etc/vvv-sub /usr/local/lib/vvv-source; d
   [[ ! -e "$old_path" ]] || fail "检测到已有 VVV 或代理状态。当前版本只支持全新安装，请重装 Debian 13 后再执行。"
 done
 if ! command -v curl >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
-  apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 update
-  DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 install -y curl ca-certificates bash python3
+  echo "APT/dpkg 锁最多等待 10 秒；超时将立即报错。"
+  apt-get \
+    -o DPkg::Lock::Timeout=10 \
+    -o Acquire::Retries=2 \
+    -o Acquire::PDiffs=false \
+    -o Acquire::IndexTargets::deb::Sources::DefaultEnabled=false \
+    update || fail "APT 更新失败。若提示锁被占用，脚本已等待最多 10 秒，请稍后重新运行。"
+  DEBIAN_FRONTEND=noninteractive apt-get \
+    -o DPkg::Lock::Timeout=10 \
+    -o Acquire::Retries=2 \
+    install -y curl ca-certificates bash python3 || fail "基础依赖安装失败。若提示锁被占用，脚本已等待最多 10 秒，请稍后重新运行。"
 fi
 nonce="$(date +%s)-$$"; mkdir -p "$TMP/app"
 echo "正在下载 VVV 普通源码……"
