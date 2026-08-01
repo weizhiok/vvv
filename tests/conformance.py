@@ -166,7 +166,7 @@ def test_jpr3_and_slot_architecture():
     ):
         require(token in prepare, f'最终槽位/JPR3 转换器缺少 {token}')
     require('python3' in landing, '落地脚本没有显式安装 Python 运行时')
-    require(".schema == 3" in landing and 'JPR3' in landing, '落地脚本没有严格校验 JPR3')
+    require('.schema==3' in landing and '.type=="jp-relay-landing"' in landing and 'actual_checksum' in landing and 'expected_checksum' in landing, '落地脚本没有严格校验 JPR3 schema、类型和摘要')
 
 
 def test_qr_helper():
