@@ -89,14 +89,14 @@ ask_center_parameters(){
   local input
   echo
   while true; do
-    read -r -p "请输入订阅 HTTPS 域名（必须已解析到本机）：" input
+    read -r -p "请输入订阅 HTTPS 域名（直接回车使用本机公网 IP）：" input
     input="${input,,}"; input="${input%.}"
     if [[ -z "$input" ]]; then
-      echo "订阅中心只提供 HTTPS，域名不能为空。"
-      continue
+      VVV_SUB_DOMAIN=""
+      break
     fi
     if valid_domain "$input"; then VVV_SUB_DOMAIN="$input"; break; fi
-    echo "域名格式不正确，请重新输入。"
+    echo "域名格式不正确，请重新输入；也可以直接回车使用本机公网 IP。"
   done
   while true; do
     read -r -p "请输入订阅 HTTPS 端口 [默认 8443]：" input
@@ -121,11 +121,11 @@ jpr_registration_code(){
 show_parameter_summary(){
   local role_name protocol_name
   case "$choice" in
-    1) role_name="订阅中心+中转主机（含自身代理）" ;;
-    2) role_name="仅订阅中心（含自身代理）" ;;
-    3) role_name="仅中转主机（含自身代理）" ;;
-    4) role_name="仅中转副机（通过主机代理）" ;;
-    5) role_name="仅直连代理" ;;
+    1) role_name="安装订阅中心 + 中转主机 + 自身代理" ;;
+    2) role_name="安装订阅中心 + 自身代理" ;;
+    3) role_name="安装中转主机 + 自身代理" ;;
+    4) role_name="安装中转副机（通过主机代理）" ;;
+    5) role_name="安装直连代理" ;;
   esac
   echo
   echo "========== 安装参数总览 =========="
@@ -138,7 +138,11 @@ show_parameter_summary(){
     echo "代理端口：$VVV_PROXY_PORT"
     [[ "$VVV_PROTOCOL_MODE" == hy2 ]] || echo "REALITY 伪装域名：$VVV_REALITY_SNI"
     if [[ "$choice" == 1 || "$choice" == 2 ]]; then
-      echo "订阅入口：https://${VVV_SUB_DOMAIN}:${VVV_SUB_PORT}"
+      if [[ -n "$VVV_SUB_DOMAIN" ]]; then
+        echo "订阅入口：https://${VVV_SUB_DOMAIN}:${VVV_SUB_PORT}"
+      else
+        echo "订阅入口：https://本机公网IP:${VVV_SUB_PORT}（自动申请免费 IP 证书）"
+      fi
     elif [[ "$choice" == 3 || "$choice" == 5 ]]; then
       [[ -n "$code" ]] && echo "订阅中心接入码：已填写" || echo "订阅中心接入码：未填写（独立使用）"
     fi
@@ -149,17 +153,11 @@ show_parameter_summary(){
 
 cat <<'EOF'
 ========== VVV 一体化安装管理 ==========
-
-1. 安装订阅中心+中转主机（含自身代理）
-
-2. 仅安装订阅中心（含自身代理）
-
-3. 仅安装中转主机（含自身代理）
-
-4. 仅安装中转副机（通过主机代理）
-
-5. 仅安装直连代理
-
+1. 安装订阅中心 + 中转主机 + 自身代理
+2. 安装订阅中心 + 自身代理
+3. 安装中转主机 + 自身代理
+4. 安装中转副机（通过主机代理）
+5. 安装直连代理
 0. 退出
 EOF
 while true; do
