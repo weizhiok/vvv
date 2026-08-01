@@ -16,6 +16,7 @@ replacements = (
     ("    require('rclone copyto' in backup and 'rclone sync' not in backup, '云上传必须使用 copy/copyto 而不是 sync')\n", "    require(\"'copyto'\" in backup and \"'sync'\" not in backup, '云上传必须使用 copy/copyto 而不是 sync')\n"),
     ("    require('AESGCM' in backup and '.enc' in backup, '本地备份没有使用加密容器')\n", "    require('-aes-256-cbc' in backup and '-pbkdf2' in backup and '.enc' in backup, '本地备份没有使用 AES-256-CBC + PBKDF2 加密容器')\n"),
     ("    require(\".schema == 3\" in landing and 'JPR3' in landing, '落地脚本没有严格校验 JPR3')\n", "    require('.schema==3' in landing and '.type==\"jp-relay-landing\"' in landing and 'actual_checksum' in landing and 'expected_checksum' in landing, '落地脚本没有严格校验 JPR3 schema、类型和摘要')\n"),
+    ("    require(\"printf '\\033[47m\" in qr, '二维码顶部没有额外白边')\n", "    require(\"\\\\033[47m%*s\\\\033[0m\" in qr, '二维码顶部没有额外白边')\n"),
 )
 for old, new in replacements:
     if old in text:
