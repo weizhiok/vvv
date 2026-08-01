@@ -26,5 +26,12 @@ if old_assertion in text:
 elif new_assertion not in text:
     raise SystemExit('manager compatibility assertion anchor not found')
 
+old_error = "raise SystemExit(f'forbidden QR implementation remains: {forbidden}')"
+new_error = "raise SystemExit(f'forbidden QR implementation remains: {forbidden}; files={[p for p in production_files if forbidden in read(p)]}')"
+if old_error in text:
+    text = text.replace(old_error, new_error, 1)
+elif new_error not in text:
+    raise SystemExit('QR diagnostic anchor not found')
+
 path.write_text(text, encoding='utf-8')
 print('SSH log transformer anchors repaired')
