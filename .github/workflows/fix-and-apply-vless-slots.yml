@@ -16,32 +16,20 @@ jobs:
           set -Eeuo pipefail
           python3 - <<'PY'
           from pathlib import Path
-
           p = Path('tools/patch_vless_slots.py')
           s = p.read_text(encoding='utf-8')
-
           if s.count("post=r'''") != 1:
               raise SystemExit('outer opening delimiter not found once')
           s = s.replace("post=r'''", 'post=r"""', 1)
-
           marker = "\n'''\ns=s.replace(anchor,post+"
           if s.count(marker) != 1:
               raise SystemExit('outer closing delimiter not found once')
           s = s.replace(marker, '\n"""\ns=s.replace(anchor,post+', 1)
-
-          old = """old = '''  ALLOC_VLESS_EMAIL=\"$(jq -r '.email' <<<\"$slot_json\")\"
-  [[ -n \"$ALLOC_VLESS_SLOT\" && -n \"$ALLOC_VLESS_UUID\" && -n \"$ALLOC_VLESS_EMAIL\" ]] || fail \"VLESS 预分配用户池损坏。\"'''
-new = '''  ALLOC_VLESS_EMAIL=\"$(jq -r '.email' <<<\"$slot_json\")\"
-  ALLOC_VLESS_PORT=\"$(jq -r '.local_port' <<<\"$slot_json\")\"
-  [[ -n \"$ALLOC_VLESS_SLOT\" && -n \"$ALLOC_VLESS_UUID\" && -n \"$ALLOC_VLESS_EMAIL\" && \"$ALLOC_VLESS_PORT\" =~ ^[0-9]+$ ]] || fail \"VLESS 预分配用户池损坏。\"'''"""
-          new = """old = '''  ALLOC_VLESS_EMAIL=\"$(jq -r '.email' <<<\"$slot_json\")\"'''
-new = '''  ALLOC_VLESS_EMAIL=\"$(jq -r '.email' <<<\"$slot_json\")\"
-  ALLOC_VLESS_PORT=\"$(jq -r '.local_port' <<<\"$slot_json\")\"
-  [[ -n \"$ALLOC_VLESS_SLOT\" && -n \"$ALLOC_VLESS_UUID\" && -n \"$ALLOC_VLESS_EMAIL\" && \"$ALLOC_VLESS_PORT\" =~ ^[0-9]+$ ]] || fail \"VLESS 预分配用户池损坏。\"'''"""
+          old = "old = '''  ALLOC_VLESS_EMAIL=\\\"$(jq -r '.email' <<<\\\"$slot_json\\\")\\\"\n  [[ -n \\\"$ALLOC_VLESS_SLOT\\\" && -n \\\"$ALLOC_VLESS_UUID\\\" && -n \\\"$ALLOC_VLESS_EMAIL\\\" ]] || fail \\\"VLESS 预分配用户池损坏。\\\"'''\nnew = '''  ALLOC_VLESS_EMAIL=\\\"$(jq -r '.email' <<<\\\"$slot_json\\\")\\\"\n  ALLOC_VLESS_PORT=\\\"$(jq -r '.local_port' <<<\\\"$slot_json\\\")\\\"\n  [[ -n \\\"$ALLOC_VLESS_SLOT\\\" && -n \\\"$ALLOC_VLESS_UUID\\\" && -n \\\"$ALLOC_VLESS_EMAIL\\\" && \\\"$ALLOC_VLESS_PORT\\\" =~ ^[0-9]+$ ]] || fail \\\"VLESS 预分配用户池损坏。\\\"'''"
+          new = "old = '''  ALLOC_VLESS_EMAIL=\\\"$(jq -r '.email' <<<\\\"$slot_json\\\")\\\"'''\nnew = '''  ALLOC_VLESS_EMAIL=\\\"$(jq -r '.email' <<<\\\"$slot_json\\\")\\\"\n  ALLOC_VLESS_PORT=\\\"$(jq -r '.local_port' <<<\\\"$slot_json\\\")\\\"\n  [[ -n \\\"$ALLOC_VLESS_SLOT\\\" && -n \\\"$ALLOC_VLESS_UUID\\\" && -n \\\"$ALLOC_VLESS_EMAIL\\\" && \\\"$ALLOC_VLESS_PORT\\\" =~ ^[0-9]+$ ]] || fail \\\"VLESS 预分配用户池损坏。\\\"'''"
           if s.count(old) != 1:
               raise SystemExit(f'VLESS allocation anchor count={s.count(old)}')
           s = s.replace(old, new, 1)
-
           p.write_text(s, encoding='utf-8')
           PY
           python3 -m py_compile tools/patch_vless_slots.py
