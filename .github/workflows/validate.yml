@@ -31,7 +31,28 @@ jobs:
             echo "Patch already applied; nothing to publish."
             exit 0
           fi
-          python3 tools/apply_caddy_restart_progress_fix.py
+          set +e
+          output="$(python3 tools/apply_caddy_restart_progress_fix.py 2>&1)"
+          rc=$?
+          set -e
+          printf '%s\n' "$output"
+          if (( rc != 0 )) && [[ "$output" != *"missing anchor: README progress and restart policy"* ]]; then
+            exit "$rc"
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('README.md')
+          text = path.read_text(encoding='utf-8')
+          old = '''- IP 模式使用隔离的 Certbot 5.4+ 环境申请 Let’s Encrypt `shortlived` IP 地址证书；
+          - IP 证书有效期较短，脚本安装 systemd 定时器每天检查两次并自动续期；'''
+          new = '''- IP 模式使用隔离的 Certbot 5.4+ 环境申请 Let’s Encrypt `shortlived` IP 地址证书；
+          - IP 证书有效期较短，脚本安装 systemd 定时器每天检查两次并自动续期；
+          - 证书首次部署不会错误调用 Caddy reload；续期后只重启 Caddy，不重启整台 VPS，也不会中断 SSH；
+          - 代理部分完成后会立即显示订阅中心的分阶段进度，依赖下载和证书申请均有明确提示与超时保护；'''
+          if old not in text:
+              raise SystemExit('README fallback anchor missing')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Verify source and rendered installers
         run: |
           set -Eeuo pipefail
