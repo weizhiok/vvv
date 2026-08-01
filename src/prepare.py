@@ -112,18 +112,17 @@ slot_helpers = r'''vvv_event_backup() {
 allocate_vless_slot() {
   local slot_json
   slot_json="$(jq -c '[.vless.reserve_users[] | select(.assigned_id==null)][0] // empty' "$STATE_FILE")"
-  [[ -n "$slot_json" ]] || fail "VLESS 动态线路已达到 64 条上限。"
+  [[ -n "$slot_json" ]] || fail "VLESS 可用固定凭证槽位已用尽（已分配或退役共 64 条）。"
   ALLOC_VLESS_SLOT="$(jq -r '.slot' <<<"$slot_json")"
   ALLOC_VLESS_UUID="$(jq -r '.uuid' <<<"$slot_json")"
   ALLOC_VLESS_EMAIL="$(jq -r '.email' <<<"$slot_json")"
 }
 
 release_orphaned_vless_slots() {
-  local path="$1" tmp
+  local path="$1"
   [[ "$(jq -r '.vless // empty' "$path")" != "" ]] || return 0
-  tmp="$(mktemp --suffix=.json /tmp/vvv-slots.XXXXXX)"; TMP_FILES+=("$tmp")
-  jq '([.relays[]?.id] + [.upstream_relays[]?.id]) as $active | .vless.reserve_users |= map(if (.assigned_id != null and (($active|index(.assigned_id)) == null)) then .assigned_id=null else . end)' "$path" > "$tmp"
-  install -m600 "$tmp" "$path"
+  jq -e '[.vless.reserve_users[]?.assigned_id | select(.!=null)] as $ids | ($ids|length)==($ids|unique|length)' "$path" >/dev/null || fail "VLESS 固定槽位存在重复占用。"
+  # 删除线路后保留 assigned_id 作为退役标记，防止旧 UUID 在未来被其他线路复用。
 }
 
 '''
@@ -375,7 +374,7 @@ h = replace_once(h, unit_marker, unit_replacement, 'HY2 槽位 systemd 模板')
 hy2_helpers = r'''allocate_hy2_slot() {
   local slot_json
   slot_json="$(jq -c '[.hy2.reserve_users[] | select(.assigned_id==null)][0] // empty' "$STATE_FILE")"
-  [[ -n "$slot_json" ]] || fail "Hysteria 2 动态线路已达到 64 条上限。"
+  [[ -n "$slot_json" ]] || fail "Hysteria 2 可用固定凭证槽位已用尽（已分配或退役共 64 条）。"
   ALLOC_HY2_SLOT="$(jq -r '.slot' <<<"$slot_json")"
   ALLOC_HY2_USER="$(jq -r '.name' <<<"$slot_json")"
   ALLOC_HY2_PASSWORD="$(jq -r '.password' <<<"$slot_json")"
@@ -384,11 +383,10 @@ hy2_helpers = r'''allocate_hy2_slot() {
 }
 
 release_orphaned_hy2_slots() {
-  local state_path="$1" tmp
+  local state_path="$1"
   [[ "$(jq -r '.hy2 // empty' "$state_path")" != "" ]] || return 0
-  tmp="$(mktemp --suffix=.json /tmp/vvv-hy2-slots.XXXXXX)"; TMP_FILES+=("$tmp")
-  jq '[.relays[]?.id] as $active | .hy2.reserve_users |= map(if (.assigned_id != null and (($active|index(.assigned_id)) == null)) then .assigned_id=null else . end)' "$state_path" > "$tmp"
-  install -m600 "$tmp" "$state_path"
+  jq -e '[.hy2.reserve_users[]?.assigned_id | select(.!=null)] as $ids | ($ids|length)==($ids|unique|length)' "$state_path" >/dev/null || fail "Hysteria 2 固定槽位存在重复占用。"
+  # 删除线路后保留 assigned_id 作为退役标记，防止旧用户名和密码在未来被其他线路复用。
 }
 
 '''
