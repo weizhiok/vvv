@@ -1,0 +1,9 @@
++ cp core-src/host.sh /tmp/host.sh
++ cp core-src/landing.sh /tmp/landing.sh
++ cp core-src/center_install.sh /tmp/center.sh
++ python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
++ bash -n /tmp/host.sh
++ sh -n /tmp/landing.sh
++ sh -n /tmp/center.sh
+/tmp/center.sh: 10: Syntax error: "(" unexpected (expecting "}")
+status=failure
