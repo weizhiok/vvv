@@ -1,5 +1,5 @@
-+ echo validation-attempt=4
-validation-attempt=4
++ echo validation-attempt=5
+validation-attempt=5
 + python3 -m py_compile tools/fix_final_conformance_tests.py
 + python3 tools/fix_final_conformance_tests.py
 + sudo apt-get update -qq
@@ -31,7 +31,7 @@ Running kernel seems to be up-to-date.
 
 Restarting services...
  /etc/needrestart/restart.d/systemd-manager
- systemctl restart packagekit.service php8.3-fpm.service systemd-journald.service systemd-networkd.service systemd-resolved.service systemd-timedated.service systemd-udevd.service udisks2.service
+ systemctl restart packagekit.service php8.3-fpm.service systemd-journald.service systemd-networkd.service systemd-resolved.service systemd-udevd.service udisks2.service
 
 Service restarts being deferred:
  systemctl restart hosted-compute-agent.service
@@ -41,7 +41,7 @@ Service restarts being deferred:
 No containers need to be restarted.
 
 User sessions running outdated binaries:
- runner @ user manager service: systemd[1113]
+ runner @ user manager service: systemd[1109]
 
 No VM guests are running outdated hypervisor (qemu) binaries on this host.
 ++ sed -n 's/^XRAY_FALLBACK_VERSION="\([^"]*\)"/\1/p' core-src/host.sh
@@ -53,15 +53,15 @@ No VM guests are running outdated hypervisor (qemu) binaries on this host.
 + curl -fL --retry 5 --retry-all-errors https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip -o /tmp/xray.zip
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-100 20.1M  100 20.1M    0     0  47.1M      0 --:--:-- --:--:-- --:--:-- 47.1M
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+100 20.1M  100 20.1M    0     0  67.3M      0 --:--:-- --:--:-- --:--:-- 67.3M
 + unzip -q /tmp/xray.zip xray -d /tmp/xray-unpack
 + install -m755 /tmp/xray-unpack/xray /tmp/xray
 + curl -fL --retry 5 --retry-all-errors https://github.com/SagerNet/sing-box/releases/download/v1.13.12/sing-box-1.13.12-linux-amd64.tar.gz -o /tmp/sing-box.tgz
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-100 22.7M  100 22.7M    0     0  56.1M      0 --:--:-- --:--:-- --:--:-- 56.1M
+100 22.7M  100 22.7M    0     0  69.4M      0 --:--:-- --:--:-- --:--:-- 69.4M
 + tar -xzf /tmp/sing-box.tgz -C /tmp
 + install -m755 /tmp/sing-box-1.13.12-linux-amd64/sing-box /tmp/sing-box
 + chmod +x tests/final_runtime_validation.sh
@@ -70,13 +70,13 @@ No VM guests are running outdated hypervisor (qemu) binaries on this host.
 ===== Source conformance and syntax =====
 PASS test_menu_and_front_loaded_parameters
 Traceback (most recent call last):
-  File "/home/runner/work/vvv/vvv/tests/conformance.py", line 207, in <module>
+  File "/home/runner/work/vvv/vvv/tests/conformance.py", line 208, in <module>
     main()
-  File "/home/runner/work/vvv/vvv/tests/conformance.py", line 201, in main
+  File "/home/runner/work/vvv/vvv/tests/conformance.py", line 202, in main
     test()
-  File "/home/runner/work/vvv/vvv/tests/conformance.py", line 110, in test_subscription_renderers
-    require('hysteria2://' in shadowrocket, 'Shadowrocket 缺少 Hysteria 2 链接')
+  File "/home/runner/work/vvv/vvv/tests/conformance.py", line 119, in test_subscription_renderers
+    require("clients = ('c', 'qx', 'ln', 'sr', 'v2')" in source, '订阅短路径集合不正确')
   File "/home/runner/work/vvv/vvv/tests/conformance.py", line 18, in require
     raise AssertionError(message)
-AssertionError: Shadowrocket 缺少 Hysteria 2 链接
+AssertionError: 订阅短路径集合不正确
 status=failure
