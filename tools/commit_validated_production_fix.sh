@@ -9,7 +9,7 @@ python3 -m py_compile tools/fix_ssh_log_transformer_anchor.py tools/apply_ssh_lo
 python3 tools/fix_ssh_log_transformer_anchor.py
 python3 -m py_compile tools/apply_ssh_log_fixes.py
 python3 tools/apply_ssh_log_fixes.py
-git rm core-src/qr_helper.sh
+git rm -f --ignore-unmatch core-src/qr_helper.sh
 
 python3 -m py_compile \
   src/prepare.py core-src/sub_center.py core-src/sync_agent.py \
