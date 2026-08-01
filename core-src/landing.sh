@@ -176,7 +176,7 @@ upgrade_system_once() {
     dpkg --configure -a >/dev/null 2>&1 || true
     retry 3 10 apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
       ca-certificates curl unzip tar gzip openssl jq iproute2 procps \
-      tzdata kmod qrencode util-linux
+      tzdata kmod qrencode util-linux python3
     update-ca-certificates >/dev/null 2>&1 || true
     echo "Debian 核心组件保持 VPS 镜像原版本，仅安装代理所需依赖。"
   else
@@ -184,7 +184,7 @@ upgrade_system_once() {
     # Alpine 同样不做整机 apk upgrade，降低基础镜像和 OpenRC 被改动的风险。
     retry 3 10 apk add --no-cache \
       ca-certificates curl unzip tar gzip openssl jq iproute2 procps \
-      tzdata kmod libqrencode-tools util-linux
+      tzdata kmod libqrencode-tools util-linux python3
     update-ca-certificates >/dev/null 2>&1 || true
     echo "Alpine 核心组件保持镜像原版本，仅安装代理所需依赖。"
   fi

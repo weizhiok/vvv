@@ -102,6 +102,13 @@ ask_center_parameters(){
   done
   export VVV_SUB_DOMAIN VVV_SUB_PORT
 }
+jpr_registration_code(){
+  local value="$1" rest encoded mod padded
+  rest="${value#JPR3.}"; encoded="${rest%%.*}"
+  mod=$((${#encoded} % 4))
+  case "$mod" in 0) padded="$encoded";; 2) padded="${encoded}==";; 3) padded="${encoded}=";; *) return 1;; esac
+  printf '%s' "$padded" | tr '_-' '/+' | base64 -d 2>/dev/null | jq -r '.subscription_registration_code // empty'
+}
 show_parameter_summary(){
   local role_name protocol_name
   case "$choice" in
@@ -191,6 +198,8 @@ case "$choice" in
     chmod 700 "$tmp"; sh "$tmp"; rm -f "$tmp"
     [[ -x /usr/local/sbin/vps ]] && cp -f /usr/local/sbin/vps /usr/local/sbin/vvv-landing-original
     write_roles false false true false landing
+    code="$(jpr_registration_code "$key" || true)"
+    bash "$BASE_DIR/register_sync.sh" landing "$code"
     ;;
   4)
     install_host

@@ -1,0 +1,17 @@
++ python3 -m py_compile tools/patch_landing_registration.py
++ python3 tools/patch_landing_registration.py
++ bash -n core-src/bootstrap.sh
++ sh -n core-src/landing.sh
++ grep -q python3 core-src/landing.sh
++ grep -q jpr_registration_code core-src/bootstrap.sh
++ grep -q 'register_sync.sh" landing "$code"' core-src/bootstrap.sh
++ python3 -
+JPR3 subscription registration code extraction passed
++ cp core-src/host.sh /tmp/host.sh
++ cp core-src/landing.sh /tmp/landing.sh
++ cp core-src/center_install.sh /tmp/center.sh
++ python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
++ bash -n /tmp/host.sh
++ sh -n /tmp/landing.sh
++ bash -n /tmp/center.sh
+status=success
