@@ -6,10 +6,6 @@ role="${1:?role}"; code="${2:-}"
 install -d -m700 /etc/vvv /usr/local/lib/vvv
 install -m755 "$BASE_DIR/sync_agent.py" /usr/local/lib/vvv/sync_agent.py
 
-systemctl disable --now vvv-backup-pull.timer vvv-backup-pull.service >/dev/null 2>&1 || true
-rm -f /etc/systemd/system/vvv-backup-pull.timer /etc/systemd/system/vvv-backup-pull.service
-rm -rf /var/backups/vvv-remote
-
 if [[ -n "$code" ]]; then
   python3 /usr/local/lib/vvv/sync_agent.py register "$code" "$role"
 fi
