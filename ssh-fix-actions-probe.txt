@@ -1,1 +1,1 @@
-ssh-fix-actions-probe=success
+ssh-fix-actions-probe=isolated-2
