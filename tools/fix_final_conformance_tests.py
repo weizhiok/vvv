@@ -65,3 +65,13 @@ elif any(token in text for token in ('vvv-backup-pull', '/var/backups/vvv-remote
     raise SystemExit('unexpected legacy backup cleanup remains in center installer')
 text = text.replace('create initial-center-install --force', 'create first-install --force')
 center.write_text(text, encoding='utf-8')
+
+sub_center = Path('core-src/sub_center.py')
+text = sub_center.read_text(encoding='utf-8')
+text = text.replace("backup('before-register')", "backup('before-host-register')")
+text = text.replace("backup('after-register')", "backup('after-host-register')")
+if any(token in text for token in ("backup('before-register')", "backup('after-register')")):
+    raise SystemExit('old host registration backup event names remain')
+if not all(token in text for token in ('before-host-register', 'after-host-register')):
+    raise SystemExit('explicit host registration backup events were not installed')
+sub_center.write_text(text, encoding='utf-8')
