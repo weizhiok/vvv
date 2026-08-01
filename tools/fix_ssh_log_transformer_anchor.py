@@ -33,6 +33,13 @@ if old_assertion in text:
 elif new_assertion not in text:
     raise SystemExit('manager compatibility assertion anchor not found')
 
+old_qr_test_replace = ", new_no_qr + '\\n', 'replace QR conformance test')"
+new_qr_test_replace = ", lambda m: new_no_qr + '\\n', 'replace QR conformance test')"
+if old_qr_test_replace in text:
+    text = text.replace(old_qr_test_replace, new_qr_test_replace, 1)
+elif new_qr_test_replace not in text:
+    raise SystemExit('QR conformance callback anchor not found')
+
 old_error = "raise SystemExit(f'forbidden QR implementation remains: {forbidden}')"
 new_error = "raise SystemExit(f'forbidden QR implementation remains: {forbidden}; files={[p for p in production_files if forbidden in read(p)]}')"
 if old_error in text:
