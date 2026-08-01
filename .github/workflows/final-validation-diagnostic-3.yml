@@ -1,0 +1,52 @@
+name: Final validation diagnostic 3
+on:
+  push:
+    paths:
+      - '.github/workflows/final-validation-diagnostic-3.yml'
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run validation
+        id: test
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p validation
+          {
+            set -Eeuxo pipefail
+            echo 'validation-fresh-attempt=1'
+            python3 -m py_compile tools/fix_final_conformance_tests.py
+            python3 tools/fix_final_conformance_tests.py
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq curl unzip jq openssl iproute2 qrencode
+            XRAY_VERSION="$(sed -n 's/^XRAY_FALLBACK_VERSION="\([^"]*\)"/\1/p' core-src/host.sh | head -n1)"
+            SING_VERSION="$(sed -n 's/^SING_BOX_FALLBACK_VERSION="\([^"]*\)"/\1/p' core-src/host.sh | head -n1)"
+            curl -fL --retry 5 --retry-all-errors "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip" -o /tmp/xray.zip
+            unzip -q /tmp/xray.zip xray -d /tmp/xray-unpack
+            install -m755 /tmp/xray-unpack/xray /tmp/xray
+            curl -fL --retry 5 --retry-all-errors "https://github.com/SagerNet/sing-box/releases/download/v${SING_VERSION}/sing-box-${SING_VERSION}-linux-amd64.tar.gz" -o /tmp/sing-box.tgz
+            tar -xzf /tmp/sing-box.tgz -C /tmp
+            install -m755 "/tmp/sing-box-${SING_VERSION}-linux-amd64/sing-box" /tmp/sing-box
+            chmod +x tests/final_runtime_validation.sh
+            tests/final_runtime_validation.sh /tmp/xray /tmp/sing-box
+          } > validation/final-validation-3.log 2>&1
+      - name: Publish diagnostic
+        if: always()
+        shell: bash
+        env:
+          TEST_OUTCOME: ${{ steps.test.outcome }}
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          printf 'status=%s\n' "$TEST_OUTCOME" >> validation/final-validation-3.log
+          git add core-src/center_install.sh core-src/sub_center.py tests/conformance.py tests/final_runtime_validation.sh validation/final-validation-3.log
+          git commit -m "Record fresh final VVV validation result"
+          git push
+          [[ "$TEST_OUTCOME" == success ]]
