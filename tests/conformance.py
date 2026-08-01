@@ -116,7 +116,7 @@ def test_subscription_renderers():
         require(token in hy2, f'v2rayNG HY2 缺少 {token}')
 
     source = read('core-src/sub_center.py')
-    require("clients = ('c', 'qx', 'ln', 'sr', 'v2')" in source, '订阅短路径集合不正确')
+    require("SHORT_PATHS = {'c': 'clash', 'qx': 'quantumultx', 'ln': 'loon', 'sr': 'shadowrocket', 'v2': 'v2rayng'}" in source, '订阅短路径集合不正确')
     require("{'c': 'clash', 'qx': 'quantumultx', 'ln': 'loon', 'sr': 'shadowrocket', 'v2': 'v2rayng'}" in source, '短路径渲染映射不正确')
     center = read('core-src/center_install.sh')
     require('for client in sr v2' in center, '订阅二维码应只显示 Shadowrocket 和 v2rayNG')
