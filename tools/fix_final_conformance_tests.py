@@ -22,6 +22,10 @@ replacements = (
         "    clash = module.render_clash(nodes)\n    qx = module.render_qx(nodes)\n    loon = module.render_loon(nodes)\n    shadowrocket = module.render_shadowrocket(nodes)\n",
     ),
     (
+        "    require('hysteria2://' in shadowrocket, 'Shadowrocket 缺少 Hysteria 2 链接')\n",
+        "    shadowrocket_text = base64.b64decode(shadowrocket).decode('utf-8')\n    require('hysteria2://' in shadowrocket_text, 'Shadowrocket 缺少 Hysteria 2 链接')\n",
+    ),
+    (
         "    require('rclone copyto' in backup and 'rclone sync' not in backup, '云上传必须使用 copy/copyto 而不是 sync')\n",
         "    require(\"'copyto'\" in backup and \"'sync'\" not in backup, '云上传必须使用 copy/copyto 而不是 sync')\n",
     ),
