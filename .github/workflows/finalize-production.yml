@@ -17,4 +17,4 @@ jobs:
         with:
           ref: main
           clean: true
-      - run: bash tools/rebase_publish_production_fix.sh
+      - run: bash tools/finalize_validated_production_fix.sh
