@@ -1,0 +1,14 @@
+name: Publish SSH fixes
+on:
+  push:
+    paths:
+      - '.github/workflows/publish-quick-ssh-fix.yml'
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tools/run_quick_ssh_fix.sh
