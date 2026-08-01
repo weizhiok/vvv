@@ -1,0 +1,13 @@
++ python3 -m py_compile tools/frontload_host_env.py
++ python3 tools/frontload_host_env.py
++ bash -n core-src/host.sh
++ bash -n core-src/bootstrap.sh
++ cp core-src/host.sh /tmp/host.sh
++ cp core-src/landing.sh /tmp/landing.sh
++ cp core-src/center_install.sh /tmp/center.sh
++ python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
++ bash -n /tmp/host.sh
++ sh -n /tmp/landing.sh
++ bash -n /tmp/center.sh
++ grep -q 'preset_mode="${VVV_PROXY_MODE:-}"' /tmp/host.sh
+status=failure
