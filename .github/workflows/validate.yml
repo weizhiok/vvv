@@ -2,6 +2,13 @@ name: Validate VVV
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'tools/**'
+      - 'validation/**'
+      - '.github/workflows/apply-ssh-log-fixes*.yml'
+      - '.github/workflows/run-final-ssh-fix.yml'
+      - '.github/workflows/publish-quick-ssh-fix.yml'
+      - '.github/workflows/ssh-fix-actions-probe.yml'
   pull_request:
   workflow_dispatch:
 concurrency:
