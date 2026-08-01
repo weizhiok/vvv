@@ -12,10 +12,16 @@ show_roles(){
   role_has landing && echo "✓ 中转副机" || echo "✗ 中转副机"
 }
 primary(){ jq -r .primary_role "$ROLE_FILE"; }
+sync_role(){
+  case "$(primary)" in
+    all) echo center-relay ;;
+    *) primary ;;
+  esac
+}
 register_center(){
   read -r -p "请输入 VVV 主机接入码：" code
   [[ -n $code ]] || { echo "接入码不能为空。"; return; }
-  /usr/local/lib/vvv/register_sync.sh "$(primary)" "$code"
+  /usr/local/lib/vvv/register_sync.sh "$(sync_role)" "$code"
 }
 show_sync(){
   [[ -f /etc/vvv/client.json ]] && jq '{base_url,host_id,role,registered_at,last_sync,last_result}' /etc/vvv/client.json || echo "尚未注册订阅中心。"
