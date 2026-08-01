@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 umask 077
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-XRAY="${1:?usage: final_runtime_validation.sh XRAY SING_BOX}"
-SING_BOX="${2:?usage: final_runtime_validation.sh XRAY SING_BOX}"
+TEST_XRAY="${1:?usage: final_runtime_validation.sh XRAY SING_BOX}"
+TEST_SING_BOX="${2:?usage: final_runtime_validation.sh XRAY SING_BOX}"
 WORK="$(mktemp -d /tmp/vvv-final-test.XXXXXX)"
 PIDS=()
 cleanup(){
@@ -53,6 +53,8 @@ bash -n "$WORK/center.sh"
 python3 "$ROOT/tests/extract_manager_library.py" "$WORK/host.sh" "$WORK/manager-lib.sh"
 bash -n "$WORK/manager-lib.sh"
 source "$WORK/manager-lib.sh"
+XRAY="$TEST_XRAY"
+SING_BOX="$TEST_SING_BOX"
 HY2_LIMIT_MBPS=50
 
 log 'Build fixed main and isolated slot fixtures'
