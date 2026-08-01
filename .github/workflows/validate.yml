@@ -23,13 +23,13 @@ permissions:
 jobs:
   final-validation:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Install test dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ca-certificates curl unzip jq openssl iproute2
+          sudo apt-get install -y -qq ca-certificates curl unzip jq openssl iproute2 python3-venv
       - name: Download declared proxy cores
         run: |
           set -Eeuo pipefail
@@ -44,7 +44,23 @@ jobs:
           install -m755 "/tmp/sing-box-${SING_VERSION}-linux-amd64/sing-box" /tmp/sing-box
           /tmp/xray version
           /tmp/sing-box version
+      - name: Download Caddy and install Certbot 5.4+
+        run: |
+          set -Eeuo pipefail
+          CADDY_API="$(curl -fsSL --retry 5 --retry-all-errors https://api.github.com/repos/caddyserver/caddy/releases/latest)"
+          CADDY_URL="$(jq -r '.assets[] | select(.name|endswith("linux_amd64.tar.gz")) | .browser_download_url' <<<"$CADDY_API" | head -n1)"
+          [[ -n "$CADDY_URL" && "$CADDY_URL" != null ]]
+          mkdir -p /tmp/caddy-unpack
+          curl -fL --retry 5 --retry-all-errors "$CADDY_URL" -o /tmp/caddy.tgz
+          tar -xzf /tmp/caddy.tgz -C /tmp/caddy-unpack caddy
+          install -m755 /tmp/caddy-unpack/caddy /tmp/caddy
+          python3 -m venv /tmp/certbot-check
+          /tmp/certbot-check/bin/pip install --disable-pip-version-check --no-cache-dir 'certbot>=5.4,<6'
       - name: Run final conformance and live-process validation
         run: |
           chmod +x tests/final_runtime_validation.sh
           tests/final_runtime_validation.sh /tmp/xray /tmp/sing-box
+      - name: Validate HTTPS frontends with real tools
+        run: |
+          chmod +x tests/https_frontend_validation.sh
+          tests/https_frontend_validation.sh /tmp/caddy /tmp/certbot-check/bin/certbot
