@@ -20,6 +20,7 @@ jobs:
           mkdir -p validation
           {
             set -Eeuxo pipefail
+            echo 'validation-attempt=3'
             python3 -m py_compile tools/fix_final_conformance_tests.py
             python3 tools/fix_final_conformance_tests.py
             sudo apt-get update -qq
