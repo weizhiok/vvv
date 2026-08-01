@@ -302,8 +302,8 @@ text = replace_once(text, old_https_wait, new_https_wait, "https health wait")
 
 text = replace_once(
     text,
-    '''printf '\\n订阅中心安装成功。\\n主机接入码：%s\\n' "$registration_code"''',
-    '''printf '\\n订阅中心安装成功，总耗时 %s 秒。\\n主机接入码：%s\\n' "$((SECONDS-CENTER_STARTED))" "$registration_code"''',
+    '''printf '\\n订阅中心安装成功。\\nHTTPS 模式：%s\\n主机接入码：%s\\n' "$mode" "$registration_code"''',
+    '''printf '\\n订阅中心安装成功，总耗时 %s 秒。\\nHTTPS 模式：%s\\n主机接入码：%s\\n' "$((SECONDS-CENTER_STARTED))" "$mode" "$registration_code"''',
     "completion duration",
 )
 path.write_text(text, encoding="utf-8")
