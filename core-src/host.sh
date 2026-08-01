@@ -288,11 +288,7 @@ check_debian() {
   [[ -r /etc/os-release ]] || fail "无法读取 /etc/os-release。"
   # shellcheck disable=SC1091
   source /etc/os-release
-  [[ "${ID:-}" == "debian" ]] || fail "日本脚本仅支持 Debian 12/13。当前系统：${PRETTY_NAME:-未知}"
-  case "${VERSION_ID:-}" in
-    12|13) ;;
-    *) fail "日本脚本仅支持 Debian 12/13。当前版本：${VERSION_ID:-未知}" ;;
-  esac
+  [[ "${ID:-}" == "debian" && "${VERSION_ID:-}" == "13" ]] || fail "主机脚本仅支持 Debian 13。当前系统：${PRETTY_NAME:-未知}"
   command -v systemctl >/dev/null 2>&1 || fail "当前 Debian 没有 systemctl，无法管理代理服务。"
   [[ "$(cat /proc/1/comm 2>/dev/null | tr -d '[:space:]')" == "systemd" ]] || fail "当前系统不是以 systemd 作为 PID 1，主机脚本无法安全安装服务。"
 

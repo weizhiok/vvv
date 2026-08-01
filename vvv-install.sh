@@ -6,6 +6,10 @@ TMP="$(mktemp -d /tmp/vvv-install.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 fail(){ echo "错误：$*" >&2; exit 1; }
 [[ $(id -u) -eq 0 ]] || fail "请使用 root 用户运行。"
+[[ -r /etc/os-release ]] || fail "无法读取 /etc/os-release。"
+# shellcheck disable=SC1091
+source /etc/os-release
+[[ "${ID:-}" == debian && "${VERSION_ID:-}" == 13 ]] || fail "VVV 仅支持 Debian 13。当前系统：${PRETTY_NAME:-未知}"
 if ! command -v curl >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
   apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 update
   DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 install -y curl ca-certificates bash python3

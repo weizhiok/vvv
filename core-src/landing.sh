@@ -23,8 +23,6 @@ TMP_DIR=""
 TMP_CFG=""
 TEST_LOG=""
 TEST_PID=""
-OS_FAMILY=""
-OS_VERSION=""
 IS_CONTAINER=0
 BBR_STATUS="未检查"
 BBR_QDISC="未知"
@@ -138,56 +136,34 @@ base64url_decode() {
 }
 
 detect_os() {
-  if [ -f /etc/alpine-release ]; then
-    OS_FAMILY="alpine"
-    OS_VERSION="$(cat /etc/alpine-release 2>/dev/null || true)"
-    command -v apk >/dev/null 2>&1 || fail "检测到 Alpine，但找不到 apk。"
-    command -v rc-service >/dev/null 2>&1 || fail "检测到 Alpine，但找不到 OpenRC。"
-  elif [ -f /etc/debian_version ]; then
-    OS_FAMILY="debian"
-    OS_VERSION="$(cat /etc/debian_version 2>/dev/null || true)"
-    command -v apt-get >/dev/null 2>&1 || fail "检测到 Debian，但找不到 apt-get。"
-    command -v systemctl >/dev/null 2>&1 || fail "检测到 Debian，但找不到 systemd。"
-    if [ -r /etc/os-release ]; then
-      # shellcheck disable=SC1091
-      . /etc/os-release
-      case "${VERSION_ID:-}" in 12|13) : ;; *) fail "落地脚本仅支持 Debian 12/13 或 Alpine。当前版本：${VERSION_ID:-未知}" ;; esac
-    fi
-  else
-    fail "落地脚本仅支持 Debian 12/13 或 Alpine Linux。"
-  fi
+  [ -r /etc/os-release ] || fail "无法读取 /etc/os-release。"
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  [ "${ID:-}" = "debian" ] && [ "${VERSION_ID:-}" = "13" ] || fail "落地脚本仅支持 Debian 13。当前系统：${PRETTY_NAME:-未知}"
+  command -v apt-get >/dev/null 2>&1 || fail "当前 Debian 13 找不到 apt-get。"
+  command -v systemctl >/dev/null 2>&1 || fail "当前 Debian 13 找不到 systemd。"
+  [ "$(cat /proc/1/comm 2>/dev/null | tr -d '[:space:]')" = "systemd" ] || fail "当前系统不是以 systemd 作为 PID 1。"
 
   if grep -qE 'lxcfs|/dev/\.incus|/dev/incus' /proc/mounts 2>/dev/null || \
      [ -e /.dockerenv ] || \
      grep -qiE 'docker|lxc|containerd|kubepods' /proc/1/cgroup 2>/dev/null; then
     IS_CONTAINER=1
   fi
-  echo "系统：${OS_FAMILY} ${OS_VERSION}"
+  echo "系统：${PRETTY_NAME}"
   echo "架构：$(uname -m)"
   [ "$IS_CONTAINER" -eq 0 ] || echo "虚拟化环境：受限容器（内核参数由宿主机控制）"
 }
 
 upgrade_system_once() {
   mkdir -p "$(dirname "$UPGRADE_MARKER")"
-  if [ "$OS_FAMILY" = "debian" ]; then
-    export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
-    # 不执行 full-upgrade，避免不同 VPS 镜像升级内核、GRUB、网络或 SSH 时失败。
-    retry 5 10 apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 -o DPkg::Lock::Timeout=120 -o Acquire::PDiffs=false update
-    dpkg --configure -a >/dev/null 2>&1 || true
-    retry 3 10 apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
-      ca-certificates curl unzip tar gzip openssl jq iproute2 procps \
-      tzdata kmod qrencode util-linux python3
-    update-ca-certificates >/dev/null 2>&1 || true
-    echo "Debian 核心组件保持 VPS 镜像原版本，仅安装代理所需依赖。"
-  else
-    retry 5 10 apk update
-    # Alpine 同样不做整机 apk upgrade，降低基础镜像和 OpenRC 被改动的风险。
-    retry 3 10 apk add --no-cache \
-      ca-certificates curl unzip tar gzip openssl jq iproute2 procps \
-      tzdata kmod libqrencode-tools util-linux python3
-    update-ca-certificates >/dev/null 2>&1 || true
-    echo "Alpine 核心组件保持镜像原版本，仅安装代理所需依赖。"
-  fi
+  export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
+  retry 5 10 apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 -o DPkg::Lock::Timeout=120 -o Acquire::PDiffs=false update
+  dpkg --configure -a >/dev/null 2>&1 || true
+  retry 3 10 apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
+    ca-certificates curl unzip tar gzip openssl jq iproute2 procps \
+    tzdata kmod qrencode util-linux python3
+  update-ca-certificates >/dev/null 2>&1 || true
+  echo "Debian 13 核心组件保持 VPS 镜像原版本，仅安装代理所需依赖。"
 }
 
 parse_pairing_key() {
@@ -320,8 +296,8 @@ check_disk_space() {
 }
 
 configure_swap_if_suitable() {
-  if [ "$OS_FAMILY" = "alpine" ] || [ "$IS_CONTAINER" -eq 1 ]; then
-    echo "Alpine/受限容器不创建 Swap。"
+  if [ "$IS_CONTAINER" -eq 1 ]; then
+    echo "受限容器不创建 Swap。"
     return 0
   fi
   current_swap_kb="$(awk 'NR>1{s+=$3}END{print s+0}' /proc/swaps)"
@@ -422,10 +398,8 @@ configure_timezone_and_daily_reboot() {
   ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
   echo 'Asia/Shanghai' > /etc/timezone
   export TZ=Asia/Shanghai
-
-  if [ "$OS_FAMILY" = "debian" ]; then
-    timedatectl set-timezone Asia/Shanghai >/dev/null 2>&1 || true
-    cat > /etc/systemd/system/daily-reboot.service <<'EOF_REBOOT_SERVICE'
+  timedatectl set-timezone Asia/Shanghai >/dev/null 2>&1 || true
+  cat > /etc/systemd/system/daily-reboot.service <<'EOF_REBOOT_SERVICE'
 [Unit]
 Description=Daily reboot at 06:00 Asia/Shanghai
 
@@ -433,7 +407,7 @@ Description=Daily reboot at 06:00 Asia/Shanghai
 Type=oneshot
 ExecStart=/usr/bin/systemctl reboot
 EOF_REBOOT_SERVICE
-    cat > /etc/systemd/system/daily-reboot.timer <<'EOF_REBOOT_TIMER'
+  cat > /etc/systemd/system/daily-reboot.timer <<'EOF_REBOOT_TIMER'
 [Unit]
 Description=Daily reboot timer at 06:00 Asia/Shanghai
 
@@ -447,33 +421,12 @@ Unit=daily-reboot.service
 [Install]
 WantedBy=timers.target
 EOF_REBOOT_TIMER
-    if systemctl daemon-reload >/dev/null 2>&1 && \
-       systemctl enable --now daily-reboot.timer >/dev/null 2>&1 && \
-       systemctl is-active --quiet daily-reboot.timer; then
-      echo "每日自动重启：北京时间 06:00"
-    else
-      echo "警告：当前 Debian 环境不允许启用自动重启定时器，代理安装将继续。"
-    fi
+  if systemctl daemon-reload >/dev/null 2>&1 && \
+     systemctl enable --now daily-reboot.timer >/dev/null 2>&1 && \
+     systemctl is-active --quiet daily-reboot.timer; then
+    echo "每日自动重启：北京时间 06:00"
   else
-    cat > /usr/local/sbin/jp-daily-reboot <<'EOF_ALPINE_REBOOT'
-#!/bin/sh
-exec /sbin/reboot
-EOF_ALPINE_REBOOT
-    chmod 700 /usr/local/sbin/jp-daily-reboot
-    mkdir -p /etc/crontabs
-    touch /etc/crontabs/root
-    cron_tmp="$(mktemp /tmp/root-crontab.XXXXXX)"
-    awk '!/jp-relay-daily-reboot/' /etc/crontabs/root > "$cron_tmp"
-    echo '0 6 * * * /usr/local/sbin/jp-daily-reboot >/dev/null 2>&1 # jp-relay-daily-reboot' >> "$cron_tmp"
-    cp "$cron_tmp" /etc/crontabs/root
-    rm -f "$cron_tmp"
-    chmod 600 /etc/crontabs/root
-    rc-update add crond default >/dev/null 2>&1 || true
-    if rc-service crond restart >/dev/null 2>&1 && rc-service crond status >/dev/null 2>&1; then
-      echo "每日自动重启：北京时间 06:00"
-    else
-      echo "警告：当前 Alpine 环境不允许启用自动重启任务，代理安装将继续。"
-    fi
+    echo "警告：当前环境不允许启用自动重启定时器，代理安装将继续。"
   fi
   echo "当前时间：$(date '+%F %T %Z %z')"
 }
@@ -528,27 +481,17 @@ sing_box_archive_name_for_version() {
 
 service_stop() {
   name="$1"
-  if [ "$OS_FAMILY" = "debian" ]; then systemctl stop "$name" >/dev/null 2>&1 || true
-  else rc-service "$name" stop >/dev/null 2>&1 || true
-  fi
+  systemctl stop "$name" >/dev/null 2>&1 || true
 }
 
 service_restart() {
   name="$1"
-  if [ "$OS_FAMILY" = "debian" ]; then
-    systemctl restart "$name"
-  else
-    if rc-service "$name" status >/dev/null 2>&1; then rc-service "$name" restart
-    else rc-service "$name" start
-    fi
-  fi
+  systemctl restart "$name"
 }
 
 service_active() {
   name="$1"
-  if [ "$OS_FAMILY" = "debian" ]; then systemctl is-active --quiet "$name"
-  else rc-service "$name" status >/dev/null 2>&1
-  fi
+  systemctl is-active --quiet "$name"
 }
 
 install_xray_version() {
@@ -633,12 +576,11 @@ install_sing_box_binary() {
 }
 
 create_services() {
-  if [ "$OS_FAMILY" = "debian" ]; then
-    if mode_has_vless; then
-      getent group xray >/dev/null 2>&1 || groupadd --system xray
-      id xray >/dev/null 2>&1 || useradd --system --gid xray --no-create-home --shell /usr/sbin/nologin xray
-      install -d -o root -g xray -m 750 /usr/local/etc/xray
-      cat > /etc/systemd/system/xray.service <<EOF_XRAY_SERVICE
+  if mode_has_vless; then
+    getent group xray >/dev/null 2>&1 || groupadd --system xray
+    id xray >/dev/null 2>&1 || useradd --system --gid xray --no-create-home --shell /usr/sbin/nologin xray
+    install -d -o root -g xray -m 750 /usr/local/etc/xray
+    cat > /etc/systemd/system/xray.service <<EOF_XRAY_SERVICE
 [Unit]
 Description=Xray Landing VLESS Service
 After=network-online.target nss-lookup.target
@@ -660,13 +602,13 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF_XRAY_SERVICE
-      systemctl enable xray >/dev/null
-    fi
-    if mode_has_hy2; then
-      getent group sing-box >/dev/null 2>&1 || groupadd --system sing-box
-      id sing-box >/dev/null 2>&1 || useradd --system --gid sing-box --no-create-home --shell /usr/sbin/nologin sing-box
-      install -d -o root -g sing-box -m 750 /etc/sing-box "$TLS_DIR"
-      cat > /etc/systemd/system/sing-box.service <<EOF_SING_SERVICE
+    systemctl enable xray >/dev/null
+  fi
+  if mode_has_hy2; then
+    getent group sing-box >/dev/null 2>&1 || groupadd --system sing-box
+    id sing-box >/dev/null 2>&1 || useradd --system --gid sing-box --no-create-home --shell /usr/sbin/nologin sing-box
+    install -d -o root -g sing-box -m 750 /etc/sing-box "$TLS_DIR"
+    cat > /etc/systemd/system/sing-box.service <<EOF_SING_SERVICE
 [Unit]
 Description=sing-box Landing Hysteria 2 Service
 After=network-online.target nss-lookup.target
@@ -688,70 +630,9 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF_SING_SERVICE
-      systemctl enable sing-box >/dev/null
-    fi
-    systemctl daemon-reload
-  else
-    mkdir -p /etc/conf.d /etc/init.d /var/log/jp-relay /run
-    if mode_has_vless; then
-      mkdir -p /usr/local/etc/xray
-      cat > /etc/conf.d/xray <<EOF_XRAY_CONF
-GOMEMLIMIT_VALUE="${GOMEMLIMIT_VALUE}"
-GOGC_VALUE="50"
-EOF_XRAY_CONF
-      cat > /etc/init.d/xray <<'EOF_XRAY_OPENRC'
-#!/sbin/openrc-run
-name="Xray Landing VLESS Service"
-description="VLESS REALITY landing service"
-supervisor=supervise-daemon
-respawn_delay=5
-respawn_max=3
-respawn_period=60
-pidfile="/run/${RC_SVCNAME}.pid"
-rc_ulimit="-n 1048576"
-command="/usr/local/bin/xray"
-command_args="run -format=json -config /usr/local/etc/xray/config.json"
-command_user="root:root"
-required_files="/usr/local/etc/xray/config.json"
-export GOMEMLIMIT="${GOMEMLIMIT_VALUE:-96MiB}"
-export GOGC="${GOGC_VALUE:-50}"
-depend() { need net; want dns; after firewall; }
-checkconfig() { "$command" run -test -format=json -config /usr/local/etc/xray/config.json; }
-start_pre() { checkconfig; }
-EOF_XRAY_OPENRC
-      chmod 755 /etc/init.d/xray
-      rc-update add xray default >/dev/null 2>&1 || true
-    fi
-    if mode_has_hy2; then
-      mkdir -p /etc/sing-box "$TLS_DIR"
-      cat > /etc/conf.d/sing-box <<EOF_SING_CONF
-GOMEMLIMIT_VALUE="${GOMEMLIMIT_VALUE}"
-GOGC_VALUE="50"
-EOF_SING_CONF
-      cat > /etc/init.d/sing-box <<'EOF_SING_OPENRC'
-#!/sbin/openrc-run
-name="sing-box Landing Hysteria 2 Service"
-description="Hysteria 2 landing service"
-supervisor=supervise-daemon
-respawn_delay=5
-respawn_max=3
-respawn_period=60
-pidfile="/run/${RC_SVCNAME}.pid"
-rc_ulimit="-n 1048576"
-command="/usr/local/bin/sing-box"
-command_args="run -c /etc/sing-box/config.json"
-command_user="root:root"
-required_files="/etc/sing-box/config.json"
-export GOMEMLIMIT="${GOMEMLIMIT_VALUE:-96MiB}"
-export GOGC="${GOGC_VALUE:-50}"
-depend() { need net; want dns; after firewall; }
-checkconfig() { "$command" check -c /etc/sing-box/config.json; }
-start_pre() { checkconfig; }
-EOF_SING_OPENRC
-      chmod 755 /etc/init.d/sing-box
-      rc-update add sing-box default >/dev/null 2>&1 || true
-    fi
+    systemctl enable sing-box >/dev/null
   fi
+  systemctl daemon-reload
 }
 
 check_port_available() {
@@ -785,11 +666,9 @@ write_hy2_certificate() {
   printf '%s\n' "$REMOTE_HY2_CERT_PEM" > "$cert_path"
   printf '%s\n' "$REMOTE_HY2_KEY_PEM" > "$key_path"
   chmod 640 "$cert_path" "$key_path"
-  if [ "$OS_FAMILY" = "debian" ]; then
-    chown root:sing-box "$cert_path" "$key_path"
-    runuser -u sing-box -- test -r "$cert_path" || fail "sing-box 用户无法读取落地 Hysteria 2 证书。"
-    runuser -u sing-box -- test -r "$key_path" || fail "sing-box 用户无法读取落地 Hysteria 2 私钥。"
-  fi
+  chown root:sing-box "$cert_path" "$key_path"
+  runuser -u sing-box -- test -r "$cert_path" || fail "sing-box 用户无法读取落地 Hysteria 2 证书。"
+  runuser -u sing-box -- test -r "$key_path" || fail "sing-box 用户无法读取落地 Hysteria 2 私钥。"
   actual_fp="$(openssl x509 -in "$cert_path" -noout -fingerprint -sha256 | sed 's/^[^=]*=//')"
   [ "$actual_fp" = "$REMOTE_HY2_FINGERPRINT" ] || fail "JPR3 中的 Hysteria 2 证书指纹不匹配。"
   actual_pin="$(openssl x509 -in "$cert_path" -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl enc -base64 -A)"
@@ -862,12 +741,7 @@ write_xray_config() {
 }
 EOF_XRAY_CONFIG
   "$XRAY" run -test -format=json -config "$TMP_CFG" || return 1
-  if [ "$OS_FAMILY" = "debian" ]; then
-    install -o root -g xray -m 640 "$TMP_CFG" "$XRAY_CFG" || return 1
-  else
-    cp "$TMP_CFG" "$XRAY_CFG" || return 1
-    chmod 600 "$XRAY_CFG" || return 1
-  fi
+  install -o root -g xray -m 640 "$TMP_CFG" "$XRAY_CFG" || return 1
   rm -f "$TMP_CFG"; TMP_CFG=""
 }
 
@@ -938,13 +812,8 @@ write_sing_config() {
 }
 EOF_SING_CONFIG
   "$SING_BOX" check -c "$TMP_CFG" || return 1
-  if [ "$OS_FAMILY" = "debian" ]; then
-    install -o root -g sing-box -m 640 "$TMP_CFG" "$SING_CFG" || return 1
-    runuser -u sing-box -- "$SING_BOX" check -c "$SING_CFG" || return 1
-  else
-    cp "$TMP_CFG" "$SING_CFG" || return 1
-    chmod 600 "$SING_CFG" || return 1
-  fi
+  install -o root -g sing-box -m 640 "$TMP_CFG" "$SING_CFG" || return 1
+  runuser -u sing-box -- "$SING_BOX" check -c "$SING_CFG" || return 1
   rm -f "$TMP_CFG"; TMP_CFG=""
 }
 
@@ -1366,8 +1235,7 @@ CURRENT_STEP="验证 TCP/UDP 监听状态"
 log "$CURRENT_STEP"
 sleep 3
 if ! verify_runtime; then
-  [ "$OS_FAMILY" != "debian" ] || journalctl -u xray -u sing-box --no-pager -n 100 2>/dev/null || true
-  [ "$OS_FAMILY" != "alpine" ] || tail -n 100 /var/log/jp-relay/*.log 2>/dev/null || true
+  journalctl -u xray -u sing-box --no-pager -n 100 2>/dev/null || true
   fail "代理服务未完整启动或监听端口不完整。"
 fi
 
@@ -1380,10 +1248,8 @@ log "$CURRENT_STEP"
 save_state
 install_shortcuts
 
-if [ "$OS_FAMILY" = "debian" ]; then
-  apt-get clean
-  rm -rf /var/lib/apt/lists/*
-fi
+apt-get clean
+rm -rf /var/lib/apt/lists/*
 
 log "新加坡副机 VPS / 落地 VPS 安装成功"
 echo "线路：${NODE_NAME}"
