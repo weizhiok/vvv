@@ -51,8 +51,8 @@ grep -q 'v2rayNG.txt' "$work/host.sh"
 grep -q 'pinSHA256' "$work/host.sh"
 grep -q 'basicConstraints=critical,CA:FALSE' "$work/host.sh"
 rm -rf "$work"
-stage stage-3-render
 
-git add README.md vvv-install.sh core-src src tests .github/workflows/validate.yml
+printf '%s\n' stage-3-render-and-production > validation/final-production-stage.txt
+git add validation/final-production-stage.txt README.md vvv-install.sh core-src src tests .github/workflows/validate.yml
 git commit -m 'Require HTTPS, fix v2rayNG HY2, remove QR, and reorder roles'
 git push
