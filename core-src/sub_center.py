@@ -242,9 +242,9 @@ class Handler(BaseHTTPRequestHandler):
                 host_id=str(body.get('host_id') or '').strip(); role=str(body.get('role') or 'direct')
                 if role not in ('center-relay','center','relay','direct','landing'): return self.send_bytes(400,b'Bad role\n')
                 if not re.fullmatch(r'[A-Za-z0-9._-]{8,128}',host_id): return self.send_bytes(400,b'Bad host id\n')
-                backup('before-register'); entry=next((x for x in registry['hosts'] if x['host_id']==host_id),None)
+                backup('before-host-register'); entry=next((x for x in registry['hosts'] if x['host_id']==host_id),None)
                 if entry is None: entry={'host_id':host_id,'token':secrets.token_urlsafe(32),'created_at':now()}; registry['hosts'].append(entry)
-                entry.update(role=role,hostname=str(body.get('hostname') or ''),updated_at=now()); atomic_json(REGISTRY,registry); backup('after-register')
+                entry.update(role=role,hostname=str(body.get('hostname') or ''),updated_at=now()); atomic_json(REGISTRY,registry); backup('after-host-register')
                 return self.send_bytes(200,json.dumps({'host_id':host_id,'host_token':entry['token']},ensure_ascii=False).encode(),'application/json')
             if path=='/api/v1/sync':
                 token=auth_token(self); entry=next((x for x in registry.get('hosts',[]) if secrets.compare_digest(x.get('token',''),token)),None)
