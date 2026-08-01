@@ -19,6 +19,9 @@ jobs:
           set -o pipefail
           {
             set -Eeuxo pipefail
+            echo 'ssh-log-fixes-attempt=2'
+            python3 -m py_compile tools/fix_ssh_log_transformer_anchor.py tools/apply_ssh_log_fixes.py
+            python3 tools/fix_ssh_log_transformer_anchor.py
             python3 -m py_compile tools/apply_ssh_log_fixes.py
             python3 tools/apply_ssh_log_fixes.py
             git rm core-src/qr_helper.sh
@@ -66,7 +69,8 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           if [[ "$RESULT" == success ]]; then
-            git rm tools/apply_ssh_log_fixes.py .github/workflows/apply-ssh-log-fixes.yml
+            git rm tools/apply_ssh_log_fixes.py tools/fix_ssh_log_transformer_anchor.py .github/workflows/apply-ssh-log-fixes.yml
+            git rm -f --ignore-unmatch validation/ssh-log-fix-validation.log
             git add -A
             git commit -m 'Require HTTPS, fix v2rayNG HY2, remove QR, and reorder roles'
             git push
