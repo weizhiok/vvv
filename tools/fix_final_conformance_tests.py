@@ -15,6 +15,7 @@ replacements = (
     ("    require(\"'enabled': False\" in center, '云备份默认值不是关闭')\n", "    require('rm -f \"$CFG_DIR/cloud.json\" \"$CFG_DIR/rclone.conf\"' in center, '云备份默认状态不是关闭')\n"),
     ("    require('rclone copyto' in backup and 'rclone sync' not in backup, '云上传必须使用 copy/copyto 而不是 sync')\n", "    require(\"'copyto'\" in backup and \"'sync'\" not in backup, '云上传必须使用 copy/copyto 而不是 sync')\n"),
     ("    require('AESGCM' in backup and '.enc' in backup, '本地备份没有使用加密容器')\n", "    require('-aes-256-cbc' in backup and '-pbkdf2' in backup and '.enc' in backup, '本地备份没有使用 AES-256-CBC + PBKDF2 加密容器')\n"),
+    ("    require(\".schema == 3\" in landing and 'JPR3' in landing, '落地脚本没有严格校验 JPR3')\n", "    require('.schema==3' in landing and '.type==\"jp-relay-landing\"' in landing and 'actual_checksum' in landing and 'expected_checksum' in landing, '落地脚本没有严格校验 JPR3 schema、类型和摘要')\n"),
 )
 for old, new in replacements:
     if old in text:
