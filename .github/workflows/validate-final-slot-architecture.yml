@@ -43,7 +43,7 @@ jobs:
             python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
             bash -n /tmp/host.sh
             sh -n /tmp/landing.sh
-            sh -n /tmp/center.sh
+            bash -n /tmp/center.sh
             grep -q 'build_hy2_slot_configs' /tmp/host.sh
             grep -q 'sync_hy2_slot_services' /tmp/host.sh
             grep -q 'vvv-hy2-slot@' /tmp/host.sh
