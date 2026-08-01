@@ -9,7 +9,7 @@ git config user.email 41898282+github-actions[bot]@users.noreply.github.com
 set +e
 (
   set -Eeuxo pipefail
-  echo 'final-ssh-log-fix-runner=1'
+  echo 'final-ssh-log-fix-runner=2'
   python3 -m py_compile tools/fix_ssh_log_transformer_anchor.py tools/apply_ssh_log_fixes.py
   python3 tools/fix_ssh_log_transformer_anchor.py
   python3 -m py_compile tools/apply_ssh_log_fixes.py
@@ -49,7 +49,8 @@ set +e
     ':!tools/fix_ssh_log_transformer_anchor.py' \
     ':!tools/run_final_ssh_fix.sh' \
     ':!.github/workflows/apply-ssh-log-fixes.yml' \
-    ':!.github/workflows/apply-ssh-log-fixes-final.yml'
+    ':!.github/workflows/apply-ssh-log-fixes-final.yml' \
+    ':!.github/workflows/run-final-ssh-fix.yml'
   ! git grep -n '二维码' -- vvv-install.sh core-src src/prepare.py
   grep -q 'base_url="https://${domain}:${public_port}"' core-src/center_install.sh
   ! grep -q 'http://${public_ip}' core-src/center_install.sh
@@ -66,6 +67,7 @@ if [[ $rc -eq 0 ]]; then
     tools/run_final_ssh_fix.sh \
     .github/workflows/apply-ssh-log-fixes.yml \
     .github/workflows/apply-ssh-log-fixes-final.yml \
+    .github/workflows/run-final-ssh-fix.yml \
     .github/workflows/ssh-fix-actions-probe.yml \
     ssh-fix-actions-probe.txt \
     validation/ssh-log-fix-validation.log
