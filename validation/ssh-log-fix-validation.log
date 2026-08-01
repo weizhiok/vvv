@@ -1,5 +1,10 @@
++ echo ssh-log-fixes-attempt=2
+ssh-log-fixes-attempt=2
++ python3 -m py_compile tools/fix_ssh_log_transformer_anchor.py tools/apply_ssh_log_fixes.py
++ python3 tools/fix_ssh_log_transformer_anchor.py
+SSH log transformer anchors repaired
 + python3 -m py_compile tools/apply_ssh_log_fixes.py
 + python3 tools/apply_ssh_log_fixes.py
-anchor not found: role execution mapping
+forbidden QR implementation remains: qr_helper
 
 status=failure
