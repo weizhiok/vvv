@@ -1,0 +1,154 @@
++ cp core-src/host.sh /tmp/host.sh
++ cp core-src/landing.sh /tmp/landing.sh
++ cp core-src/center_install.sh /tmp/center.sh
++ python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
++ python3 -m py_compile tools/extract_manager_library.py tools/build_slot_audit_fixture.py
++ python3 tools/extract_manager_library.py /tmp/host.sh /tmp/jp-relay-manager-lib.sh
++ bash -n /tmp/jp-relay-manager-lib.sh
+++ sed -n 's/^XRAY_FALLBACK_VERSION="\([^"]*\)"/\1/p' /tmp/jp-relay-manager-lib.sh
+++ head -n1
++ XRAY_VERSION=26.3.27
+++ sed -n 's/^SING_BOX_FALLBACK_VERSION="\([^"]*\)"/\1/p' /tmp/jp-relay-manager-lib.sh
+++ head -n1
++ SING_VERSION=1.13.12
++ [[ -n 26.3.27 ]]
++ [[ -n 1.13.12 ]]
++ curl -fL --retry 5 --retry-all-errors https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip -o /tmp/xray.zip
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+100 20.1M  100 20.1M    0     0  98.6M      0 --:--:-- --:--:-- --:--:-- 98.6M
++ unzip -q /tmp/xray.zip xray -d /tmp/xray-unpack
++ install -m755 /tmp/xray-unpack/xray /tmp/xray
++ curl -fL --retry 5 --retry-all-errors https://github.com/SagerNet/sing-box/releases/download/v1.13.12/sing-box-1.13.12-linux-amd64.tar.gz -o /tmp/sing-box.tgz
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+100 22.7M  100 22.7M    0     0   103M      0 --:--:-- --:--:-- --:--:--  103M
++ tar -xzf /tmp/sing-box.tgz -C /tmp
++ install -m755 /tmp/sing-box-1.13.12-linux-amd64/sing-box /tmp/sing-box
++ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 -nodes -days 7 -subj /CN=jp-hy2.jp-relay.local -addext subjectAltName=DNS:jp-hy2.jp-relay.local -keyout /tmp/vvv-slot-audit/server.key -out /tmp/vvv-slot-audit/server.crt
++ source /tmp/jp-relay-manager-lib.sh
+++ set -Eeuo pipefail
+++ umask 077
+++ [[ -r /usr/local/lib/vvv/qr_helper.sh ]]
+++ RUN_MODE=
+++ RUN_ARG=
+++ STATE_DIR=/etc/jp-relay
+++ STATE_FILE=/etc/jp-relay/state.json
+++ PACKAGE_ROOT=/root/relay-packages
+++ TLS_DIR=/etc/sing-box/tls
+++ LOCK_FILE=/run/lock/jp-relay-manager.lock
+++ XRAY=/usr/local/bin/xray
+++ XRAY_CFG=/usr/local/etc/xray/config.json
+++ XRAY_FALLBACK_VERSION=26.3.27
+++ XRAY_VERSION=26.3.27
+++ XRAY_VERSION_SOURCE=备用稳定版
+++ SING_BOX=/usr/local/bin/sing-box
+++ SING_CFG=/etc/sing-box/config.json
+++ SING_BOX_FALLBACK_VERSION=1.13.12
+++ SING_BOX_VERSION=1.13.12
+++ SING_BOX_VERSION_SOURCE=备用稳定版
+++ HY2_LIMIT_MBPS=50
+++ DEFAULT_SNI=www.softbank.jp
+++ UPGRADE_MARKER=/var/lib/jp-relay/japan-system-upgrade.done
+++ CURRENT_STEP=启动
+++ TMP_FILES=()
+++ INSTALL_CANCELLED=0
+++ MANAGER_EXIT_REQUESTED=0
+++ IS_CONTAINER=0
+++ VIRT_TYPE=unknown
+++ VLESS_STATUS=未启用
+++ VLESS_REASON=
+++ VLESS_TIME=
+++ VLESS_EXIT_IP=
+++ HY2_STATUS=未启用
+++ HY2_REASON=
+++ HY2_TIME=
+++ HY2_EXIT_IP=
+++ UPSTREAM_STATUS=未检测
+++ UPSTREAM_REASON=
+++ UPSTREAM_TIME=
+++ UPSTREAM_EXIT_IP=
+++ trap on_exit EXIT
+++ trap - EXIT
++ XRAY=/tmp/xray
++ SING_BOX=/tmp/sing-box
++ HY2_LIMIT_MBPS=50
+++ /tmp/xray x25519
++ parse_x25519_keys 'PrivateKey: EBknummUt-qXvRH9KgpyyaWLrH0Ohpar_D1HBP9xcXk
+Password (PublicKey): mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk
+Hash32: JrwLyifItyWq0WeO1JSXEmxcTR57zCURDFuhXKoKS2c'
++ local 'output=PrivateKey: EBknummUt-qXvRH9KgpyyaWLrH0Ohpar_D1HBP9xcXk
+Password (PublicKey): mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk
+Hash32: JrwLyifItyWq0WeO1JSXEmxcTR57zCURDFuhXKoKS2c' derived
+++ printf '%s\n' 'PrivateKey: EBknummUt-qXvRH9KgpyyaWLrH0Ohpar_D1HBP9xcXk
+Password (PublicKey): mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk
+Hash32: JrwLyifItyWq0WeO1JSXEmxcTR57zCURDFuhXKoKS2c'
+++ sed -n 's/^PrivateKey:[[:space:]]*//p'
+++ head -n1
+++ tr -d '\r'
++ GENERATED_PRIVATE_KEY=EBknummUt-qXvRH9KgpyyaWLrH0Ohpar_D1HBP9xcXk
+++ printf '%s\n' 'PrivateKey: EBknummUt-qXvRH9KgpyyaWLrH0Ohpar_D1HBP9xcXk
+Password (PublicKey): mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk
+Hash32: JrwLyifItyWq0WeO1JSXEmxcTR57zCURDFuhXKoKS2c'
+++ sed -n -E -e 's/^Password( \(PublicKey\))?:[[:space:]]*//p' -e 's/^PublicKey:[[:space:]]*//p'
+++ tr -d '\r'
+++ head -n1
++ GENERATED_PUBLIC_KEY=mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk
++ [[ -z mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk ]]
++ [[ -n EBknummUt-qXvRH9KgpyyaWLrH0Ohpar_D1HBP9xcXk ]]
++ [[ -n mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk ]]
++ export VVV_AUDIT_REALITY_PRIVATE=EBknummUt-qXvRH9KgpyyaWLrH0Ohpar_D1HBP9xcXk
++ VVV_AUDIT_REALITY_PRIVATE=EBknummUt-qXvRH9KgpyyaWLrH0Ohpar_D1HBP9xcXk
++ export VVV_AUDIT_REALITY_PUBLIC=mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk
++ VVV_AUDIT_REALITY_PUBLIC=mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk
+++ /tmp/xray x25519
++ parse_x25519_keys 'PrivateKey: WIA0mBDlvwB2LrGKy-867DwnwDdWzV5hfS0ufe_KUlY
+Password (PublicKey): WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M
+Hash32: fw4XFo1qTFVBMbJe2GueOwOHPQlmsgsqgsCSNNKa8ac'
++ local 'output=PrivateKey: WIA0mBDlvwB2LrGKy-867DwnwDdWzV5hfS0ufe_KUlY
+Password (PublicKey): WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M
+Hash32: fw4XFo1qTFVBMbJe2GueOwOHPQlmsgsqgsCSNNKa8ac' derived
+++ printf '%s\n' 'PrivateKey: WIA0mBDlvwB2LrGKy-867DwnwDdWzV5hfS0ufe_KUlY
+Password (PublicKey): WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M
+Hash32: fw4XFo1qTFVBMbJe2GueOwOHPQlmsgsqgsCSNNKa8ac'
+++ sed -n 's/^PrivateKey:[[:space:]]*//p'
+++ head -n1
+++ tr -d '\r'
++ GENERATED_PRIVATE_KEY=WIA0mBDlvwB2LrGKy-867DwnwDdWzV5hfS0ufe_KUlY
+++ printf '%s\n' 'PrivateKey: WIA0mBDlvwB2LrGKy-867DwnwDdWzV5hfS0ufe_KUlY
+Password (PublicKey): WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M
+Hash32: fw4XFo1qTFVBMbJe2GueOwOHPQlmsgsqgsCSNNKa8ac'
+++ sed -n -E -e 's/^Password( \(PublicKey\))?:[[:space:]]*//p' -e 's/^PublicKey:[[:space:]]*//p'
+++ head -n1
+++ tr -d '\r'
++ GENERATED_PUBLIC_KEY=WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M
++ [[ -z WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M ]]
++ [[ -n WIA0mBDlvwB2LrGKy-867DwnwDdWzV5hfS0ufe_KUlY ]]
++ [[ -n WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M ]]
++ export VVV_AUDIT_REMOTE_PUBLIC=WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M
++ VVV_AUDIT_REMOTE_PUBLIC=WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M
++ export VVV_AUDIT_CERT_PATH=/tmp/vvv-slot-audit/server.crt
++ VVV_AUDIT_CERT_PATH=/tmp/vvv-slot-audit/server.crt
++ export VVV_AUDIT_KEY_PATH=/tmp/vvv-slot-audit/server.key
++ VVV_AUDIT_KEY_PATH=/tmp/vvv-slot-audit/server.key
++ export AUDIT_DIR=/tmp/vvv-slot-audit
++ AUDIT_DIR=/tmp/vvv-slot-audit
++ python3 tools/build_slot_audit_fixture.py
+/tmp/vvv-slot-audit
++ build_xray_config /tmp/vvv-slot-audit/state-empty.json /tmp/vvv-slot-audit/xray-empty.json
++ local state_path=/tmp/vvv-slot-audit/state-empty.json output=/tmp/vvv-slot-audit/xray-empty.json
++ python3 - /tmp/vvv-slot-audit/state-empty.json /tmp/vvv-slot-audit/xray-empty.json
++ build_xray_config /tmp/vvv-slot-audit/state-active.json /tmp/vvv-slot-audit/xray-active.json
++ local state_path=/tmp/vvv-slot-audit/state-active.json output=/tmp/vvv-slot-audit/xray-active.json
++ python3 - /tmp/vvv-slot-audit/state-active.json /tmp/vvv-slot-audit/xray-active.json
++ cmp /tmp/vvv-slot-audit/xray-empty.json /tmp/vvv-slot-audit/xray-active.json
++ build_sing_config /tmp/vvv-slot-audit/state-empty.json /tmp/vvv-slot-audit/sing-empty.json
++ local state_path=/tmp/vvv-slot-audit/state-empty.json output=/tmp/vvv-slot-audit/sing-empty.json
++ python3 - /tmp/vvv-slot-audit/state-empty.json /tmp/vvv-slot-audit/sing-empty.json 50
+  File "<stdin>", line 6
+    Path(sys.argv[2]).write_text("{}
+                                 ^
+SyntaxError: unterminated string literal (detected at line 6)
+status=failure
