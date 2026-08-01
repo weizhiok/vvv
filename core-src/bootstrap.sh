@@ -45,6 +45,8 @@ ask_code(){
 ask_proxy_parameters(){
   local choice input
   echo
+  echo "========== 安装参数（全部前置设置） =========="
+  echo
   echo "请选择要安装的代理协议："
   echo "1. 同时安装双协议（TCP + UDP）【默认】"
   echo "2. 只安装 VLESS + XTLS Vision + REALITY（TCP）"
@@ -66,7 +68,17 @@ ask_proxy_parameters(){
     if valid_port "$input"; then VVV_PROXY_PORT="$((10#$input))"; break; fi
     echo "端口必须是 1–65535 之间的数字。"
   done
-  export VVV_PROTOCOL_MODE VVV_PROXY_PORT
+  VVV_REALITY_SNI=www.softbank.jp
+  if [[ "$VVV_PROTOCOL_MODE" != hy2 ]]; then
+    while true; do
+      read -r -p "请输入 VLESS + REALITY 伪装域名 [默认 www.softbank.jp]：" input
+      input="${input,,}"; input="${input%.}"
+      [[ -n "$input" ]] || input=www.softbank.jp
+      if valid_domain "$input"; then VVV_REALITY_SNI="$input"; break; fi
+      echo "REALITY 伪装域名格式不正确，请重新输入。"
+    done
+  fi
+  export VVV_PROTOCOL_MODE VVV_PROXY_PORT VVV_REALITY_SNI
 }
 ask_center_parameters(){
   local input
@@ -89,6 +101,35 @@ ask_center_parameters(){
     VVV_SUB_PORT="$input"; break
   done
   export VVV_SUB_DOMAIN VVV_SUB_PORT
+}
+show_parameter_summary(){
+  local role_name protocol_name
+  case "$choice" in
+    1) role_name="订阅中心（含自身代理）" ;;
+    2) role_name="中转主机（含自身代理）" ;;
+    3) role_name="中转副机" ;;
+    4) role_name="直连代理" ;;
+    5) role_name="以上全部安装（不含副机）" ;;
+  esac
+  echo
+  echo "========== 安装参数总览 =========="
+  echo "安装角色：$role_name"
+  if [[ "$choice" == 3 ]]; then
+    echo "JPR3 密钥：已填写（${#key} 个字符）"
+  else
+    case "$VVV_PROTOCOL_MODE" in dual) protocol_name="VLESS + Hysteria 2";; vless) protocol_name="仅 VLESS";; hy2) protocol_name="仅 Hysteria 2";; esac
+    echo "代理协议：$protocol_name"
+    echo "代理端口：$VVV_PROXY_PORT"
+    [[ "$VVV_PROTOCOL_MODE" == hy2 ]] || echo "REALITY 伪装域名：$VVV_REALITY_SNI"
+    if [[ "$choice" == 1 || "$choice" == 5 ]]; then
+      echo "订阅入口：${VVV_SUB_DOMAIN:-本机 IP}"
+      echo "订阅端口：$VVV_SUB_PORT"
+    elif [[ "$choice" == 2 || "$choice" == 4 ]]; then
+      [[ -n "$code" ]] && echo "订阅中心接入码：已填写" || echo "订阅中心接入码：未填写（独立使用）"
+    fi
+  fi
+  echo "=================================="
+  echo "参数已收集完毕，直接开始全自动安装。"
 }
 
 cat <<'EOF'
@@ -129,9 +170,8 @@ case "$choice" in
   4) ask_proxy_parameters; ask_code code "请输入订阅中心接入码" ;;
   5) ask_proxy_parameters; ask_center_parameters ;;
 esac
+show_parameter_summary
 
-echo
-echo "参数已收集完毕，开始全自动安装。"
 case "$choice" in
   1)
     install_host
