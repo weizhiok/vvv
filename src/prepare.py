@@ -336,7 +336,7 @@ PY_BUILD_SING
 '''
 h, count = re.subn(
     r'(?ms)^build_sing_config\(\) \{.*?^\}\n\nverify_xray_runtime\(\) \{',
-    hy2_main + '\nverify_xray_runtime() {',
+    lambda _match: hy2_main + '\nverify_xray_runtime() {',
     h,
     count=1,
 )
@@ -508,7 +508,7 @@ verify_hy2 = r'''verify_sing_runtime() {
 '''
 h, count = re.subn(
     r'(?ms)^verify_sing_runtime\(\) \{.*?^\}\n\nactivate_initial_state\(\) \{',
-    verify_hy2 + '\nactivate_initial_state() {',
+    lambda _match: verify_hy2 + '\nactivate_initial_state() {',
     h,
     count=1,
 )
@@ -723,7 +723,7 @@ new_apply = r'''apply_candidate_with_rollback() {
 }
 
 '''
-h, n = re.subn(r'(?ms)^apply_candidate_with_rollback\(\) \{.*?^\}\n\ngenerate_client_files\(\) \{', new_apply + 'generate_client_files() {', h, count=1)
+h, n = re.subn(r'(?ms)^apply_candidate_with_rollback\(\) \{.*?^\}\n\ngenerate_client_files\(\) \{', lambda _match: new_apply + 'generate_client_files() {', h, count=1)
 if n != 1:
     raise SystemExit('无法替换槽位事务函数')
 h = h.replace('线路已通过运行时接口生效；Xray/sing-box 主进程均未重启。', '线路已通过独立槽位服务生效；Xray/sing-box 主进程均未重启。')

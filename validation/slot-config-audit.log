@@ -1,3 +1,6 @@
++ python3 -m py_compile tools/fix_transform_replacement_escapes.py
++ python3 tools/fix_transform_replacement_escapes.py
++ python3 -m py_compile src/prepare.py
 + cp core-src/host.sh /tmp/host.sh
 + cp core-src/landing.sh /tmp/landing.sh
 + cp core-src/center_install.sh /tmp/center.sh
@@ -17,14 +20,14 @@
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-100 20.1M  100 20.1M    0     0  98.6M      0 --:--:-- --:--:-- --:--:-- 98.6M
+ 19 20.1M   19 4061k    0     0  11.1M      0  0:00:01 --:--:--  0:00:01 11.1M100 20.1M  100 20.1M    0     0  50.0M      0 --:--:-- --:--:-- --:--:--  344M
 + unzip -q /tmp/xray.zip xray -d /tmp/xray-unpack
 + install -m755 /tmp/xray-unpack/xray /tmp/xray
 + curl -fL --retry 5 --retry-all-errors https://github.com/SagerNet/sing-box/releases/download/v1.13.12/sing-box-1.13.12-linux-amd64.tar.gz -o /tmp/sing-box.tgz
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-100 22.7M  100 22.7M    0     0   103M      0 --:--:-- --:--:-- --:--:--  103M
+ 88 22.7M   88 20.0M    0     0  31.9M      0 --:--:-- --:--:-- --:--:-- 31.9M100 22.7M  100 22.7M    0     0  35.9M      0 --:--:-- --:--:-- --:--:--  538M
 + tar -xzf /tmp/sing-box.tgz -C /tmp
 + install -m755 /tmp/sing-box-1.13.12-linux-amd64/sing-box /tmp/sing-box
 + openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 -nodes -days 7 -subj /CN=jp-hy2.jp-relay.local -addext subjectAltName=DNS:jp-hy2.jp-relay.local -keyout /tmp/vvv-slot-audit/server.key -out /tmp/vvv-slot-audit/server.crt
@@ -76,59 +79,59 @@
 + SING_BOX=/tmp/sing-box
 + HY2_LIMIT_MBPS=50
 ++ /tmp/xray x25519
-+ parse_x25519_keys 'PrivateKey: EBknummUt-qXvRH9KgpyyaWLrH0Ohpar_D1HBP9xcXk
-Password (PublicKey): mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk
-Hash32: JrwLyifItyWq0WeO1JSXEmxcTR57zCURDFuhXKoKS2c'
-+ local 'output=PrivateKey: EBknummUt-qXvRH9KgpyyaWLrH0Ohpar_D1HBP9xcXk
-Password (PublicKey): mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk
-Hash32: JrwLyifItyWq0WeO1JSXEmxcTR57zCURDFuhXKoKS2c' derived
-++ printf '%s\n' 'PrivateKey: EBknummUt-qXvRH9KgpyyaWLrH0Ohpar_D1HBP9xcXk
-Password (PublicKey): mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk
-Hash32: JrwLyifItyWq0WeO1JSXEmxcTR57zCURDFuhXKoKS2c'
++ parse_x25519_keys 'PrivateKey: 6IGi41zlCVt6eOuUjMPFZC5DMoH62qv-2E0Nuz7JZU8
+Password (PublicKey): vBiEvoC5IkGaedK7gnC1eSwgD0b_nnfrz9kGSLfygFo
+Hash32: JZDC2ls3pUg-HPhlcPQUJyzrgtBwKHtLv9PGuQ9LTr0'
++ local 'output=PrivateKey: 6IGi41zlCVt6eOuUjMPFZC5DMoH62qv-2E0Nuz7JZU8
+Password (PublicKey): vBiEvoC5IkGaedK7gnC1eSwgD0b_nnfrz9kGSLfygFo
+Hash32: JZDC2ls3pUg-HPhlcPQUJyzrgtBwKHtLv9PGuQ9LTr0' derived
+++ printf '%s\n' 'PrivateKey: 6IGi41zlCVt6eOuUjMPFZC5DMoH62qv-2E0Nuz7JZU8
+Password (PublicKey): vBiEvoC5IkGaedK7gnC1eSwgD0b_nnfrz9kGSLfygFo
+Hash32: JZDC2ls3pUg-HPhlcPQUJyzrgtBwKHtLv9PGuQ9LTr0'
 ++ sed -n 's/^PrivateKey:[[:space:]]*//p'
 ++ head -n1
 ++ tr -d '\r'
-+ GENERATED_PRIVATE_KEY=EBknummUt-qXvRH9KgpyyaWLrH0Ohpar_D1HBP9xcXk
-++ printf '%s\n' 'PrivateKey: EBknummUt-qXvRH9KgpyyaWLrH0Ohpar_D1HBP9xcXk
-Password (PublicKey): mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk
-Hash32: JrwLyifItyWq0WeO1JSXEmxcTR57zCURDFuhXKoKS2c'
++ GENERATED_PRIVATE_KEY=6IGi41zlCVt6eOuUjMPFZC5DMoH62qv-2E0Nuz7JZU8
+++ printf '%s\n' 'PrivateKey: 6IGi41zlCVt6eOuUjMPFZC5DMoH62qv-2E0Nuz7JZU8
+Password (PublicKey): vBiEvoC5IkGaedK7gnC1eSwgD0b_nnfrz9kGSLfygFo
+Hash32: JZDC2ls3pUg-HPhlcPQUJyzrgtBwKHtLv9PGuQ9LTr0'
 ++ sed -n -E -e 's/^Password( \(PublicKey\))?:[[:space:]]*//p' -e 's/^PublicKey:[[:space:]]*//p'
-++ tr -d '\r'
 ++ head -n1
-+ GENERATED_PUBLIC_KEY=mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk
-+ [[ -z mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk ]]
-+ [[ -n EBknummUt-qXvRH9KgpyyaWLrH0Ohpar_D1HBP9xcXk ]]
-+ [[ -n mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk ]]
-+ export VVV_AUDIT_REALITY_PRIVATE=EBknummUt-qXvRH9KgpyyaWLrH0Ohpar_D1HBP9xcXk
-+ VVV_AUDIT_REALITY_PRIVATE=EBknummUt-qXvRH9KgpyyaWLrH0Ohpar_D1HBP9xcXk
-+ export VVV_AUDIT_REALITY_PUBLIC=mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk
-+ VVV_AUDIT_REALITY_PUBLIC=mVJKNi6o7vkJsTX8eLvzHriAqA2rZ7dNwuzxzH1_Qgk
+++ tr -d '\r'
++ GENERATED_PUBLIC_KEY=vBiEvoC5IkGaedK7gnC1eSwgD0b_nnfrz9kGSLfygFo
++ [[ -z vBiEvoC5IkGaedK7gnC1eSwgD0b_nnfrz9kGSLfygFo ]]
++ [[ -n 6IGi41zlCVt6eOuUjMPFZC5DMoH62qv-2E0Nuz7JZU8 ]]
++ [[ -n vBiEvoC5IkGaedK7gnC1eSwgD0b_nnfrz9kGSLfygFo ]]
++ export VVV_AUDIT_REALITY_PRIVATE=6IGi41zlCVt6eOuUjMPFZC5DMoH62qv-2E0Nuz7JZU8
++ VVV_AUDIT_REALITY_PRIVATE=6IGi41zlCVt6eOuUjMPFZC5DMoH62qv-2E0Nuz7JZU8
++ export VVV_AUDIT_REALITY_PUBLIC=vBiEvoC5IkGaedK7gnC1eSwgD0b_nnfrz9kGSLfygFo
++ VVV_AUDIT_REALITY_PUBLIC=vBiEvoC5IkGaedK7gnC1eSwgD0b_nnfrz9kGSLfygFo
 ++ /tmp/xray x25519
-+ parse_x25519_keys 'PrivateKey: WIA0mBDlvwB2LrGKy-867DwnwDdWzV5hfS0ufe_KUlY
-Password (PublicKey): WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M
-Hash32: fw4XFo1qTFVBMbJe2GueOwOHPQlmsgsqgsCSNNKa8ac'
-+ local 'output=PrivateKey: WIA0mBDlvwB2LrGKy-867DwnwDdWzV5hfS0ufe_KUlY
-Password (PublicKey): WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M
-Hash32: fw4XFo1qTFVBMbJe2GueOwOHPQlmsgsqgsCSNNKa8ac' derived
-++ printf '%s\n' 'PrivateKey: WIA0mBDlvwB2LrGKy-867DwnwDdWzV5hfS0ufe_KUlY
-Password (PublicKey): WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M
-Hash32: fw4XFo1qTFVBMbJe2GueOwOHPQlmsgsqgsCSNNKa8ac'
++ parse_x25519_keys 'PrivateKey: qA0qStNfpiRcbWpSTYWR5ioA3gik_mgUan5NKKzXEnc
+Password (PublicKey): tDml-c01WQ9X1tHwzNYbQVoa-Z-EKkYfsteLuZLz8WA
+Hash32: d6auRJs0W-tevtEeVmOiZQhXu9oOJoZ5rvISK6QX9_E'
++ local 'output=PrivateKey: qA0qStNfpiRcbWpSTYWR5ioA3gik_mgUan5NKKzXEnc
+Password (PublicKey): tDml-c01WQ9X1tHwzNYbQVoa-Z-EKkYfsteLuZLz8WA
+Hash32: d6auRJs0W-tevtEeVmOiZQhXu9oOJoZ5rvISK6QX9_E' derived
+++ printf '%s\n' 'PrivateKey: qA0qStNfpiRcbWpSTYWR5ioA3gik_mgUan5NKKzXEnc
+Password (PublicKey): tDml-c01WQ9X1tHwzNYbQVoa-Z-EKkYfsteLuZLz8WA
+Hash32: d6auRJs0W-tevtEeVmOiZQhXu9oOJoZ5rvISK6QX9_E'
 ++ sed -n 's/^PrivateKey:[[:space:]]*//p'
-++ head -n1
 ++ tr -d '\r'
-+ GENERATED_PRIVATE_KEY=WIA0mBDlvwB2LrGKy-867DwnwDdWzV5hfS0ufe_KUlY
-++ printf '%s\n' 'PrivateKey: WIA0mBDlvwB2LrGKy-867DwnwDdWzV5hfS0ufe_KUlY
-Password (PublicKey): WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M
-Hash32: fw4XFo1qTFVBMbJe2GueOwOHPQlmsgsqgsCSNNKa8ac'
+++ head -n1
++ GENERATED_PRIVATE_KEY=qA0qStNfpiRcbWpSTYWR5ioA3gik_mgUan5NKKzXEnc
+++ printf '%s\n' 'PrivateKey: qA0qStNfpiRcbWpSTYWR5ioA3gik_mgUan5NKKzXEnc
+Password (PublicKey): tDml-c01WQ9X1tHwzNYbQVoa-Z-EKkYfsteLuZLz8WA
+Hash32: d6auRJs0W-tevtEeVmOiZQhXu9oOJoZ5rvISK6QX9_E'
 ++ sed -n -E -e 's/^Password( \(PublicKey\))?:[[:space:]]*//p' -e 's/^PublicKey:[[:space:]]*//p'
 ++ head -n1
 ++ tr -d '\r'
-+ GENERATED_PUBLIC_KEY=WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M
-+ [[ -z WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M ]]
-+ [[ -n WIA0mBDlvwB2LrGKy-867DwnwDdWzV5hfS0ufe_KUlY ]]
-+ [[ -n WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M ]]
-+ export VVV_AUDIT_REMOTE_PUBLIC=WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M
-+ VVV_AUDIT_REMOTE_PUBLIC=WaD5bbNjEzGElfaCGN71Ms4dRonpGOKwhOOPILHLj3M
++ GENERATED_PUBLIC_KEY=tDml-c01WQ9X1tHwzNYbQVoa-Z-EKkYfsteLuZLz8WA
++ [[ -z tDml-c01WQ9X1tHwzNYbQVoa-Z-EKkYfsteLuZLz8WA ]]
++ [[ -n qA0qStNfpiRcbWpSTYWR5ioA3gik_mgUan5NKKzXEnc ]]
++ [[ -n tDml-c01WQ9X1tHwzNYbQVoa-Z-EKkYfsteLuZLz8WA ]]
++ export VVV_AUDIT_REMOTE_PUBLIC=tDml-c01WQ9X1tHwzNYbQVoa-Z-EKkYfsteLuZLz8WA
++ VVV_AUDIT_REMOTE_PUBLIC=tDml-c01WQ9X1tHwzNYbQVoa-Z-EKkYfsteLuZLz8WA
 + export VVV_AUDIT_CERT_PATH=/tmp/vvv-slot-audit/server.crt
 + VVV_AUDIT_CERT_PATH=/tmp/vvv-slot-audit/server.crt
 + export VVV_AUDIT_KEY_PATH=/tmp/vvv-slot-audit/server.key
@@ -147,8 +150,80 @@ Hash32: fw4XFo1qTFVBMbJe2GueOwOHPQlmsgsqgsCSNNKa8ac'
 + build_sing_config /tmp/vvv-slot-audit/state-empty.json /tmp/vvv-slot-audit/sing-empty.json
 + local state_path=/tmp/vvv-slot-audit/state-empty.json output=/tmp/vvv-slot-audit/sing-empty.json
 + python3 - /tmp/vvv-slot-audit/state-empty.json /tmp/vvv-slot-audit/sing-empty.json 50
-  File "<stdin>", line 6
-    Path(sys.argv[2]).write_text("{}
-                                 ^
-SyntaxError: unterminated string literal (detected at line 6)
-status=failure
++ build_sing_config /tmp/vvv-slot-audit/state-active.json /tmp/vvv-slot-audit/sing-active.json
++ local state_path=/tmp/vvv-slot-audit/state-active.json output=/tmp/vvv-slot-audit/sing-active.json
++ python3 - /tmp/vvv-slot-audit/state-active.json /tmp/vvv-slot-audit/sing-active.json 50
++ cmp /tmp/vvv-slot-audit/sing-empty.json /tmp/vvv-slot-audit/sing-active.json
++ mkdir -p /tmp/vvv-slot-audit/vless-empty /tmp/vvv-slot-audit/vless-active /tmp/vvv-slot-audit/hy2-empty /tmp/vvv-slot-audit/hy2-active
++ build_vless_slot_configs /tmp/vvv-slot-audit/state-empty.json /tmp/vvv-slot-audit/vless-empty
++ local state_path=/tmp/vvv-slot-audit/state-empty.json out_dir=/tmp/vvv-slot-audit/vless-empty
++ mkdir -p /tmp/vvv-slot-audit/vless-empty
++ python3 - /tmp/vvv-slot-audit/state-empty.json /tmp/vvv-slot-audit/vless-empty
++ build_vless_slot_configs /tmp/vvv-slot-audit/state-active.json /tmp/vvv-slot-audit/vless-active
++ local state_path=/tmp/vvv-slot-audit/state-active.json out_dir=/tmp/vvv-slot-audit/vless-active
++ mkdir -p /tmp/vvv-slot-audit/vless-active
++ python3 - /tmp/vvv-slot-audit/state-active.json /tmp/vvv-slot-audit/vless-active
++ build_hy2_slot_configs /tmp/vvv-slot-audit/state-empty.json /tmp/vvv-slot-audit/hy2-empty
++ local state_path=/tmp/vvv-slot-audit/state-empty.json out_dir=/tmp/vvv-slot-audit/hy2-empty
++ mkdir -p /tmp/vvv-slot-audit/hy2-empty
++ python3 - /tmp/vvv-slot-audit/state-empty.json /tmp/vvv-slot-audit/hy2-empty 50
++ build_hy2_slot_configs /tmp/vvv-slot-audit/state-active.json /tmp/vvv-slot-audit/hy2-active
++ local state_path=/tmp/vvv-slot-audit/state-active.json out_dir=/tmp/vvv-slot-audit/hy2-active
++ mkdir -p /tmp/vvv-slot-audit/hy2-active
++ python3 - /tmp/vvv-slot-audit/state-active.json /tmp/vvv-slot-audit/hy2-active 50
+++ find /tmp/vvv-slot-audit/vless-empty -type f
+++ wc -l
++ [[ 0 -eq 0 ]]
+++ find /tmp/vvv-slot-audit/hy2-empty -type f
+++ wc -l
++ [[ 0 -eq 0 ]]
+++ find /tmp/vvv-slot-audit/vless-active -name '*.json'
+++ wc -l
++ [[ 2 -eq 2 ]]
+++ find /tmp/vvv-slot-audit/hy2-active -name '*.json'
+++ wc -l
++ [[ 1 -eq 1 ]]
++ [[ -f /tmp/vvv-slot-audit/vless-active/v01.json ]]
++ [[ -f /tmp/vvv-slot-audit/vless-active/v02.json ]]
++ [[ -f /tmp/vvv-slot-audit/hy2-active/h01.json ]]
++ /tmp/xray run -test -format=json -config /tmp/vvv-slot-audit/xray-active.json
+Xray 26.3.27 (Xray, Penetrates Everything.) d2758a0 (go1.26.1 linux/amd64)
+A unified platform for anti-censorship.
+2026/08/01 08:57:04.777647 [Info] infra/conf/serial: Reading config: &{Name:/tmp/vvv-slot-audit/xray-active.json Format:json}
+2026/08/01 08:57:04.779769 [Warning] infra/conf: REALITY: Listening on non-443 ports may get your IP blocked by the GFW
+Configuration OK.
++ for cfg in /tmp/vvv-slot-audit/vless-active/*.json
++ /tmp/xray run -test -format=json -config /tmp/vvv-slot-audit/vless-active/v01.json
+Xray 26.3.27 (Xray, Penetrates Everything.) d2758a0 (go1.26.1 linux/amd64)
+A unified platform for anti-censorship.
+2026/08/01 08:57:04.788089 [Info] infra/conf/serial: Reading config: &{Name:/tmp/vvv-slot-audit/vless-active/v01.json Format:json}
+Configuration OK.
++ for cfg in /tmp/vvv-slot-audit/vless-active/*.json
++ /tmp/xray run -test -format=json -config /tmp/vvv-slot-audit/vless-active/v02.json
+Xray 26.3.27 (Xray, Penetrates Everything.) d2758a0 (go1.26.1 linux/amd64)
+A unified platform for anti-censorship.
+2026/08/01 08:57:04.795826 [Info] infra/conf/serial: Reading config: &{Name:/tmp/vvv-slot-audit/vless-active/v02.json Format:json}
+Configuration OK.
++ /tmp/sing-box check -c /tmp/vvv-slot-audit/sing-active.json
++ for cfg in /tmp/vvv-slot-audit/hy2-active/*.json
++ /tmp/sing-box check -c /tmp/vvv-slot-audit/hy2-active/h01.json
++ printf 'xray_version=%s\n' 26.3.27
+xray_version=26.3.27
++ printf 'sing_box_version=%s\n' 1.13.12
+sing_box_version=1.13.12
++ sha256sum /tmp/vvv-slot-audit/xray-empty.json /tmp/vvv-slot-audit/xray-active.json
+f3bb2bb74372cd1ad5bf187aa0ed2c520cedff08294915cd490751c2cea435f1  /tmp/vvv-slot-audit/xray-empty.json
+f3bb2bb74372cd1ad5bf187aa0ed2c520cedff08294915cd490751c2cea435f1  /tmp/vvv-slot-audit/xray-active.json
++ sha256sum /tmp/vvv-slot-audit/sing-empty.json /tmp/vvv-slot-audit/sing-active.json
+b2131eee9860c824063544f5fa4acbcda22ba8abe1e1cf21b10f338cd3ae5d9b  /tmp/vvv-slot-audit/sing-empty.json
+b2131eee9860c824063544f5fa4acbcda22ba8abe1e1cf21b10f338cd3ae5d9b  /tmp/vvv-slot-audit/sing-active.json
++ jq -c '{inbounds:(.inbounds|length),outbounds:(.outbounds|length),rules:(.routing.rules|length)}' /tmp/vvv-slot-audit/xray-active.json
+{"inbounds":1,"outbounds":66,"rules":67}
++ jq -c '{inbounds:(.inbounds|length),outbounds:(.outbounds|length),rules:(.route.rules|length)}' /tmp/vvv-slot-audit/sing-active.json
+{"inbounds":1,"outbounds":65,"rules":66}
++ find /tmp/vvv-slot-audit/vless-active /tmp/vvv-slot-audit/hy2-active -maxdepth 1 -type f -printf '%p\n'
++ sort
+/tmp/vvv-slot-audit/hy2-active/h01.json
+/tmp/vvv-slot-audit/vless-active/v01.json
+/tmp/vvv-slot-audit/vless-active/v02.json
+status=success
