@@ -55,4 +55,15 @@ rm -rf "$work"
 printf '%s\n' stage-3-render-and-production > validation/final-production-stage.txt
 git add validation/final-production-stage.txt README.md vvv-install.sh core-src src tests .github/workflows/validate.yml
 git commit -m 'Require HTTPS, fix v2rayNG HY2, remove QR, and reorder roles'
-git push
+
+for attempt in 1 2 3 4 5 6; do
+  git fetch origin main
+  git rebase origin/main
+  if git push origin HEAD:main; then
+    exit 0
+  fi
+  sleep 2
+done
+
+echo '阶段 3 正式生产提交推送失败。' >&2
+exit 1
