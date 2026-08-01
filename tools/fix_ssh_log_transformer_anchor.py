@@ -19,6 +19,13 @@ t = sub_once(
 '''
 text = text[:start] + replacement + text[block_end:]
 
+installer_anchor = "t = t.replace(' backup_manager.py rclone_manager.sh qr_helper.sh)', ' backup_manager.py rclone_manager.sh)')\n"
+installer_replacement = installer_anchor + "t = t.replace(' rclone_manager.sh qr_helper.sh host.sh;', ' rclone_manager.sh host.sh;')\n"
+if installer_replacement not in text:
+    if installer_anchor not in text:
+        raise SystemExit('installer QR syntax list anchor not found')
+    text = text.replace(installer_anchor, installer_replacement, 1)
+
 old_assertion = "require('sync_role' not in manager and 'center-relay' not in manager, '仍保留旧 all 角色兼容映射')"
 new_assertion = "require('sync_role' not in manager, '仍保留旧 all 角色兼容映射')"
 if old_assertion in text:
