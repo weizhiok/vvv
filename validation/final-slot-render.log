@@ -2,6 +2,9 @@
 + cp core-src/landing.sh /tmp/landing.sh
 + cp core-src/center_install.sh /tmp/center.sh
 + python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
++ cp /tmp/host.sh validation/generated-host-final-slots.sh
++ cp /tmp/landing.sh validation/generated-landing-final-slots.sh
++ cp /tmp/center.sh validation/generated-center-final-slots.sh
 + bash -n /tmp/host.sh
 + sh -n /tmp/landing.sh
 + bash -n /tmp/center.sh
@@ -12,4 +15,9 @@
 + grep -q sync_vless_slot_services /tmp/host.sh
 + grep -q vvv-vless-slot@ /tmp/host.sh
 + grep -q '主 Xray PID 已保持不变' /tmp/host.sh
-status=failure
++ grep -q '主 sing-box PID 已保持不变' /tmp/host.sh
++ grep -q '^xray_dynamic_parts()' /tmp/host.sh
++ grep -q '^xray_hot_apply()' /tmp/host.sh
++ python3 - /tmp/host.sh
+transaction block preserves and verifies both main service PIDs
+status=success
