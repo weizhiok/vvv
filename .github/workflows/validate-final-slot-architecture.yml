@@ -1,0 +1,99 @@
+name: Validate final isolated relay slot architecture
+on:
+  push:
+    paths:
+      - '.github/workflows/validate-final-slot-architecture.yml'
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply final transformers
+        id: transform
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p validation
+          {
+            set -Eeuxo pipefail
+            python3 -m py_compile tools/patch_hy2_slots_clean.py
+            python3 tools/patch_hy2_slots_clean.py
+            python3 -m py_compile src/prepare.py
+            python3 -m py_compile tools/repair_patch_anchor.py
+            python3 tools/repair_patch_anchor.py
+            python3 -m py_compile tools/patch_vless_slots.py
+            python3 tools/patch_vless_slots.py
+            python3 -m py_compile src/prepare.py
+          } > validation/final-slot-transform.log 2>&1
+      - name: Render and inspect installers
+        id: render
+        if: steps.transform.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            set -Eeuxo pipefail
+            cp core-src/host.sh /tmp/host.sh
+            cp core-src/landing.sh /tmp/landing.sh
+            cp core-src/center_install.sh /tmp/center.sh
+            python3 src/prepare.py /tmp/host.sh /tmp/landing.sh /tmp/center.sh
+            bash -n /tmp/host.sh
+            sh -n /tmp/landing.sh
+            sh -n /tmp/center.sh
+            grep -q 'build_hy2_slot_configs' /tmp/host.sh
+            grep -q 'sync_hy2_slot_services' /tmp/host.sh
+            grep -q 'vvv-hy2-slot@' /tmp/host.sh
+            grep -q 'build_vless_slot_configs' /tmp/host.sh
+            grep -q 'sync_vless_slot_services' /tmp/host.sh
+            grep -q 'vvv-vless-slot@' /tmp/host.sh
+            grep -q '主 Xray PID 已保持不变' /tmp/host.sh
+            grep -q '主 sing-box PID 已保持不变' /tmp/host.sh
+            ! grep -q '^xray_dynamic_parts()' /tmp/host.sh
+            ! grep -q '^xray_hot_apply()' /tmp/host.sh
+            python3 - /tmp/host.sh <<'PY'
+          import re,sys
+          from pathlib import Path
+          text=Path(sys.argv[1]).read_text(encoding='utf-8')
+          match=re.search(r'(?ms)^apply_candidate_with_rollback\(\) \{.*?^\}\n\ngenerate_client_files\(\) \{',text)
+          if not match:
+              raise SystemExit('apply_candidate_with_rollback not found')
+          block=match.group(0)
+          forbidden=['systemctl restart xray','systemctl restart sing-box','xray_hot_apply']
+          found=[item for item in forbidden if item in block]
+          if found:
+              raise SystemExit(f'forbidden main-service operation in transaction: {found}')
+          print('transaction block does not restart main services')
+          PY
+            cp /tmp/host.sh validation/generated-host-final-slots.sh
+            cp /tmp/landing.sh validation/generated-landing-final-slots.sh
+            cp /tmp/center.sh validation/generated-center-final-slots.sh
+          } > validation/final-slot-render.log 2>&1
+      - name: Publish diagnostic result
+        if: always()
+        shell: bash
+        env:
+          TRANSFORM_OUTCOME: ${{ steps.transform.outcome }}
+          RENDER_OUTCOME: ${{ steps.render.outcome }}
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          printf 'status=%s\n' "$TRANSFORM_OUTCOME" >> validation/final-slot-transform.log
+          if [[ -f validation/final-slot-render.log ]]; then
+            printf 'status=%s\n' "$RENDER_OUTCOME" >> validation/final-slot-render.log
+          fi
+          git add validation/final-slot-transform.log
+          [[ ! -f validation/final-slot-render.log ]] || git add validation/final-slot-render.log
+          [[ ! -f validation/generated-host-final-slots.sh ]] || git add validation/generated-host-final-slots.sh validation/generated-landing-final-slots.sh validation/generated-center-final-slots.sh
+          if [[ "$TRANSFORM_OUTCOME" == success && "$RENDER_OUTCOME" == success ]]; then
+            git add src/prepare.py
+            git commit -m 'Use isolated VLESS and HY2 relay slot services'
+          else
+            git commit -m 'Record final slot architecture validation failure'
+          fi
+          git push
+          [[ "$TRANSFORM_OUTCOME" == success && "$RENDER_OUTCOME" == success ]]
