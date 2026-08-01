@@ -87,7 +87,7 @@ def sample_host_state():
 
 
 def decoded_v2rayng(module, nodes):
-    raw = module.render_client('v2', nodes)
+    raw = module.render_v2rayng(nodes)
     return base64.b64decode(raw).decode('utf-8').splitlines()
 
 
@@ -97,10 +97,10 @@ def test_subscription_renderers():
     nodes = module.nodes_from_host(host)
     require({n['protocol'] for n in nodes} == {'vless', 'hysteria2'}, '双协议直连节点没有同时进入订阅')
 
-    clash = module.render_client('c', nodes)
-    qx = module.render_client('qx', nodes)
-    loon = module.render_client('ln', nodes)
-    shadowrocket = module.render_client('sr', nodes)
+    clash = module.render_clash(nodes)
+    qx = module.render_qx(nodes)
+    loon = module.render_loon(nodes)
+    shadowrocket = module.render_shadowrocket(nodes)
     v2_lines = decoded_v2rayng(module, nodes)
 
     require('type: vless' in clash and 'type: hysteria2' in clash, 'Clash 订阅缺少双协议节点')
@@ -145,8 +145,8 @@ def test_backup_policy():
         require(token in sub, f'订阅数据写入缺少 {token} 备份')
     for token in ('before-cloud-backup-enabled', 'after-cloud-backup-enabled', 'before-cloud-backup-disabled', 'after-cloud-backup-disabled'):
         require(token in rclone, f'云备份配置缺少事务事件 {token}')
-    require('rclone copyto' in backup and 'rclone sync' not in backup, '云上传必须使用 copy/copyto 而不是 sync')
-    require('AESGCM' in backup and '.enc' in backup, '本地备份没有使用加密容器')
+    require("'copyto'" in backup and "'sync'" not in backup, '云上传必须使用 copy/copyto 而不是 sync')
+    require('-aes-256-cbc' in backup and '-pbkdf2' in backup and '.enc' in backup, '本地备份没有使用 AES-256-CBC + PBKDF2 加密容器')
 
 
 def test_jpr3_and_slot_architecture():
