@@ -1,0 +1,21 @@
+name: Export PR Source
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pack source
+        run: tar --exclude=.git -czf /tmp/vvv-source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vvv-source
+          path: /tmp/vvv-source.tar.gz
+          retention-days: 1
