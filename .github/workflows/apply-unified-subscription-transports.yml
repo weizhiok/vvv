@@ -4,6 +4,8 @@ on:
     branches: [agent/unified-subscription-transports]
     paths:
       - 'trigger-unified-subscription-transports.txt'
+  pull_request:
+    branches: [main]
 permissions:
   contents: write
 concurrency:
@@ -11,6 +13,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   apply-and-verify:
+    if: github.head_ref == 'agent/unified-subscription-transports' || github.ref_name == 'agent/unified-subscription-transports'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
