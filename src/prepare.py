@@ -717,6 +717,6 @@ l = l.replace("salamander-password={loon_q(h['obfs_password'])}", "salamander-pa
 landing.write_text(l, encoding='utf-8')
 
 c = center.read_text(encoding='utf-8')
-for required in ('VVV_SUB_DOMAIN', 'VVV_SUB_PORT', '--adapter caddyfile', 'backup_manager.py', '/r/${token}/c'):
+for required in ('VVV_SUB_DOMAIN', 'VVV_SUB_PORT', 'VVV_SUB_TRANSPORT', 'VVV_SUB_SUFFIX', 'client_adapters.py', 'center_transport.sh'):
     if required not in c:
         raise SystemExit('订阅中心源码缺少必要字段：' + required)
