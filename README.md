@@ -1,6 +1,6 @@
 # VVV 一体化 VPS 工具
 
-VVV 使用一个固定安装入口，在全新的 **Debian 13 + systemd** VPS 上安装和管理代理、订阅与中转线路。
+VVV 使用一个固定安装入口，在 **Debian 13 + systemd** VPS 上安装和管理代理、订阅与中转线路。安装命令可以重复运行：每次都会进入安装菜单，并按当前状态续装、修复或追加角色。
 
 ## 永久固定安装地址
 
@@ -8,7 +8,7 @@ VVV 使用一个固定安装入口，在全新的 **Debian 13 + systemd** VPS �
 { command -v curl >/dev/null 2>&1 || { apt-get -o DPkg::Lock::Timeout=10 -o Acquire::Retries=2 -o Acquire::IndexTargets::deb-src::Sources::DefaultEnabled=false update && DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=10 -o Acquire::Retries=2 install -y curl ca-certificates; }; } && curl -fsSL --retry 5 "https://raw.githubusercontent.com/weizhiok/vvv/install/vvv-install.sh?$(date +%s)" | bash
 ```
 
-`install` 是固定入口分支，会自动取得 `main` 分支经过验证的最新安装程序。安装完成后统一输入：
+`install` 是固定入口分支，会自动取得 `main` 分支经过验证的最新安装程序。无论首次安装、SSH 中断后续装，还是已经安装后追加其他角色，重新运行同一条安装命令都会先显示安装菜单。安装完成后统一输入：
 
 ```bash
 vps
@@ -34,6 +34,15 @@ vps
 - 订阅中心接入码或 JPR3 对接密钥。
 
 订阅域名可以直接按回车留空。留空时自动使用本机公网 IPv4，并申请 Let’s Encrypt 短期公网 IP 证书。参数总览显示后直接开始安装，不再要求输入 `Y`，安装过程中也不会穿插新的问题。
+
+重复安装规则：
+
+- 已安装的本机代理会复用原协议、端口和永久凭证，不重新生成节点；
+- 已安装的订阅中心会保留订阅密钥、已注册主机和备份数据；
+- 后续选择新的角色时，只追加缺少的模块，并自动合并最终角色。例如先安装菜单 2，再运行菜单 3，最终会成为“订阅中心 + 中转主机 + 自身代理”；
+- SSH 在参数输入或源码下载期间中断，不会再把 VPS 判定为“必须重装系统”；
+- 订阅中心安装中途断开时，下次选择带订阅中心的角色会先备份残留，再清理不完整组件并续装；
+- 中转副机与本机代理/订阅中心/中转主机不能安装在同一台 VPS，但安装菜单仍会正常显示并给出明确提示。
 
 ## 代理与中转架构
 
@@ -84,7 +93,7 @@ vps
 
 ## 系统要求
 
-- 仅支持全新 Debian 13；
+- 仅支持 Debian 13；
 - 必须使用 systemd；
 - 使用 root 用户执行；
 - 固定安装命令会在缺少 curl 时先通过 APT 安装 curl 和 CA 证书；
@@ -95,4 +104,4 @@ vps
 
 ## 安装策略
 
-当前版本只按全新 Debian 13 首次安装设计。检测到旧 VVV 状态时会停止，不提供原地升级、迁移或旧版本兼容。
+安装入口支持重复执行和角色追加，但仍不迁移 Debian 12、Alpine、OpenRC 或其他旧系统方案。每次运行都会刷新并验证安装源码，然后进入安装菜单；现有完整模块会被保留，只安装所选角色缺少的部分。
