@@ -37,6 +37,8 @@ def test_menu_and_front_loaded_parameters():
     ]
     positions = [text.index(label) for label in labels]
     require(positions == sorted(positions), '初始菜单顺序不符合最终要求')
+    detect_body = text.split('detect_installed_modules() {', 1)[1].split('\n}', 1)[0]
+    require('return 0' in detect_body, '模块未安装时检测函数会触发 set -e 静默退出，导致菜单不显示')
     for token in (
         '========== 安装参数（全部前置设置） ==========',
         '请输入代理监听端口 [默认 443]',
