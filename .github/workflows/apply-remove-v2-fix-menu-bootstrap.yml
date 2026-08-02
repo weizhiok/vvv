@@ -23,7 +23,18 @@ jobs:
           ref: agent/remove-v2-fix-menu-bootstrap
           fetch-depth: 0
       - name: Apply production patch
-        run: python3 tools/apply_remove_v2_fix_menu_bootstrap.py
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tools/apply_remove_v2_fix_menu_bootstrap.py')
+          text = path.read_text(encoding='utf-8')
+          old = r"    production = '\n'.join((host, read('core-src/landing.sh'), read('core-src/center_install.sh'), read('core-src/sub_center.py')))"
+          new = r"    production = '\\n'.join((host, read('core-src/landing.sh'), read('core-src/center_install.sh'), read('core-src/sub_center.py')))"
+          if old not in text:
+              raise SystemExit('temporary patch escape target not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          python3 tools/apply_remove_v2_fix_menu_bootstrap.py
       - name: Verify source and rendered installers
         run: |
           set -Eeuo pipefail
