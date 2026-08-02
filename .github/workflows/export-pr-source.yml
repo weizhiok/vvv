@@ -24,8 +24,8 @@ jobs:
           echo "56bc56d62b2082148f33a41d5c1af8871dd4cf7516fc33c832a0020715513c64  /tmp/vvv.patch.gz.b64" | sha256sum -c -
           base64 -d /tmp/vvv.patch.gz.b64 | gzip -d > /tmp/vvv.patch
           echo "251f6b8d0efe639a972b2bb6f5b01e46311f3e627ee5bbff921456a263088ac5  /tmp/vvv.patch" | sha256sum -c -
-          git apply --binary /tmp/vvv.patch
-          rm -rf .github/vvv-patch
+          git apply --binary --exclude=.github/workflows/export-pr-source.yml /tmp/vvv.patch
+          rm -rf .github/vvv-patch .github/workflows/export-pr-source.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
