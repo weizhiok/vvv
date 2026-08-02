@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import base64
 import importlib.util
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -106,6 +107,34 @@ def test_direct_address_registration():
         require(token in center, f'订阅中心直连自动注册缺少：{token}')
     require('if [[ "$current" == direct ]]' in manager and '请输入订阅中心 IP 地址或域名' in manager, 'vps 菜单不能按地址补注册直连副机')
     require(manager.count('注册或更换订阅中心') == 1 and "act[$n]=register" in manager, '已注册后不能更换订阅中心')
+    require('订阅中心注册成功' in register and '\x1b[32m' in register and '\x1b[0m' in register, 'SSH 没有绿色订阅中心注册成功提示')
+    for token in ('require_registration_success', "'registered'", "'subscription_refreshed'", 'snapshot_payload'):
+        require(token in sync, f'客户端没有验证注册刷新成功标识：{token}')
+    for token in ('def finalize_registration', "'registered':True", "'subscription_refreshed':True", 'count=regenerate()'):
+        require(token in center, f'订阅中心没有在注册响应前刷新订阅：{token}')
+
+
+def test_registration_refresh_contract():
+    module = load_sub_center()
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        module.HOSTS = root / 'hosts'
+        module.OUT = root / 'output'
+        module.HOSTS.mkdir(parents=True)
+        module.OUT.mkdir(parents=True)
+        calls = []
+        module.regenerate = lambda: calls.append('refresh') or 2
+        entry = {'host_id': 'confirmed-host-001', 'token': 'host-token', 'role': 'direct'}
+        result = module.finalize_registration(entry, {
+            'state': sample_host_state(),
+            'meta': {'hostname': 'direct-node', 'role': 'direct'},
+        })
+        require(calls == ['refresh'], '注册没有在返回前刷新订阅文件')
+        require(result.get('ok') is True and result.get('registered') is True, '注册响应缺少成功标识')
+        require(result.get('subscription_refreshed') is True, '注册响应没有确认订阅已刷新')
+        require(result.get('node_count') == 2 and result.get('host_token') == 'host-token', '注册响应内容不完整')
+        saved = module.read_json(module.HOSTS / 'confirmed-host-001.json', {})
+        require(saved.get('state', {}).get('public_ip') == '198.51.100.10', '注册时没有保存首份节点状态')
 
 
 def test_subscription_renderers():
@@ -305,6 +334,7 @@ def main():
     tests = [
         test_menu_and_front_loaded_parameters,
         test_direct_address_registration,
+        test_registration_refresh_contract,
         test_subscription_renderers,
         test_backup_policy,
         test_jpr3_and_slot_architecture,
