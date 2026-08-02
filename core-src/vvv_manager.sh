@@ -13,9 +13,18 @@ show_roles(){
 }
 primary(){ jq -r .primary_role "$ROLE_FILE"; }
 register_center(){
-  read -r -p "请输入 VVV 主机接入码：" code
-  [[ -n $code ]] || { echo "接入码不能为空。"; return; }
-  /usr/local/lib/vvv/register_sync.sh "$(primary)" "$code"
+  local current address code
+  current="$(primary)"
+  if [[ "$current" == direct ]]; then
+    read -r -p "请输入订阅中心 IP 地址或域名（默认 HTTPS 端口 8443）：" address
+    address="${address//[[:space:]]/}"
+    [[ -n "$address" ]] || { echo "订阅中心地址不能为空。"; return; }
+    /usr/local/lib/vvv/register_sync.sh direct "" "$address"
+  else
+    read -r -p "请输入 VVV 主机接入码：" code
+    [[ -n "$code" ]] || { echo "接入码不能为空。"; return; }
+    /usr/local/lib/vvv/register_sync.sh "$current" "$code"
+  fi
 }
 show_sync(){
   [[ -f /etc/vvv/client.json ]] && jq '{base_url,host_id,role,registered_at,last_sync,last_result}' /etc/vvv/client.json || echo "尚未注册订阅中心。"
@@ -35,9 +44,8 @@ while true; do
   if [[ -f /etc/vvv/client.json ]]; then
     echo "$n. 立即同步订阅"; act[$n]=sync; ((n++))
     echo "$n. 查看订阅同步状态"; act[$n]=status; ((n++))
-  else
-    echo "$n. 注册或更换订阅中心"; act[$n]=register; ((n++))
   fi
+  echo "$n. 注册或更换订阅中心"; act[$n]=register; ((n++))
   role_has center && { echo "$n. 查看已注册副机"; act[$n]=hosts; ((n++)); }
   echo "0. 退出"
   read -r -p "请输入编号：" x

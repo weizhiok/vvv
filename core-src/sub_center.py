@@ -2,6 +2,7 @@
 import argparse
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -201,6 +202,13 @@ def auth_token(handler):
     return value[7:] if value.startswith('Bearer ') else ''
 
 
+def request_ip(handler):
+    forwarded=handler.headers.get('X-Forwarded-For','').split(',')[0].strip()
+    candidate=forwarded or handler.client_address[0]
+    try: return ipaddress.ip_address(candidate)
+    except ValueError: return None
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version='StaticResource/2.0'
     def log_message(self,*_): pass
@@ -227,6 +235,19 @@ class Handler(BaseHTTPRequestHandler):
         if body is None: return self.send_bytes(400,b'Bad Request\n')
         with LOCK:
             registry=read_json(REGISTRY,{'hosts':[]}) or {'hosts':[]}
+            if path=='/api/v1/register-direct':
+                host_id=str(body.get('host_id') or '').strip(); role=str(body.get('role') or '')
+                if role!='direct': return self.send_bytes(400,b'Direct role required\n')
+                if not re.fullmatch(r'[A-Za-z0-9._-]{8,128}',host_id): return self.send_bytes(400,b'Bad host id\n')
+                try: declared_ip=ipaddress.ip_address(str(body.get('public_ip') or '').strip())
+                except ValueError: return self.send_bytes(400,b'Bad public ip\n')
+                source_ip=request_ip(self)
+                if source_ip is None or not declared_ip.is_global: return self.send_bytes(403,b'Public source required\n')
+                if source_ip.version==declared_ip.version and source_ip!=declared_ip: return self.send_bytes(403,b'Source IP mismatch\n')
+                backup('before-host-register'); entry=next((x for x in registry['hosts'] if x['host_id']==host_id),None)
+                if entry is None: entry={'host_id':host_id,'token':secrets.token_urlsafe(32),'created_at':now()}; registry['hosts'].append(entry)
+                entry.update(role='direct',hostname=str(body.get('hostname') or ''),auto_registered=True,source_ip=str(source_ip),updated_at=now()); atomic_json(REGISTRY,registry); backup('after-host-register')
+                return self.send_bytes(200,json.dumps({'host_id':host_id,'host_token':entry['token']},ensure_ascii=False).encode(),'application/json')
             if path=='/api/v1/register':
                 if not secrets.compare_digest(auth_token(self),cfg.get('master_token','')): return self.send_bytes(403,b'Forbidden\n')
                 host_id=str(body.get('host_id') or '').strip(); role=str(body.get('role') or 'direct')

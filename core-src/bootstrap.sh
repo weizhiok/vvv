@@ -191,6 +191,29 @@ ask_code(){
   printf -v "$__var" '%s' "$value"
 }
 
+ask_center_address(){
+  local __var=$1 value
+  read -r -p "请输入订阅中心 IP 地址或域名（直接回车暂不注册，默认 HTTPS 端口 8443）：" value
+  value="${value//[[:space:]]/}"
+  printf -v "$__var" '%s' "$value"
+}
+
+ask_required_jpr3(){
+  while true; do
+    read -r -p "请输入完整 JPR3 对接密钥（中转模式必填）：" key
+    key="${key//[[:space:]]/}"
+    if [[ -z "$key" ]]; then
+      echo "中转模式必须输入 JPR3 对接密钥，不能跳过。"
+      continue
+    fi
+    if [[ "$key" != JPR3.* ]]; then
+      echo "对接密钥格式错误，必须以 JPR3. 开头。"
+      continue
+    fi
+    break
+  done
+}
+
 ask_proxy_parameters(){
   local choice input
   echo
@@ -314,6 +337,21 @@ enable_relay(){
   rm -f "$tmp"
 }
 
+refresh_center_runtime_code() {
+  local changed=0
+  install -d -m700 /usr/local/lib/vvv
+  for file in sub_center.py backup_manager.py; do
+    if [[ ! -f "/usr/local/lib/vvv/$file" ]] || ! cmp -s "$BASE_DIR/$file" "/usr/local/lib/vvv/$file"; then
+      install -m755 "$BASE_DIR/$file" "/usr/local/lib/vvv/$file"
+      changed=1
+    fi
+  done
+  if (( changed == 1 )); then
+    echo "检测到订阅中心程序更新，保留全部数据并重新启动内部服务。"
+    timeout 75 systemctl restart vvv-sub.service
+  fi
+}
+
 ensure_center_runtime() {
   systemctl daemon-reload
   systemctl enable vvv-sub.service caddy.service >/dev/null 2>&1 || true
@@ -326,6 +364,7 @@ ensure_center_runtime() {
 ensure_center(){
   if center_complete; then
     echo "订阅中心已完整安装，保留现有订阅密钥、已注册主机和备份数据。"
+    refresh_center_runtime_code
     ensure_center_runtime || fail "现有订阅中心文件完整，但服务无法启动；为保护数据，脚本没有自动删除它。"
     return 0
   fi
@@ -409,8 +448,10 @@ EOF_VPS
 }
 
 register_current_main_role(){
-  local supplied_code="${1:-}" role code="$supplied_code"
+  local supplied_code role code
+  supplied_code="${1:-}"
   role="$(primary_role)"
+  code="$supplied_code"
   if center_complete; then
     code="$(cat /etc/vvv-sub/registration.code)"
   fi
@@ -450,8 +491,10 @@ show_parameter_summary(){
       else
         echo "订阅入口：https://本机公网IP:${VVV_SUB_PORT}$([[ "$REUSE_CENTER" == 1 ]] && echo '（复用现有）' || echo '（自动申请免费 IP 证书）')"
       fi
-    elif [[ "$choice" == 3 || "$choice" == 5 ]]; then
+    elif [[ "$choice" == 3 ]]; then
       [[ -n "$code" ]] && echo "订阅中心接入码：已填写或将使用本机订阅中心" || echo "订阅中心接入码：未填写（独立使用）"
+    elif [[ "$choice" == 5 ]]; then
+      [[ -n "$center_address" ]] && echo "订阅中心地址：$center_address（自动注册直连节点）" || echo "订阅中心地址：未填写（本次暂不注册）"
     fi
   fi
   echo "=================================="
@@ -462,6 +505,7 @@ REUSE_PROXY=0
 REUSE_CENTER=0
 code=""
 key=""
+center_address=""
 
 show_install_menu
 while true; do
@@ -498,7 +542,7 @@ case "$choice" in
       ask_center_parameters
     fi
     ;;
-  3|5)
+  3)
     if center_complete; then
       code="$(cat /etc/vvv-sub/registration.code)"
     else
@@ -506,8 +550,14 @@ case "$choice" in
     fi
     ;;
   4)
-    read -r -p "请输入完整 JPR3 对接密钥：" key
-    [[ "$key" == JPR3.* ]] || fail "对接密钥必须以 JPR3. 开头。"
+    ask_required_jpr3
+    ;;
+  5)
+    if center_complete; then
+      center_address="本机订阅中心"
+    else
+      ask_center_address center_address
+    fi
     ;;
 esac
 
@@ -542,7 +592,11 @@ case "$choice" in
   5)
     ensure_host
     rebuild_roles_from_system
-    register_current_main_role "$code"
+    if center_complete; then
+      register_current_main_role
+    else
+      bash "$BASE_DIR/register_sync.sh" direct "" "$center_address"
+    fi
     ;;
 esac
 
