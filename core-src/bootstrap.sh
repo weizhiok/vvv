@@ -337,6 +337,21 @@ enable_relay(){
   rm -f "$tmp"
 }
 
+refresh_center_runtime_code() {
+  local changed=0
+  install -d -m700 /usr/local/lib/vvv
+  for file in sub_center.py backup_manager.py; do
+    if [[ ! -f "/usr/local/lib/vvv/$file" ]] || ! cmp -s "$BASE_DIR/$file" "/usr/local/lib/vvv/$file"; then
+      install -m755 "$BASE_DIR/$file" "/usr/local/lib/vvv/$file"
+      changed=1
+    fi
+  done
+  if (( changed == 1 )); then
+    echo "检测到订阅中心程序更新，保留全部数据并重新启动内部服务。"
+    timeout 75 systemctl restart vvv-sub.service
+  fi
+}
+
 ensure_center_runtime() {
   systemctl daemon-reload
   systemctl enable vvv-sub.service caddy.service >/dev/null 2>&1 || true
@@ -349,6 +364,7 @@ ensure_center_runtime() {
 ensure_center(){
   if center_complete; then
     echo "订阅中心已完整安装，保留现有订阅密钥、已注册主机和备份数据。"
+    refresh_center_runtime_code
     ensure_center_runtime || fail "现有订阅中心文件完整，但服务无法启动；为保护数据，脚本没有自动删除它。"
     return 0
   fi

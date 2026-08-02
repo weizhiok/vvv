@@ -97,6 +97,8 @@ def test_direct_address_registration():
     require('local supplied_code="${1:-}" role code="$supplied_code"' not in bootstrap, '仍保留 supplied_code 未绑定崩溃写法')
     require('ask_center_address' in bootstrap and '默认 HTTPS 端口 8443' in bootstrap, '直连安装没有只询问订阅中心地址')
     require('ask_required_jpr3' in bootstrap and '中转模式必须输入 JPR3 对接密钥' in bootstrap, '中转副机仍可跳过对接码')
+    require('refresh_center_runtime_code' in bootstrap and 'cmp -s "$BASE_DIR/$file"' in bootstrap, '已有订阅中心不会刷新自动注册接口')
+    require('timeout 75 systemctl restart vvv-sub.service' in bootstrap, '订阅中心程序更新后没有有界重启服务')
     require('register-direct "$center_address"' in register, '直连地址没有传给自动注册客户端')
     for token in ('normalize_center_address', "'/api/v1/register-direct'", "registration_method': 'center-address'", "commands.add_parser('register-direct')"):
         require(token in sync, f'直连地址注册客户端缺少：{token}')
