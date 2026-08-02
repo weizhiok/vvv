@@ -2,13 +2,14 @@
 import argparse
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 import platform
+import re
 import socket
 import time
 from pathlib import Path
-from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -28,72 +29,60 @@ def read(path, default=None):
 def atomic(path, obj):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix('.tmp')
-    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+    fd_path = path.with_suffix('.tmp')
+    fd_path.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    os.chmod(fd_path, 0o600)
+    os.replace(fd_path, path)
 
 
 def post(url, token, obj):
     data = json.dumps(obj, ensure_ascii=False).encode()
-    headers = {'Content-Type': 'application/json', 'User-Agent': 'VVV-Sync/3.0'}
+    headers = {'Content-Type': 'application/json', 'User-Agent': 'VVV-Sync/4.0'}
     if token:
         headers['Authorization'] = 'Bearer ' + token
     request = Request(url, data=data, method='POST', headers=headers)
     with urlopen(request, timeout=30) as response:
-        payload = response.read().decode()
-        return json.loads(payload)
+        return json.loads(response.read().decode())
 
 
-def decode_code(code):
-    code = code.strip()
-    raw = code.split('.', 1)[1] if code.startswith('VVV1.') else code
-    raw += '=' * ((4 - len(raw) % 4) % 4)
-    return json.loads(base64.urlsafe_b64decode(raw).decode())
+def encode_vvc1(payload):
+    raw = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode()
+    encoded = base64.urlsafe_b64encode(raw).decode().rstrip('=')
+    digest = hashlib.sha256(b'VVV-VVC1\0' + raw).hexdigest()[:20]
+    return f'VVC1.{encoded}.{digest}'
 
 
-def format_base(scheme, host, port=None):
-    if ':' in host and not host.startswith('['):
-        host = '[' + host + ']'
-    if port is None or (scheme == 'https' and port == 443) or (scheme == 'http' and port == 80):
-        return f'{scheme}://{host}'
-    return f'{scheme}://{host}:{port}'
-
-
-def explicit_base(value):
-    parsed = urlparse(value)
-    if parsed.scheme.lower() not in ('http', 'https') or not parsed.hostname:
-        raise ValueError('invalid center address')
+def decode_vvc1(code):
+    value = ''.join(str(code or '').split())
+    if value.startswith('JPR3.'):
+        raise ValueError('这是中转副机 JPR3 密钥，不能用于订阅中心注册。')
+    if value.startswith('VVVR1.'):
+        raise ValueError('这是旧云恢复码，不能用于订阅中心注册。')
+    parts = value.split('.')
+    if len(parts) != 3 or parts[0] != 'VVC1' or not re.fullmatch(r'[A-Za-z0-9_-]+', parts[1]) or not re.fullmatch(r'[0-9a-f]{20}', parts[2]):
+        raise ValueError('订阅中心对接码格式错误，必须以 VVC1. 开头。')
     try:
-        port = parsed.port
-    except ValueError as exc:
-        raise ValueError('invalid center port') from exc
-    return format_base(parsed.scheme.lower(), parsed.hostname, port)
-
-
-def center_candidates(value):
-    value = str(value or '').strip().rstrip('/')
-    if not value:
-        raise SystemExit('订阅中心地址不能为空。')
-    if '://' in value:
-        try:
-            return [explicit_base(value)]
-        except ValueError as exc:
-            raise SystemExit('订阅中心地址格式错误。') from exc
-    parsed = urlparse('//' + value)
-    if not parsed.hostname:
-        raise SystemExit('订阅中心地址格式错误。')
+        raw = base64.urlsafe_b64decode(parts[1] + '=' * ((4 - len(parts[1]) % 4) % 4))
+        actual = hashlib.sha256(b'VVV-VVC1\0' + raw).hexdigest()[:20]
+        if actual != parts[2]:
+            raise ValueError('订阅中心对接码校验失败，内容可能复制不完整。')
+        obj = json.loads(raw.decode())
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f'订阅中心对接码无法解析：{exc}') from exc
+    if obj.get('schema') != 1 or obj.get('type') != 'vvv-subscription-center':
+        raise ValueError('对接码用途错误，不是 VVV 订阅中心对接码。')
+    parsed = urlparse(str(obj.get('api_base_url') or ''))
+    if parsed.scheme != 'http' or not parsed.hostname:
+        raise ValueError('对接码中的订阅中心 API 地址无效。')
     try:
-        explicit_port = parsed.port
+        ipaddress.ip_address(parsed.hostname)
     except ValueError as exc:
-        raise SystemExit('订阅中心端口格式错误。') from exc
-    host = parsed.hostname
-    if explicit_port is not None:
-        if not 1 <= explicit_port <= 65535:
-            raise SystemExit('订阅中心端口必须是 1-65535。')
-        return [format_base('https', host, explicit_port), format_base('http', host, explicit_port)]
-    # Direct VVV defaults to 8443. Tunnel mode uses standard HTTPS/443.
-    return [format_base('https', host, 8443), format_base('https', host, 443), format_base('http', host, 8443)]
+        raise ValueError('对接码中的订阅中心必须使用 IP 地址，不能使用域名。') from exc
+    if not str(obj.get('master_token') or ''):
+        raise ValueError('对接码缺少注册授权信息。')
+    return obj
 
 
 def stable_id():
@@ -107,18 +96,6 @@ def stable_id():
 
 def state_path(role):
     return LANDING_STATE if role == 'landing' else MAIN_STATE
-
-
-def local_api_for(role, public_base):
-    if role not in ('center', 'center-relay') or not CENTER_CFG.exists():
-        return public_base
-    center = read(CENTER_CFG, {}) or {}
-    port = int(center.get('listen_port') or 18081)
-    return f'http://127.0.0.1:{port}'
-
-
-def api_base(cfg):
-    return (cfg.get('api_base_url') or cfg['base_url']).rstrip('/')
 
 
 def snapshot_payload(role):
@@ -138,104 +115,48 @@ def snapshot_payload(role):
 def require_registration_success(response):
     if not isinstance(response, dict):
         raise SystemExit('订阅中心返回了无效的注册结果。')
-    required = ('ok', 'registered', 'subscription_refreshed')
-    if any(response.get(key) is not True for key in required):
-        raise SystemExit('订阅中心未返回完整的注册成功标识，未确认订阅刷新。')
+    if any(response.get(key) is not True for key in ('ok', 'registered', 'subscription_refreshed')):
+        raise SystemExit('订阅中心未确认注册和订阅刷新成功。')
     if not response.get('host_token'):
         raise SystemExit('订阅中心注册响应缺少主机令牌。')
     return response
 
 
-def canonicalize_cfg(cfg, response, internal=False):
-    canonical = str((response or {}).get('canonical_base_url') or '').rstrip('/')
-    if canonical.startswith(('http://', 'https://')):
-        cfg['base_url'] = canonical
-        if not internal:
-            cfg['api_base_url'] = canonical
-        if canonical.startswith('https://'):
-            cfg['https_pinned'] = True
-    subscription_url = str((response or {}).get('subscription_url') or '')
-    if subscription_url:
-        cfg['subscription_url'] = subscription_url
-    return cfg
+def local_api_for(role, api_base):
+    if role in ('center', 'center-relay') and CENTER_CFG.exists():
+        center = read(CENTER_CFG, {}) or {}
+        return f"http://127.0.0.1:{int(center.get('listen_port') or 18081)}"
+    return api_base.rstrip('/')
 
 
 def register(code, role):
-    decoded = decode_code(code)
-    public_base = str(decoded['base_url']).rstrip('/')
-    internal_base = local_api_for(role, public_base)
-    master = decoded['master_token']
+    try:
+        decoded = decode_vvc1(code)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    public_api = str(decoded['api_base_url']).rstrip('/')
+    api_base = local_api_for(role, public_api)
     host_id = stable_id()
     payload = {'host_id': host_id, 'role': role, 'hostname': socket.gethostname()}
     payload.update(snapshot_payload(role))
-    response = require_registration_success(post(internal_base + '/api/v1/register', master, payload))
+    response = require_registration_success(post(api_base + '/api/v1/register', decoded['master_token'], payload))
     current = time.time()
     cfg = {
-        'schema': 3,
-        'base_url': public_base,
-        'api_base_url': internal_base,
+        'schema': 4,
+        'api_base_url': public_api,
+        'effective_api_base_url': api_base,
+        'center_ip': urlparse(public_api).hostname,
         'host_id': host_id,
         'host_token': response['host_token'],
         'role': role,
         'registered_at': current,
         'last_sync': current,
         'last_result': response,
-        'https_pinned': public_base.startswith('https://'),
+        'subscription_url': response.get('subscription_url', ''),
+        'registration_method': 'VVC1',
     }
-    canonicalize_cfg(cfg, response, internal=internal_base.startswith('http://127.0.0.1:'))
     atomic(CFG, cfg)
     return response
-
-
-def register_direct(center_address):
-    state = read(MAIN_STATE, {}) or {}
-    public_ip = str(state.get('public_ip') or '').strip()
-    if not public_ip:
-        raise SystemExit('本机代理状态缺少公网 IP，无法自动注册。')
-    host_id = stable_id()
-    payload = {
-        'host_id': host_id,
-        'role': 'direct',
-        'hostname': socket.gethostname(),
-        'public_ip': public_ip,
-    }
-    payload.update(snapshot_payload('direct'))
-    errors = []
-    response = None
-    public_base = ''
-    for candidate in center_candidates(center_address):
-        try:
-            response = require_registration_success(post(candidate + '/api/v1/register-direct', '', payload))
-            public_base = candidate
-            break
-        except (HTTPError, URLError, TimeoutError, OSError, ValueError, SystemExit) as exc:
-            errors.append(f'{candidate}: {exc}')
-    if response is None:
-        raise SystemExit('无法连接订阅中心：' + '；'.join(errors[-3:]))
-    current = time.time()
-    cfg = {
-        'schema': 3,
-        'base_url': public_base,
-        'api_base_url': public_base,
-        'host_id': host_id,
-        'host_token': response['host_token'],
-        'role': 'direct',
-        'registered_at': current,
-        'last_sync': current,
-        'last_result': response,
-        'registration_method': 'center-address',
-        'https_pinned': public_base.startswith('https://'),
-    }
-    canonicalize_cfg(cfg, response)
-    atomic(CFG, cfg)
-    return response
-
-
-def https_upgrade_base(base):
-    parsed = urlparse(base)
-    if parsed.scheme != 'http' or not parsed.hostname:
-        return None
-    return format_base('https', parsed.hostname, parsed.port)
 
 
 def sync():
@@ -244,36 +165,44 @@ def sync():
         raise SystemExit('尚未配置订阅同步。')
     payload = {'host_id': cfg['host_id']}
     payload.update(snapshot_payload(cfg.get('role', 'direct')))
-    bases = []
-    internal = str(cfg.get('api_base_url') or '').startswith('http://127.0.0.1:')
-    current_base = api_base(cfg)
-    if not internal and not cfg.get('https_pinned'):
-        upgraded = https_upgrade_base(current_base)
-        if upgraded:
-            bases.append(upgraded)
-    bases.append(current_base)
-    response = None
-    used_base = ''
-    errors = []
-    for base in dict.fromkeys(bases):
-        try:
-            response = post(base + '/api/v1/sync', cfg['host_token'], payload)
-            used_base = base
-            break
-        except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
-            errors.append(f'{base}: {exc}')
-    if response is None:
-        raise SystemExit('订阅同步失败：' + '；'.join(errors[-2:]))
-    if used_base.startswith('https://') and not internal:
-        cfg['base_url'] = used_base
-        cfg['api_base_url'] = used_base
-        cfg['https_pinned'] = True
-        cfg['https_upgraded_at'] = time.time()
-    canonicalize_cfg(cfg, response, internal=internal)
+    api_base = str(cfg.get('effective_api_base_url') or cfg.get('api_base_url') or '').rstrip('/')
+    if not api_base:
+        raise SystemExit('订阅中心 API 地址缺失。')
+    response = post(api_base + '/api/v1/sync', cfg['host_token'], payload)
     cfg['last_sync'] = time.time()
     cfg['last_result'] = response
+    if response.get('subscription_url'):
+        cfg['subscription_url'] = response['subscription_url']
     atomic(CFG, cfg)
     print(json.dumps(response, ensure_ascii=False))
+
+
+def update_center_ip(new_ip):
+    try:
+        ip = ipaddress.ip_address(new_ip)
+    except ValueError as exc:
+        raise SystemExit('请输入有效的订阅中心 IP 地址。') from exc
+    if ip.version != 4 or ip.is_unspecified:
+        raise SystemExit('当前只支持有效的 IPv4 地址。')
+    cfg = read(CFG)
+    if not cfg:
+        raise SystemExit('尚未注册订阅中心。')
+    old = json.loads(json.dumps(cfg))
+    parsed = urlparse(str(cfg.get('api_base_url') or ''))
+    port = parsed.port or 18081
+    cfg['center_ip'] = str(ip)
+    cfg['api_base_url'] = f'http://{ip}:{port}'
+    if str(cfg.get('effective_api_base_url') or '').startswith('http://127.0.0.1:'):
+        pass
+    else:
+        cfg['effective_api_base_url'] = cfg['api_base_url']
+    atomic(CFG, cfg)
+    try:
+        sync()
+    except Exception:
+        atomic(CFG, old)
+        raise
+    return cfg
 
 
 if __name__ == '__main__':
@@ -282,13 +211,17 @@ if __name__ == '__main__':
     register_cmd = commands.add_parser('register')
     register_cmd.add_argument('code')
     register_cmd.add_argument('role', choices=['center-relay', 'center', 'relay', 'direct', 'landing'])
-    direct_cmd = commands.add_parser('register-direct')
-    direct_cmd.add_argument('center_address')
     commands.add_parser('sync')
+    update_cmd = commands.add_parser('update-center-ip')
+    update_cmd.add_argument('ip')
+    validate_cmd = commands.add_parser('validate-code')
+    validate_cmd.add_argument('code')
     args = parser.parse_args()
     if args.cmd == 'register':
         print(json.dumps(register(args.code, args.role), ensure_ascii=False))
-    elif args.cmd == 'register-direct':
-        print(json.dumps(register_direct(args.center_address), ensure_ascii=False))
-    else:
+    elif args.cmd == 'sync':
         sync()
+    elif args.cmd == 'update-center-ip':
+        print(json.dumps(update_center_ip(args.ip), ensure_ascii=False))
+    else:
+        print(json.dumps(decode_vvc1(args.code), ensure_ascii=False))

@@ -4,6 +4,7 @@
 # 可作为文件执行，也可整段粘贴到 SSH 终端。
 # 首次运行只询问协议模式和统一端口；选择后全自动安装。
 umask 077
+VVV_PREPARED_SOURCE=1
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "错误：请使用 root 用户执行。" >&2
@@ -38,9 +39,9 @@ SING_BOX_VERSION="$SING_BOX_FALLBACK_VERSION"
 SING_BOX_VERSION_SOURCE="备用稳定版"
 
 # Hysteria 2 每条连接及中转链路的上下行硬上限（Mbps）
-HY2_LIMIT_MBPS=50
+HY2_LIMIT_MBPS="${VVV_HY2_LIMIT_MBPS:-50}"
 
-DEFAULT_SNI="www.softbank.jp"
+DEFAULT_SNI="${VVV_REALITY_SNI:-www.softbank.jp}"
 UPGRADE_MARKER="/var/lib/jp-relay/japan-system-upgrade.done"
 
 CURRENT_STEP="启动"
@@ -477,39 +478,14 @@ EOF_REBOOT_TIMER
 }
 
 prompt_initial_mode_and_port() {
-  local choice input
-  echo
-  echo "请选择要安装的代理协议："
-  echo
-  echo "1. 同时安装双协议（TCP/443 + UDP/443）【默认】"
-  echo "2. 只安装 VLESS + XTLS Vision + REALITY（TCP/443）"
-  echo "3. 只安装 Hysteria 2（QUIC/UDP/443）"
-  echo "0. 退出"
-  echo
-  while true; do
-    read -r -p "请输入编号 [默认 1]：" choice
-    [[ -n "$choice" ]] || choice="1"
-    case "$choice" in
-      1) INSTALL_MODE="dual"; break ;;
-      2) INSTALL_MODE="vless"; break ;;
-      3) INSTALL_MODE="hy2"; break ;;
-      0) INSTALL_CANCELLED=1; return 0 ;;
-      *) echo "请输入 0、1、2 或 3。" ;;
-    esac
-  done
-
-  while true; do
-    read -r -p "请输入代理监听端口 [默认 443]：" input
-    input="${input//[[:space:]]/}"
-    [[ -n "$input" ]] || input="443"
-    if valid_port "$input"; then
-      INSTALL_PORT="$((10#$input))"
-      break
-    fi
-    echo "端口必须是 1–65535 之间的数字。"
-  done
+  local preset_mode="${VVV_PROTOCOL_MODE:-dual}" preset_port="${VVV_PROXY_PORT:-443}"
+  case "$preset_mode" in dual|vless|hy2) INSTALL_MODE="$preset_mode";; *) fail "预设协议模式无效：$preset_mode"; return 1;; esac
+  valid_port "$preset_port" || { fail "预设代理端口无效：$preset_port"; return 1; }
+  INSTALL_PORT="$((10#$preset_port))"
+  [[ "$INSTALL_MODE" == hy2 ]] || [[ "$DEFAULT_SNI" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$ ]] || { fail "REALITY 伪装域名格式无效：$DEFAULT_SNI"; return 1; }
   echo "已选择模式：$INSTALL_MODE"
   echo "统一监听端口：TCP/UDP ${INSTALL_PORT}（仅启用所选协议）"
+  [[ "$INSTALL_MODE" == hy2 ]] || echo "REALITY 伪装域名：$DEFAULT_SNI"
 }
 
 mode_has_vless() {
@@ -729,6 +705,27 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF_SING_SERVICE
+  install -d -o root -g sing-box -m 750 /etc/vvv-slots/hy2
+  cat > /etc/systemd/system/vvv-hy2-slot@.service <<'EOF_HY2_SLOT_SERVICE'
+[Unit]
+Description=VVV Hysteria 2 relay slot %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=sing-box
+Group=sing-box
+NoNewPrivileges=true
+Environment=GOMEMLIMIT=128MiB
+Environment=GOGC=50
+ExecStart=/usr/local/bin/sing-box run -c /etc/vvv-slots/hy2/%i.json
+Restart=on-failure
+RestartSec=2s
+LimitNOFILE=262144
+
+[Install]
+WantedBy=multi-user.target
+EOF_HY2_SLOT_SERVICE
   systemctl daemon-reload
   systemctl enable sing-box >/dev/null
 }
@@ -815,7 +812,12 @@ initialize_state() {
   chmod 700 "$STATE_DIR" "$PACKAGE_ROOT"
   if [[ -f "$STATE_FILE" ]]; then
     jq -e '.schema==3 and .role=="japan-hub" and (.relays|type=="array") and ((.upstream_relays // [])|type=="array")' "$STATE_FILE" >/dev/null || fail "状态文件不是本脚本的 JPR3 格式。"
-    echo "检测到本脚本状态，复用已保存的协议、端口和全部密钥。"
+    local migrated
+    migrated="$(mktemp --suffix=.json /tmp/vvv-state-migrate.XXXXXX)"; TMP_FILES+=("$migrated")
+    jq --argjson limit "${VVV_HY2_LIMIT_MBPS:-50}" '.hy2_limit_mbps=(.hy2_limit_mbps // $limit) | .temporary_nodes=(.temporary_nodes // [])' "$STATE_FILE" > "$migrated"
+    install -m600 "$migrated" "$STATE_FILE"
+    HY2_LIMIT_MBPS="$(jq -r '.hy2_limit_mbps // 50' "$STATE_FILE")"
+    echo "检测到本脚本状态，复用已保存的协议、端口、限速和全部密钥。"
     return
   fi
 
@@ -832,8 +834,13 @@ initialize_state() {
 
   local vless_json='null' hy2_json='null'
   if mode_has_vless "$mode"; then
-    local key_output v_private v_public short_id uuid
+    local key_output v_private v_public short_id uuid reserve_json i slot_uuid slot_email
     uuid="$(new_uuid)"
+    reserve_json='[]'
+    for i in $(seq 1 256); do
+      slot_uuid="$(new_uuid)"; slot_email="reserve-$(printf '%02d' "$i")@relay.local"
+      reserve_json="$(jq --arg slot "v$(printf '%02d' "$i")" --arg uuid "$slot_uuid" --arg email "$slot_email" --argjson local_port "$((22000+i))" '. + [{slot:$slot,uuid:$uuid,email:$email,local_port:$local_port,assigned_id:null}]' <<<"$reserve_json")"
+    done
     key_output="$("$XRAY" x25519)"
     parse_x25519_keys "$key_output"
     v_private="$GENERATED_PRIVATE_KEY"
@@ -841,12 +848,12 @@ initialize_state() {
     short_id="$(openssl rand -hex 8)"
     vless_json="$(jq -n \
       --arg private "$v_private" --arg public "$v_public" --arg sid "$short_id" \
-      --arg uuid "$uuid" \
-      '{reality:{private_key:$private,public_key:$public,short_id:$sid},direct_user:{uuid:$uuid,email:"jp-direct@relay.local"}}')"
+      --arg uuid "$uuid" --argjson reserve "$reserve_json" \
+      '{reality:{private_key:$private,public_key:$public,short_id:$sid},direct_user:{uuid:$uuid,email:"jp-direct@relay.local"},reserve_users:$reserve}')"
   fi
 
   if mode_has_hy2 "$mode"; then
-    local server_name cert key meta password obfs
+    local server_name cert key meta password obfs reserve_json i slot_name slot_password
     server_name="jp-hy2.jp-relay.local"
     cert="${TLS_DIR}/japan-hy2.crt"
     key="${TLS_DIR}/japan-hy2.key"
@@ -855,13 +862,19 @@ initialize_state() {
     meta="$(certificate_metadata_json "$cert")"
     password="$(random_secret)"
     obfs="$(random_secret)"
+    reserve_json='[]'
+    for i in $(seq 1 256); do
+      slot_name="reserve-h$(printf '%02d' "$i")"
+      slot_password="$(random_secret)"
+      reserve_json="$(jq --arg slot "h$(printf '%02d' "$i")" --arg name "$slot_name" --arg password "$slot_password" --argjson local_port "$((21000+i))" '. + [{slot:$slot,name:$name,password:$password,local_port:$local_port,assigned_id:null}]' <<<"$reserve_json")"
+    done
     hy2_json="$(jq -n \
       --arg server_name "$server_name" --arg cert "$cert" --arg key "$key" \
-      --arg password "$password" --arg obfs "$obfs" \
+      --arg password "$password" --arg obfs "$obfs" --argjson reserve "$reserve_json" \
       --arg fp "$(jq -r '.fingerprint' <<< "$meta")" \
       --arg pinhex "$(jq -r '.pin_hex' <<< "$meta")" \
       --arg pinb64 "$(jq -r '.public_key_sha256' <<< "$meta")" \
-      '{server_name:$server_name,certificate_path:$cert,key_path:$key,certificate_fingerprint:$fp,certificate_pin_hex:$pinhex,certificate_public_key_sha256:$pinb64,obfs_password:$obfs,direct_user:{name:"jp-direct-hy2",password:$password}}')"
+      '{server_name:$server_name,certificate_path:$cert,key_path:$key,certificate_fingerprint:$fp,certificate_pin_hex:$pinhex,certificate_public_key_sha256:$pinb64,obfs_password:$obfs,direct_user:{name:"jp-direct-hy2",password:$password},reserve_users:$reserve}')"
   fi
 
   jq -n \
@@ -875,10 +888,11 @@ initialize_state() {
     --argjson vless "$vless_json" \
     --argjson hy2 "$hy2_json" \
     --arg now "$now" \
+    --argjson limit "$HY2_LIMIT_MBPS" \
     '{
       schema:3,role:"japan-hub",protocol_mode:$mode,public_ip:$ip,listen_port:$port,
       sni:$sni,direct_base_name:$direct_base,xray_version:$xray_version,
-      sing_box_version:$sing_version,vless:$vless,hy2:$hy2,relays:[],upstream_relays:[],
+      sing_box_version:$sing_version,hy2_limit_mbps:$limit,vless:$vless,hy2:$hy2,relays:[],upstream_relays:[],temporary_nodes:[],
       relay_manager_enabled:false,created_at:$now,updated_at:$now
     }' > "$STATE_FILE"
   chmod 600 "$STATE_FILE"
@@ -913,12 +927,8 @@ v=state["vless"]; sni=state["sni"]; port=int(state["listen_port"])
 relays=state.get("relays",[])
 upstreams=state.get("upstream_relays",[])
 clients=[{"id":v["direct_user"]["uuid"],"level":0,"email":v["direct_user"]["email"],"flow":"xtls-rprx-vision"}]
-for r in relays:
-    rv=r.get("vless")
-    if rv:
-        clients.append({"id":rv["client_uuid"],"level":0,"email":rv["client_email"],"flow":"xtls-rprx-vision"})
-for r in upstreams:
-    clients.append({"id":r["client_uuid"],"level":0,"email":r["client_email"],"flow":"xtls-rprx-vision"})
+for user in v.get("reserve_users",[]):
+    clients.append({"id":user["uuid"],"level":0,"email":user["email"],"flow":"xtls-rprx-vision"})
 inbounds=[{
  "tag":"in-vless-reality","listen":"0.0.0.0","port":port,"protocol":"vless",
  "settings":{"clients":clients,"decryption":"none"},
@@ -928,39 +938,11 @@ inbounds=[{
  "sniffing":{"enabled":True,"destOverride":["http","tls","quic"],"routeOnly":True}
 }]
 outbounds=[{"tag":"direct","protocol":"freedom","settings":{"domainStrategy":"UseIPv4"}}]
+for user in v.get("reserve_users",[]):
+    outbounds.append({"tag":f"vless-slot-{user['slot']}","protocol":"socks","settings":{"address":"127.0.0.1","port":int(user["local_port"])}})
 test_rules=[]
-route_rules=[]
+route_rules=[{"type":"field","user":[user["email"]],"outboundTag":f"vless-slot-{user['slot']}","ruleTag":f"vless-slot-route-{user['slot']}"} for user in v.get("reserve_users",[])]
 udp_block_rules=[]
-for r in relays:
-    rv=r.get("vless")
-    if not rv: continue
-    inbounds.append({
-      "tag":rv["test_inbound_tag"],"listen":"127.0.0.1","port":int(rv["test_socks_port"]),
-      "protocol":"socks","settings":{"udp":False},
-      "sniffing":{"enabled":True,"destOverride":["http","tls"],"routeOnly":True}
-    })
-    outbounds.append({
-      "tag":rv["outbound_tag"],"protocol":"vless",
-      "settings":{"address":r["remote_ip"],"port":int(r["remote_port"]),"id":rv["outbound_uuid"],"encryption":"none","flow":"xtls-rprx-vision"},
-      "streamSettings":{"method":"raw","security":"reality","realitySettings":{
-        "serverName":sni,"fingerprint":"chrome","password":rv["remote_reality"]["public_key"],
-        "shortId":rv["remote_reality"]["short_id"],"spiderX":""}}
-    })
-    test_rules.append({"type":"field","inboundTag":[rv["test_inbound_tag"]],"outboundTag":rv["outbound_tag"],"ruleTag":f"test-{r['id']}"})
-    route_rules.append({"type":"field","user":[rv["client_email"]],"outboundTag":rv["outbound_tag"],"ruleTag":f"route-{r['id']}"})
-for r in upstreams:
-    inbounds.append({
-      "tag":r["test_inbound_tag"],"listen":"127.0.0.1","port":int(r["test_socks_port"]),
-      "protocol":"socks","settings":{"udp":False},
-      "sniffing":{"enabled":True,"destOverride":["http","tls"],"routeOnly":True}
-    })
-    outbounds.append({
-      "tag":r["outbound_tag"],"protocol":r["proxy_protocol"],
-      "settings":{"address":r["host"],"port":int(r["port"]),"user":r["username"],"pass":r["password"]}
-    })
-    test_rules.append({"type":"field","inboundTag":[r["test_inbound_tag"]],"outboundTag":r["outbound_tag"],"ruleTag":f"test-{r['id']}"})
-    udp_block_rules.append({"type":"field","user":[r["client_email"]],"network":"udp","outboundTag":"blocked","ruleTag":f"block-udp-{r['id']}"})
-    route_rules.append({"type":"field","user":[r["client_email"]],"outboundTag":r["outbound_tag"],"ruleTag":f"route-{r['id']}"})
 private_ips=[
  "0.0.0.0/8","10.0.0.0/8","100.64.0.0/10","127.0.0.0/8",
  "169.254.0.0/16","172.16.0.0/12","192.0.0.0/24","192.0.2.0/24",
@@ -984,42 +966,27 @@ build_sing_config() {
 import json, sys
 from pathlib import Path
 state=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-limit_mbps=int(sys.argv[3])
+limit_mbps=int(state.get("hy2_limit_mbps") or sys.argv[3])
 if state["protocol_mode"] not in ("dual","hy2"):
     Path(sys.argv[2]).write_text("{}\n",encoding="utf-8")
     raise SystemExit
 h=state["hy2"]; port=int(state["listen_port"])
+reserve=h.get("reserve_users",[])
 users=[{"name":h["direct_user"]["name"],"password":h["direct_user"]["password"]}]
-for r in state["relays"]:
-    rh=r.get("hy2")
-    if rh:
-        users.append({"name":rh["client_user"],"password":rh["client_password"]})
+users.extend({"name":slot["name"],"password":slot["password"]} for slot in reserve)
 inbounds=[{
  "type":"hysteria2","tag":"hy2-in","listen":"0.0.0.0","listen_port":port,
- "up_mbps":limit_mbps,"down_mbps":limit_mbps,"users":users,
+ "up_mbps":limit_mbps,"down_mbps":limit_mbps,"ignore_client_bandwidth":True,"users":users,
  "obfs":{"type":"salamander","password":h["obfs_password"]},
  "tls":{"enabled":True,"server_name":h["server_name"],"alpn":["h3"],"min_version":"1.3",
         "certificate_path":h["certificate_path"],"key_path":h["key_path"]}
 }]
 outbounds=[{"type":"direct","tag":"direct"}]
 rules=[{"ip_is_private":True,"action":"reject","method":"drop"}]
-for r in state["relays"]:
-    rh=r.get("hy2")
-    if not rh: continue
-    inbounds.append({
-      "type":"mixed","tag":rh["test_inbound_tag"],"listen":"127.0.0.1",
-      "listen_port":int(rh["test_socks_port"])
-    })
-    outbounds.append({
-      "type":"hysteria2","tag":rh["outbound_tag"],"server":r["remote_ip"],
-      "server_port":int(r["remote_port"]),"up_mbps":limit_mbps,"down_mbps":limit_mbps,
-      "password":rh["outbound_password"],
-      "obfs":{"type":"salamander","password":rh["outbound_obfs_password"]},
-      "tls":{"enabled":True,"server_name":rh["outbound_server_name"],"insecure":True,"alpn":["h3"],
-             "min_version":"1.3","certificate_public_key_sha256":[rh["remote_certificate_public_key_sha256"]]}
-    })
-    rules.append({"inbound":[rh["test_inbound_tag"]],"action":"route","outbound":rh["outbound_tag"]})
-    rules.append({"auth_user":[rh["client_user"]],"action":"route","outbound":rh["outbound_tag"]})
+for slot in reserve:
+    tag=f"hy2-slot-{slot['slot']}"
+    outbounds.append({"type":"socks","tag":tag,"server":"127.0.0.1","server_port":int(slot["local_port"])})
+    rules.append({"auth_user":[slot["name"]],"action":"route","outbound":tag})
 rules.append({"auth_user":[h["direct_user"]["name"]],"action":"route","outbound":"direct"})
 cfg={
  "log":{"level":"warn","timestamp":True},
@@ -1050,14 +1017,15 @@ verify_xray_runtime() {
 
 verify_sing_runtime() {
   mode_has_hy2 || return 0
-  local port
+  local port slot
   port="$(jq -r '.listen_port' "$STATE_FILE")"
   systemctl is-active --quiet sing-box || return 1
   ss -H -lnup "sport = :${port}" 2>/dev/null | grep -qi sing-box || return 1
-  while IFS= read -r port; do
-    [[ -z "$port" ]] && continue
+  while IFS=$'\t' read -r slot port; do
+    [[ -n "$slot" && -n "$port" ]] || continue
+    systemctl is-active --quiet "vvv-hy2-slot@${slot}.service" || return 1
     ss -H -lntp "sport = :${port}" 2>/dev/null | grep -qi sing-box || return 1
-  done < <(jq -r '.relays[]?.hy2.test_socks_port // empty' "$STATE_FILE")
+  done < <(jq -r '.hy2.reserve_users[]? | select(.assigned_id!=null) | [.slot,(.local_port|tostring)] | @tsv' "$STATE_FILE")
   return 0
 }
 
@@ -1087,6 +1055,7 @@ activate_initial_state() {
     runuser -u sing-box -- "$SING_BOX" check -c "$SING_CFG" || return 1
     systemctl daemon-reload
     systemctl restart sing-box || return 1
+    sync_hy2_slot_services "$STATE_FILE" "$STATE_FILE" || return 1
     sleep 2
     verify_sing_runtime || { journalctl -u sing-box --no-pager -n 80 || true; return 1; }
   fi
@@ -1124,60 +1093,231 @@ activate_initial_state_with_fallback() {
   activate_initial_state || fail "使用备用版本后，代理服务仍无法启动。"
 }
 
-apply_candidate_with_rollback() {
-  local candidate_state="$1" delete_dir="${2:-}"
-  local old_state old_xray old_sing candidate_xray candidate_sing
-  local had_xray=0 had_sing=0 ok=1
-  old_state="$(mktemp --suffix=.json /tmp/jp-old-state.XXXXXX)"
-  old_xray="$(mktemp --suffix=.json /tmp/jp-old-xray.XXXXXX)"
-  old_sing="$(mktemp --suffix=.json /tmp/jp-old-sing.XXXXXX)"
-  candidate_xray="$(mktemp --suffix=.json /tmp/jp-new-xray.XXXXXX)"
-  candidate_sing="$(mktemp --suffix=.json /tmp/jp-new-sing.XXXXXX)"
-  TMP_FILES+=("$old_state" "$old_xray" "$old_sing" "$candidate_xray" "$candidate_sing")
-  cp -a "$STATE_FILE" "$old_state"
-  [[ ! -f "$XRAY_CFG" ]] || { cp -a "$XRAY_CFG" "$old_xray"; had_xray=1; }
-  [[ ! -f "$SING_CFG" ]] || { cp -a "$SING_CFG" "$old_sing"; had_sing=1; }
+build_vless_slot_configs() {
+  local state_path="$1" out_dir="$2"
+  mkdir -p "$out_dir"
+  python3 - "$state_path" "$out_dir" <<'PY_VLESS_SLOTS'
+import json,sys
+from pathlib import Path
+state=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8')); out=Path(sys.argv[2])
+v=state.get('vless') or {}; slots={x['slot']:x for x in v.get('reserve_users',[])}
+relays={x.get('id'):x for x in state.get('relays',[])}; upstreams={x.get('id'):x for x in state.get('upstream_relays',[])}
+temps={x.get('id'):x for x in state.get('temporary_nodes',[])}
+for slot_id,slot in slots.items():
+    assigned=slot.get('assigned_id')
+    if not assigned: continue
+    source_id=assigned
+    if assigned in temps:
+        source_id=temps[assigned].get('source_id')
+    inbound={"tag":"slot-in","listen":"127.0.0.1","port":int(slot['local_port']),"protocol":"socks","settings":{"udp":False},"sniffing":{"enabled":True,"destOverride":["http","tls"],"routeOnly":True}}
+    if source_id in relays:
+        relay=relays[source_id]; rv=relay.get('vless')
+        if not rv: continue
+        outbound={"tag":"slot-out","protocol":"vless","settings":{"address":relay['remote_ip'],"port":int(relay['remote_port']),"id":rv['outbound_uuid'],"encryption":"none","flow":"xtls-rprx-vision"},"streamSettings":{"method":"raw","security":"reality","realitySettings":{"serverName":state['sni'],"fingerprint":"chrome","password":rv['remote_reality']['public_key'],"shortId":rv['remote_reality']['short_id'],"spiderX":""}}}
+    elif source_id in upstreams:
+        relay=upstreams[source_id]
+        outbound={"tag":"slot-out","protocol":relay['proxy_protocol'],"settings":{"address":relay['host'],"port":int(relay['port']),"user":relay['username'],"pass":relay['password']}}
+    else:
+        continue
+    cfg={"log":{"loglevel":"warning"},"inbounds":[inbound],"outbounds":[outbound,{"tag":"blocked","protocol":"blackhole","settings":{}}],"routing":{"domainStrategy":"AsIs","rules":[{"type":"field","ip":["0.0.0.0/8","10.0.0.0/8","100.64.0.0/10","127.0.0.0/8","169.254.0.0/16","172.16.0.0/12","192.168.0.0/16","224.0.0.0/4","240.0.0.0/4","::1/128","fc00::/7","fe80::/10"],"outboundTag":"blocked","ruleTag":"block-private"},{"type":"field","protocol":["bittorrent"],"outboundTag":"blocked","ruleTag":"block-bittorrent"},{"type":"field","inboundTag":["slot-in"],"outboundTag":"slot-out","ruleTag":"slot-route"}]}}
+    (out/f'{slot_id}.json').write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+PY_VLESS_SLOTS
+}
 
+install_vless_slot_service() {
+  install -d -o root -g xray -m750 /etc/vvv-slots/vless
+  cat > /etc/systemd/system/vvv-vless-slot@.service <<'EOF_VLESS_SLOT_SERVICE'
+[Unit]
+Description=VVV VLESS relay slot %i
+After=network-online.target xray.service
+Wants=network-online.target
+
+[Service]
+User=xray
+Group=xray
+NoNewPrivileges=true
+Environment=GOMEMLIMIT=128MiB
+Environment=GOGC=50
+ExecStart=/usr/local/bin/xray run -format=json -config /etc/vvv-slots/vless/%i.json
+Restart=on-failure
+RestartSec=2s
+LimitNOFILE=262144
+
+[Install]
+WantedBy=multi-user.target
+EOF_VLESS_SLOT_SERVICE
+  systemctl daemon-reload
+}
+
+sync_vless_slot_services() {
+  local old_state="$1" new_state="$2" old_dir new_dir slot file changed
+  old_dir="$(mktemp -d /tmp/vvv-vless-old.XXXXXX)"; new_dir="$(mktemp -d /tmp/vvv-vless-new.XXXXXX)"
+  TMP_FILES+=("$old_dir" "$new_dir")
+  build_vless_slot_configs "$old_state" "$old_dir"
+  build_vless_slot_configs "$new_state" "$new_dir"
+  install_vless_slot_service
+  for file in "$new_dir"/*.json; do
+    [[ -e "$file" ]] || break
+    "$XRAY" run -test -format=json -config "$file"
+  done
+  for file in "$old_dir"/*.json; do
+    [[ -e "$file" ]] || break
+    slot="$(basename "$file" .json)"
+    if [[ ! -f "$new_dir/${slot}.json" ]]; then
+      systemctl disable --now "vvv-vless-slot@${slot}.service" >/dev/null 2>&1 || true
+      rm -f "/etc/vvv-slots/vless/${slot}.json"
+    fi
+  done
+  for file in "$new_dir"/*.json; do
+    [[ -e "$file" ]] || break
+    slot="$(basename "$file" .json)"; changed=1
+    [[ ! -f "/etc/vvv-slots/vless/${slot}.json" ]] || cmp -s "$file" "/etc/vvv-slots/vless/${slot}.json" && changed=0
+    install -o root -g xray -m640 "$file" "/etc/vvv-slots/vless/${slot}.json"
+    if (( changed==1 )); then
+      systemctl enable "vvv-vless-slot@${slot}.service" >/dev/null
+      systemctl restart "vvv-vless-slot@${slot}.service"
+    else
+      systemctl start "vvv-vless-slot@${slot}.service"
+    fi
+  done
+  sleep 2
+  for file in "$new_dir"/*.json; do
+    [[ -e "$file" ]] || break
+    slot="$(basename "$file" .json)"
+    systemctl is-active --quiet "vvv-vless-slot@${slot}.service" || return 1
+    local port
+    port="$(jq -r '.inbounds[0].port' "$file")"
+    ss -H -lntp "sport = :${port}" 2>/dev/null | grep -qi xray || return 1
+  done
+}
+
+build_hy2_slot_configs() {
+  local state_path="$1" out_dir="$2"
+  mkdir -p "$out_dir"
+  python3 - "$state_path" "$out_dir" "$HY2_LIMIT_MBPS" <<'PY_HY2_SLOTS'
+import json,sys
+from pathlib import Path
+state=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8')); out=Path(sys.argv[2]); limit=int(state.get('hy2_limit_mbps') or sys.argv[3])
+h=state.get('hy2') or {}; slots={x['slot']:x for x in h.get('reserve_users',[])}
+relays={x.get('id'):x for x in state.get('relays',[])}
+temps={x.get('id'):x for x in state.get('temporary_nodes',[])}
+private_rule={"ip_is_private":True,"action":"reject","method":"drop"}
+for slot_id,slot in slots.items():
+    assigned=slot.get('assigned_id')
+    relay=relays.get(assigned)
+    if not relay and assigned in temps:
+        temp=temps[assigned]
+        relay=relays.get(temp.get('source_id')) if temp.get('source_type')=='vps' else None
+    if not relay: continue
+    rh=relay.get('hy2')
+    if not rh: continue
+    inbound={"type":"mixed","tag":"slot-in","listen":"127.0.0.1","listen_port":int(slot['local_port'])}
+    outbound={
+      "type":"hysteria2","tag":"slot-out","server":relay['remote_ip'],"server_port":int(relay['remote_port']),
+      "up_mbps":limit,"down_mbps":limit,"password":rh['outbound_password'],
+      "obfs":{"type":"salamander","password":rh['outbound_obfs_password']},
+      "tls":{"enabled":True,"server_name":rh['outbound_server_name'],"insecure":True,"alpn":["h3"],
+             "min_version":"1.3","certificate_public_key_sha256":[rh['remote_certificate_public_key_sha256']]}
+    }
+    cfg={"log":{"level":"warn","timestamp":True},"inbounds":[inbound],"outbounds":[outbound],
+         "route":{"rules":[private_rule],"final":"slot-out","auto_detect_interface":True}}
+    (out/f'{slot_id}.json').write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+PY_HY2_SLOTS
+}
+
+sync_hy2_slot_services() {
+  local old_state="$1" new_state="$2" old_dir new_dir file slot changed port
+  old_dir="$(mktemp -d /tmp/vvv-hy2-old.XXXXXX)"; new_dir="$(mktemp -d /tmp/vvv-hy2-new.XXXXXX)"
+  TMP_FILES+=("$old_dir" "$new_dir")
+  build_hy2_slot_configs "$old_state" "$old_dir"
+  build_hy2_slot_configs "$new_state" "$new_dir"
+  install -d -o root -g sing-box -m750 /etc/vvv-slots/hy2
+  [[ -f /etc/systemd/system/vvv-hy2-slot@.service ]] || { fail "HY2 槽位 systemd 模板不存在。"; return 1; }
+  for file in "$new_dir"/*.json; do
+    [[ -e "$file" ]] || break
+    "$SING_BOX" check -c "$file"
+  done
+  for file in "$old_dir"/*.json; do
+    [[ -e "$file" ]] || break
+    slot="$(basename "$file" .json)"
+    if [[ ! -f "$new_dir/${slot}.json" ]]; then
+      systemctl disable --now "vvv-hy2-slot@${slot}.service" >/dev/null 2>&1 || true
+      rm -f "/etc/vvv-slots/hy2/${slot}.json"
+    fi
+  done
+  for file in "$new_dir"/*.json; do
+    [[ -e "$file" ]] || break
+    slot="$(basename "$file" .json)"; changed=1
+    [[ ! -f "/etc/vvv-slots/hy2/${slot}.json" ]] || cmp -s "$file" "/etc/vvv-slots/hy2/${slot}.json" && changed=0
+    install -o root -g sing-box -m640 "$file" "/etc/vvv-slots/hy2/${slot}.json"
+    systemctl enable "vvv-hy2-slot@${slot}.service" >/dev/null
+    if (( changed==1 )); then
+      systemctl restart "vvv-hy2-slot@${slot}.service"
+    else
+      systemctl start "vvv-hy2-slot@${slot}.service"
+    fi
+  done
+  sleep 2
+  for file in "$new_dir"/*.json; do
+    [[ -e "$file" ]] || break
+    slot="$(basename "$file" .json)"
+    systemctl is-active --quiet "vvv-hy2-slot@${slot}.service" || return 1
+    port="$(jq -r '.inbounds[0].listen_port' "$file")"
+    ss -H -lntp "sport = :${port}" 2>/dev/null | grep -qi sing-box || return 1
+  done
+}
+
+apply_candidate_with_rollback() {
+  local candidate_state="$1" delete_dir="${2:-}" old_state old_xray old_sing candidate_xray candidate_sing xray_pid="" sing_pid="" ok=1
+  old_state="$(mktemp --suffix=.json /tmp/vvv-old-state.XXXXXX)"; old_xray="$(mktemp --suffix=.json /tmp/vvv-old-xray.XXXXXX)"; old_sing="$(mktemp --suffix=.json /tmp/vvv-old-sing.XXXXXX)"
+  candidate_xray="$(mktemp --suffix=.json /tmp/vvv-new-xray.XXXXXX)"; candidate_sing="$(mktemp --suffix=.json /tmp/vvv-new-sing.XXXXXX)"
+  TMP_FILES+=("$old_state" "$old_xray" "$old_sing" "$candidate_xray" "$candidate_sing")
+  cp -a "$STATE_FILE" "$old_state"; [[ ! -f "$XRAY_CFG" ]] || cp -a "$XRAY_CFG" "$old_xray"; [[ ! -f "$SING_CFG" ]] || cp -a "$SING_CFG" "$old_sing"
+  release_orphaned_vless_slots "$candidate_state"; release_orphaned_hy2_slots "$candidate_state"
+  vvv_event_backup before-line-change
   if mode_has_vless "$(jq -r '.protocol_mode' "$candidate_state")"; then
-    build_xray_config "$candidate_state" "$candidate_xray"
-    "$XRAY" run -test -format=json -config "$candidate_xray"
+    build_xray_config "$candidate_state" "$candidate_xray"; "$XRAY" run -test -format=json -config "$candidate_xray"
+    cmp -s "$candidate_xray" "$XRAY_CFG" || { fail "线路变更意外修改了主 Xray 固定配置。"; return 1; }
+    xray_pid="$(systemctl show -p MainPID --value xray)"
+    if ! sync_vless_slot_services "$old_state" "$candidate_state"; then sync_vless_slot_services "$candidate_state" "$old_state" || true; fail "VLESS 槽位更新失败，已恢复旧槽位。"; return 1; fi
   fi
   if mode_has_hy2 "$(jq -r '.protocol_mode' "$candidate_state")"; then
-    build_sing_config "$candidate_state" "$candidate_sing"
-    "$SING_BOX" check -c "$candidate_sing"
+    build_sing_config "$candidate_state" "$candidate_sing"; "$SING_BOX" check -c "$candidate_sing"
+    cmp -s "$candidate_sing" "$SING_CFG" || { mode_has_vless && sync_vless_slot_services "$candidate_state" "$old_state" || true; fail "线路变更意外修改了主 sing-box 固定配置。"; return 1; }
+    sing_pid="$(systemctl show -p MainPID --value sing-box)"
+    if ! sync_hy2_slot_services "$old_state" "$candidate_state"; then
+      sync_hy2_slot_services "$candidate_state" "$old_state" || true; mode_has_vless && sync_vless_slot_services "$candidate_state" "$old_state" || true
+      fail "HY2 槽位更新失败，已恢复旧槽位。"; return 1
+    fi
   fi
-
-  install -o root -g root -m 600 "$candidate_state" "$STATE_FILE"
-  if mode_has_vless; then
-    install -o root -g xray -m 640 "$candidate_xray" "$XRAY_CFG"
-    systemctl restart xray >/dev/null 2>&1 || ok=0
+  install -m600 "$candidate_state" "$STATE_FILE"; sleep 2
+  if [[ -n "$xray_pid" ]]; then
+    if [[ "$(systemctl show -p MainPID --value xray)" == "$xray_pid" ]]; then
+      echo "主 Xray PID 已保持不变：${xray_pid}"
+    else
+      echo "错误：主 Xray PID 发生变化。" >&2
+      ok=0
+    fi
   fi
-  if mode_has_hy2; then
-    install -o root -g sing-box -m 640 "$candidate_sing" "$SING_CFG"
-    systemctl restart sing-box >/dev/null 2>&1 || ok=0
+  if [[ -n "$sing_pid" ]]; then
+    if [[ "$(systemctl show -p MainPID --value sing-box)" == "$sing_pid" ]]; then
+      echo "主 sing-box PID 已保持不变：${sing_pid}"
+    else
+      echo "错误：主 sing-box PID 发生变化。" >&2
+      ok=0
+    fi
   fi
-  sleep 2
-  verify_xray_runtime || ok=0
-  verify_sing_runtime || ok=0
-  if (( ok == 1 )); then
+  verify_xray_runtime || ok=0; verify_sing_runtime || ok=0
+  if (( ok==1 )); then
     [[ -z "$delete_dir" ]] || rm -rf -- "$delete_dir"
+    vvv_event_backup after-line-change
+    systemctl start vvv-sync.service >/dev/null 2>&1 || true
     return 0
   fi
-
-  echo "新配置启动失败，正在恢复旧状态和旧配置。" >&2
-  install -o root -g root -m 600 "$old_state" "$STATE_FILE"
-  if mode_has_vless; then
-    if (( had_xray )); then install -o root -g xray -m 640 "$old_xray" "$XRAY_CFG"; fi
-    systemctl restart xray >/dev/null 2>&1 || true
-  fi
-  if mode_has_hy2; then
-    if (( had_sing )); then install -o root -g sing-box -m 640 "$old_sing" "$SING_CFG"; fi
-    systemctl restart sing-box >/dev/null 2>&1 || true
-  fi
-  sleep 2
-  journalctl -u xray --no-pager -n 50 2>/dev/null || true
-  journalctl -u sing-box --no-pager -n 50 2>/dev/null || true
-  fail "新配置未生效，已恢复旧配置。"
+  install -m600 "$old_state" "$STATE_FILE"
+  mode_has_vless && sync_vless_slot_services "$candidate_state" "$old_state" || true
+  mode_has_hy2 && sync_hy2_slot_services "$candidate_state" "$old_state" || true
+  fail "新槽位配置验证失败，已恢复旧配置。"
 }
 
 generate_client_files() {
@@ -1262,7 +1402,7 @@ if enabled_hy2:
     name=protocol_name(base,"HY2")
     share_params=[("obfs","salamander"),("obfs-password",h["obfs_password"]),("sni",h["server_name"]),("insecure","1"),("pinSHA256",h["certificate_pin_hex"])]
     uri=f"hysteria2://{quote(password,safe='')}@{ip}:{port}/?{urlencode(share_params)}#{quote(name,safe='')}"
-    loon=f"{loon_name(name)} = Hysteria2,{ip},{port},{loon_q(password)},skip-cert-verify=true,sni={h['server_name']},udp=true,fast-open=true,salamander-password={loon_q(h['obfs_password'])}"
+    loon=f"{loon_name(name)} = Hysteria2,{ip},{port},{loon_q(password)},skip-cert-verify=true,sni={h['server_name']},udp=true,fast-open=true,salamander-password={h['obfs_password']}"
     clash=f'''  - name: "{name}"
     type: hysteria2
     server: {ip}
@@ -1362,6 +1502,48 @@ create_remote_hy2_material() {
     '{server_name:$server_name,certificate_pem:$cert_pem,key_pem:$key_pem,fingerprint:$fp,pin_hex:$pinhex,public_key_sha256:$pinb64}' > "$out_json"
 }
 
+vvv_event_backup() {
+  local reason="$1"
+  [[ -x /usr/local/lib/vvv/backup_manager.py && -f /etc/vvv-sub/config.json ]] || return 0
+  python3 /usr/local/lib/vvv/backup_manager.py create "$reason" --force >/dev/null || echo "警告：自动备份失败。" >&2
+}
+
+allocate_vless_slot() {
+  local slot_json
+  slot_json="$(jq -c '[.vless.reserve_users[] | select(.assigned_id==null and (.retired // false)==false)][0] // empty' "$STATE_FILE")"
+  [[ -n "$slot_json" ]] || fail "VLESS 可用固定凭证槽位已用尽（已分配或退役共 256 条）。"
+  ALLOC_VLESS_SLOT="$(jq -r '.slot' <<<"$slot_json")"
+  ALLOC_VLESS_UUID="$(jq -r '.uuid' <<<"$slot_json")"
+  ALLOC_VLESS_EMAIL="$(jq -r '.email' <<<"$slot_json")"
+  ALLOC_VLESS_PORT="$(jq -r '.local_port' <<<"$slot_json")"
+  [[ -n "$ALLOC_VLESS_SLOT" && -n "$ALLOC_VLESS_UUID" && -n "$ALLOC_VLESS_EMAIL" && "$ALLOC_VLESS_PORT" =~ ^[0-9]+$ ]] || fail "VLESS 预分配用户池损坏。"
+}
+
+release_orphaned_vless_slots() {
+  local path="$1"
+  [[ "$(jq -r '.vless // empty' "$path")" != "" ]] || return 0
+  jq -e '[.vless.reserve_users[]?.assigned_id | select(.!=null)] as $ids | ($ids|length)==($ids|unique|length)' "$path" >/dev/null || fail "VLESS 固定槽位存在重复占用。"
+  # 删除线路后保留 assigned_id 作为退役标记，防止旧 UUID 在未来被其他线路复用。
+}
+
+allocate_hy2_slot() {
+  local slot_json
+  slot_json="$(jq -c '[.hy2.reserve_users[] | select(.assigned_id==null and (.retired // false)==false)][0] // empty' "$STATE_FILE")"
+  [[ -n "$slot_json" ]] || fail "Hysteria 2 可用固定凭证槽位已用尽（已分配或退役共 256 条）。"
+  ALLOC_HY2_SLOT="$(jq -r '.slot' <<<"$slot_json")"
+  ALLOC_HY2_USER="$(jq -r '.name' <<<"$slot_json")"
+  ALLOC_HY2_PASSWORD="$(jq -r '.password' <<<"$slot_json")"
+  ALLOC_HY2_PORT="$(jq -r '.local_port' <<<"$slot_json")"
+  [[ -n "$ALLOC_HY2_SLOT" && -n "$ALLOC_HY2_USER" && -n "$ALLOC_HY2_PASSWORD" && "$ALLOC_HY2_PORT" =~ ^[0-9]+$ ]] || fail "Hysteria 2 预分配槽位池损坏。"
+}
+
+release_orphaned_hy2_slots() {
+  local state_path="$1"
+  [[ "$(jq -r '.hy2 // empty' "$state_path")" != "" ]] || return 0
+  jq -e '[.hy2.reserve_users[]?.assigned_id | select(.!=null)] as $ids | ($ids|length)==($ids|unique|length)' "$state_path" >/dev/null || fail "Hysteria 2 固定槽位存在重复占用。"
+  # 删除线路后保留 assigned_id 作为退役标记，防止旧用户名和密码在未来被其他线路复用。
+}
+
 prepare_add_or_overwrite() {
   local remote_ip="$1" remote_port="$2" node_name="$3"
   valid_ipv4 "$remote_ip" || fail "落地 IP 无效。"
@@ -1393,30 +1575,32 @@ PY_OVERWRITE
     relay_id="$(printf '%s:%s:%s' "$node_name" "$remote_ip" "$remote_port" | sha256sum | awk '{print "relay-" substr($1,1,20)}')"
     local vless_json='null' hy2_json='null'
     if mode_has_vless; then
-      local client_uuid outbound_uuid key_output private_key public_key short_id
-      test_vless="$(allocate_test_port vless)"
-      client_uuid="$(new_uuid)"
+      local client_uuid client_email reserve_slot outbound_uuid key_output private_key public_key short_id
+      allocate_vless_slot
+      test_vless="$ALLOC_VLESS_PORT"
+      client_uuid="$ALLOC_VLESS_UUID"; client_email="$ALLOC_VLESS_EMAIL"; reserve_slot="$ALLOC_VLESS_SLOT"
       outbound_uuid="$(new_uuid)"
       key_output="$("$XRAY" x25519)"
       parse_x25519_keys "$key_output"
       private_key="$GENERATED_PRIVATE_KEY"; public_key="$GENERATED_PUBLIC_KEY"; short_id="$(openssl rand -hex 8)"
       vless_json="$(jq -n \
-        --arg client_uuid "$client_uuid" --arg email "${relay_id}@relay.local" \
+        --arg client_uuid "$client_uuid" --arg email "$client_email" --arg reserve_slot "$reserve_slot" \
         --arg outbound_uuid "$outbound_uuid" --arg private "$private_key" --arg public "$public_key" --arg sid "$short_id" \
         --arg outtag "vless-out-${relay_id}" --arg testtag "vless-test-${relay_id}" --argjson testport "$test_vless" \
-        '{client_uuid:$client_uuid,client_email:$email,outbound_uuid:$outbound_uuid,remote_reality:{private_key:$private,public_key:$public,short_id:$sid},outbound_tag:$outtag,test_inbound_tag:$testtag,test_socks_port:$testport}')"
+        '{client_uuid:$client_uuid,client_email:$email,reserve_slot:$reserve_slot,outbound_uuid:$outbound_uuid,remote_reality:{private_key:$private,public_key:$public,short_id:$sid},outbound_tag:$outtag,test_inbound_tag:$testtag,test_socks_port:$testport}')"
     fi
     if mode_has_hy2; then
-      local material client_password outbound_password outbound_obfs
-      test_hy2="$(allocate_test_port hy2)"
+      local material client_user client_password reserve_slot outbound_password outbound_obfs
+      allocate_hy2_slot
+      test_hy2="$ALLOC_HY2_PORT"
+      client_user="$ALLOC_HY2_USER"; client_password="$ALLOC_HY2_PASSWORD"; reserve_slot="$ALLOC_HY2_SLOT"
       material="$(mktemp --suffix=.json /tmp/jp-hy2-material.XXXXXX)"
       TMP_FILES+=("$material")
       create_remote_hy2_material "$relay_id" "$material"
-      client_password="$(random_secret)"
       outbound_password="$(random_secret)"
       outbound_obfs="$(random_secret)"
       hy2_json="$(jq -n \
-        --arg client_user "${relay_id}-hy2" --arg client_password "$client_password" \
+        --arg client_user "$client_user" --arg client_password "$client_password" --arg reserve_slot "$reserve_slot" \
         --arg outbound_password "$outbound_password" --arg outbound_obfs "$outbound_obfs" \
         --arg outtag "hy2-out-${relay_id}" --arg testtag "hy2-test-${relay_id}" --argjson testport "$test_hy2" \
         --arg server_name "$(jq -r '.server_name' "$material")" \
@@ -1425,12 +1609,15 @@ PY_OVERWRITE
         --arg fp "$(jq -r '.fingerprint' "$material")" \
         --arg pinhex "$(jq -r '.pin_hex' "$material")" \
         --arg pinb64 "$(jq -r '.public_key_sha256' "$material")" \
-        '{client_user:$client_user,client_password:$client_password,outbound_password:$outbound_password,outbound_obfs_password:$outbound_obfs,outbound_tag:$outtag,test_inbound_tag:$testtag,test_socks_port:$testport,outbound_server_name:$server_name,remote_certificate_pem:$cert_pem,remote_key_pem:$key_pem,remote_certificate_fingerprint:$fp,remote_certificate_pin_hex:$pinhex,remote_certificate_public_key_sha256:$pinb64}')"
+        '{client_user:$client_user,client_password:$client_password,reserve_slot:$reserve_slot,outbound_password:$outbound_password,outbound_obfs_password:$outbound_obfs,outbound_tag:$outtag,test_inbound_tag:$testtag,test_socks_port:$testport,outbound_server_name:$server_name,remote_certificate_pem:$cert_pem,remote_key_pem:$key_pem,remote_certificate_fingerprint:$fp,remote_certificate_pin_hex:$pinhex,remote_certificate_public_key_sha256:$pinb64}')"
     fi
     jq \
       --arg id "$relay_id" --arg name "$node_name" --arg ip "$remote_ip" --argjson port "$remote_port" \
       --argjson vless "$vless_json" --argjson hy2 "$hy2_json" --arg now "$now" \
-      '.relays += [{id:$id,name:$name,remote_ip:$ip,remote_port:$port,vless:$vless,hy2:$hy2,created_at:$now,updated_at:$now}] | .updated_at=$now' \
+      '.relays += [{id:$id,name:$name,remote_ip:$ip,remote_port:$port,vless:$vless,hy2:$hy2,created_at:$now,updated_at:$now}] |
+       (if $vless != null then (.vless.reserve_users[] | select(.slot==$vless.reserve_slot)).assigned_id=$id else . end) |
+       (if $hy2 != null then (.hy2.reserve_users[] | select(.slot==$hy2.reserve_slot)).assigned_id=$id else . end) |
+       .updated_at=$now' \
       "$STATE_FILE" > "$candidate"
   fi
 
@@ -1464,7 +1651,7 @@ EOF_RELAY_HELP
   echo "协议模式：$(jq -r '.protocol_mode' "$STATE_FILE")"
   echo "日本入口：$(jq -r '.public_ip' "$STATE_FILE"):$(jq -r '.listen_port' "$STATE_FILE")"
   echo "落地入口：${remote_ip}:${remote_port}"
-  echo "本次只重启了启用的代理服务，没有立即重启服务器。"
+  echo "线路已通过运行时接口生效；Xray 主进程未重启。"
   echo "客户端配置目录：${package_dir}"
   echo
   echo "==================== 落地 VPS JPR3 对接密钥 ===================="
@@ -1510,8 +1697,9 @@ PY_UPSTREAM_OVERWRITE
     echo "覆盖同名动态代理线路，并复用原 VLESS UUID。"
   else
     upstream_id="$(printf '%s:%s:%s:%s' "$node_name" "$proxy_protocol" "$host" "$port" | sha256sum | awk '{print "upstream-" substr($1,1,20)}')"
-    test_port="$(allocate_test_port upstream)"
-    client_uuid="$(new_uuid)"
+    allocate_vless_slot
+    test_port="$ALLOC_VLESS_PORT"
+    client_uuid="$ALLOC_VLESS_UUID"
     python3 - "$STATE_FILE" "$candidate" "$upstream_id" "$node_name" "$proxy_protocol" "$protocol_label" "$host" "$port" "$username" "$password" "$client_uuid" "$test_port" "$exit_ip" "$now" <<'PY_UPSTREAM_NEW'
 import json,sys
 from pathlib import Path
@@ -1528,6 +1716,12 @@ s.setdefault('upstream_relays',[]).append({
 s['updated_at']=now
 Path(dst).write_text(json.dumps(s,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 PY_UPSTREAM_NEW
+    tmp_slot="$(mktemp --suffix=.json /tmp/vvv-upstream-slot.XXXXXX)"; TMP_FILES+=("$tmp_slot")
+    jq --arg id "$upstream_id" --arg email "$ALLOC_VLESS_EMAIL" --arg slot "$ALLOC_VLESS_SLOT" \
+      '(.upstream_relays[]|select(.id==$id)).client_email=$email |
+       (.upstream_relays[]|select(.id==$id)).reserve_slot=$slot |
+       (.vless.reserve_users[]|select(.slot==$slot)).assigned_id=$id' "$candidate" > "$tmp_slot"
+    install -m600 "$tmp_slot" "$candidate"
   fi
 
   local staging package_dir
@@ -1618,8 +1812,9 @@ prompt_new_upstream_relay() {
 }
 
 make_pairing_key() {
-  local state_path="$1" relay_id="$2"
-  python3 - "$state_path" "$relay_id" <<'PY_JPR3'
+  local state_path="$1" relay_id="$2" registration_code=""
+  [[ ! -r /etc/vvv-sub/registration.code ]] || registration_code="$(cat /etc/vvv-sub/registration.code)"
+  python3 - "$state_path" "$relay_id" "$registration_code" <<'PY_JPR3'
 import base64,hashlib,json,sys,zlib
 from datetime import datetime,timezone
 from pathlib import Path
@@ -1630,8 +1825,9 @@ payload={
  "relay_id":r["id"],"node_name":r["name"],
  "japan_public_ip":s["public_ip"],"japan_port":int(s["listen_port"]),
  "remote_public_ip":r["remote_ip"],"remote_public_port":int(r["remote_port"]),
- "sni":s["sni"],"xray_version":s["xray_version"],"sing_box_version":s["sing_box_version"],
- "vless":None,"hy2":None,"issued_at":datetime.now(timezone.utc).isoformat()
+ "sni":s["sni"],"hy2_limit_mbps":int(s.get("hy2_limit_mbps") or 50),"xray_version":s["xray_version"],"sing_box_version":s["sing_box_version"],
+ "vless":None,"hy2":None,"subscription_registration_code":sys.argv[3] or None,
+ "issued_at":datetime.now(timezone.utc).isoformat()
 }
 if r.get("vless"):
     rv=r["vless"]; v=s["vless"]
@@ -2005,6 +2201,165 @@ prompt_new_relay() {
   prepare_add_or_overwrite "$remote_ip" "$remote_port" "$node_name"
 }
 
+prompt_temp_ttl() {
+  local value
+  while true; do
+    read -r -p "自动销毁时间 [默认 30 分钟]：" value
+    value="${value//[[:space:]]/}"; [[ -n "$value" ]] || value=30
+    if [[ "$value" =~ ^[0-9]+$ ]] && ((10#$value>=1 && 10#$value<=10080)); then TEMP_TTL_MINUTES="$((10#$value))"; return; fi
+    echo "只允许输入 1-10080 的纯数字，单位为分钟。"
+  done
+}
+
+install_temp_cleanup_timer() {
+  cat > /usr/local/sbin/vvv-temp-cleanup <<'EOF_TEMP_CLEAN'
+#!/usr/bin/env bash
+exec /usr/local/sbin/jp-relay-manager --cleanup-temp
+EOF_TEMP_CLEAN
+  chmod 700 /usr/local/sbin/vvv-temp-cleanup
+  cat > /etc/systemd/system/vvv-temp-cleanup.service <<'EOF_TEMP_SERVICE'
+[Unit]
+Description=Remove expired VVV temporary nodes
+After=network-online.target xray.service sing-box.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vvv-temp-cleanup
+EOF_TEMP_SERVICE
+  cat > /etc/systemd/system/vvv-temp-cleanup.timer <<'EOF_TEMP_TIMER'
+[Unit]
+Description=Check expired VVV temporary nodes every minute
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF_TEMP_TIMER
+  systemctl daemon-reload
+  systemctl enable --now vvv-temp-cleanup.timer >/dev/null 2>&1 || true
+}
+
+create_temporary_node() {
+  local source_type="$1" source_id="$2" source_name="$3" ttl="$4" custom_name="$5"
+  local temp_id now expires_ts expires_at candidate vslot="" vuuid="" vemail="" hslot="" huser="" hpass=""
+  now="$(date +%s)"; expires_ts="$((now+ttl*60))"; expires_at="$(date -u -d "@${expires_ts}" --iso-8601=seconds)"
+  temp_id="temp-$(printf '%s:%s:%s:%s' "$source_type" "$source_id" "$now" "$(openssl rand -hex 8)" | sha256sum | awk '{print substr($1,1,20)}')"
+  [[ -n "$custom_name" ]] || custom_name="临时-${source_name}-$(date +%H%M)"
+  if [[ "$source_type" == vps ]]; then
+    if jq -e --arg id "$source_id" '.relays[]|select(.id==$id)|.vless != null' "$STATE_FILE" >/dev/null; then
+      allocate_vless_slot; vslot="$ALLOC_VLESS_SLOT"; vuuid="$ALLOC_VLESS_UUID"; vemail="$ALLOC_VLESS_EMAIL"
+    fi
+    if jq -e --arg id "$source_id" '.relays[]|select(.id==$id)|.hy2 != null' "$STATE_FILE" >/dev/null; then
+      allocate_hy2_slot; hslot="$ALLOC_HY2_SLOT"; huser="$ALLOC_HY2_USER"; hpass="$ALLOC_HY2_PASSWORD"
+    fi
+  else
+    allocate_vless_slot; vslot="$ALLOC_VLESS_SLOT"; vuuid="$ALLOC_VLESS_UUID"; vemail="$ALLOC_VLESS_EMAIL"
+  fi
+  [[ -n "$vslot" || -n "$hslot" ]] || fail "所选正式线路没有可以复制的协议。"
+  candidate="$(mktemp --suffix=.json /tmp/vvv-temp-create.XXXXXX)"; TMP_FILES+=("$candidate")
+  python3 - "$STATE_FILE" "$candidate" "$temp_id" "$custom_name" "$source_type" "$source_id" "$source_name" "$expires_ts" "$expires_at" "$vslot" "$vuuid" "$vemail" "$hslot" "$huser" "$hpass" <<'PY_TEMP_CREATE'
+import json,sys
+from pathlib import Path
+(src,dst,tid,name,stype,sid,sname,expires_ts,expires_at,vslot,vuuid,vemail,hslot,huser,hpass)=sys.argv[1:]
+s=json.loads(Path(src).read_text(encoding='utf-8'))
+vless=None if not vslot else {'reserve_slot':vslot,'client_uuid':vuuid,'client_email':vemail}
+hy2=None if not hslot else {'reserve_slot':hslot,'client_user':huser,'client_password':hpass}
+s.setdefault('temporary_nodes',[]).append({'id':tid,'name':name,'source_type':stype,'source_id':sid,'source_name':sname,
+ 'vless':vless,'hy2':hy2,'created_at':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),
+ 'expires_ts':int(expires_ts),'expires_at':expires_at})
+if vslot:
+    slot=next(x for x in s['vless']['reserve_users'] if x['slot']==vslot); slot['assigned_id']=tid
+if hslot:
+    slot=next(x for x in s['hy2']['reserve_users'] if x['slot']==hslot); slot['assigned_id']=tid
+s['updated_at']=__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()
+Path(dst).write_text(json.dumps(s,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+PY_TEMP_CREATE
+  apply_candidate_with_rollback "$candidate"
+  install_temp_cleanup_timer
+  echo "临时节点创建成功：${custom_name}"
+  echo "自动销毁时间：${expires_at}（${ttl} 分钟后）"
+  echo "副机和原正式线路均未修改。客户端刷新订阅后即可看到临时节点。"
+}
+
+prompt_create_temporary() {
+  local source_type="$1" rows count choice source_id source_name ttl name
+  if [[ "$source_type" == vps ]]; then
+    mapfile -t rows < <(jq -r '.relays[]? | [.id,.name] | @tsv' "$STATE_FILE")
+  else
+    mapfile -t rows < <(jq -r '.upstream_relays[]? | [.id,.name] | @tsv' "$STATE_FILE")
+  fi
+  count="${#rows[@]}"
+  (( count>0 )) || { echo "没有可复制的正式线路。"; return; }
+  echo; echo "========== 从已有正式线路复制 =========="
+  local i
+  for ((i=0;i<count;i++)); do IFS=$'\t' read -r source_id source_name <<<"${rows[$i]}"; echo "$((i+1)). $source_name"; done
+  echo "0. 返回"
+  while true; do
+    read -r -p "请选择正式线路：" choice
+    [[ "$choice" == 0 ]] && return
+    [[ "$choice" =~ ^[0-9]+$ ]] && ((10#$choice>=1 && 10#$choice<=count)) && break
+    echo "请输入有效编号。"
+  done
+  IFS=$'\t' read -r source_id source_name <<<"${rows[$((10#$choice-1))]}"
+  prompt_temp_ttl; ttl="$TEMP_TTL_MINUTES"
+  read -r -p "请输入临时节点名称（回车自动生成）：" name
+  name="$(printf '%s' "$name" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  [[ "$name" != *$'\n'* && "$name" != *$'\r'* ]] || { echo "名称不能包含换行。"; return 1; }
+  create_temporary_node "$source_type" "$source_id" "$source_name" "$ttl" "$name"
+}
+
+retire_temporary_nodes() {
+  local mode="$1" target="${2:-}" candidate count names
+  candidate="$(mktemp --suffix=.json /tmp/vvv-temp-retire.XXXXXX)"; TMP_FILES+=("$candidate")
+  names="$(python3 - "$STATE_FILE" "$candidate" "$mode" "$target" <<'PY_TEMP_RETIRE'
+import json,sys,time
+from pathlib import Path
+src,dst,mode,target=sys.argv[1:]
+s=json.loads(Path(src).read_text(encoding='utf-8')); now=time.time(); kept=[]; removed=[]
+for item in s.get('temporary_nodes',[]):
+    remove=(mode=='expired' and float(item.get('expires_ts') or 0)<=now) or (mode=='one' and item.get('id')==target)
+    if not remove:
+        kept.append(item); continue
+    removed.append(item)
+    v=item.get('vless') or {}; h=item.get('hy2') or {}
+    if v.get('reserve_slot'):
+        slot=next((x for x in (s.get('vless') or {}).get('reserve_users',[]) if x.get('slot')==v['reserve_slot']),None)
+        if slot: slot.update(assigned_id=None,retired=True,retired_id=item.get('id'))
+    if h.get('reserve_slot'):
+        slot=next((x for x in (s.get('hy2') or {}).get('reserve_users',[]) if x.get('slot')==h['reserve_slot']),None)
+        if slot: slot.update(assigned_id=None,retired=True,retired_id=item.get('id'))
+s['temporary_nodes']=kept
+if removed:
+    s['updated_at']=__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()
+Path(dst).write_text(json.dumps(s,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+for item in removed: print(item.get('name') or item.get('id'))
+PY_TEMP_RETIRE
+)"
+  count="$(printf '%s\n' "$names" | sed '/^$/d' | wc -l)"
+  (( count>0 )) || return 2
+  apply_candidate_with_rollback "$candidate"
+  while IFS= read -r name; do [[ -z "$name" ]] || echo "临时节点已销毁：$name"; done <<<"$names"
+}
+
+cleanup_expired_temporary() {
+  retire_temporary_nodes expired "" || { [[ $? == 2 ]] && return 0; return 1; }
+}
+
+temporary_submenu() {
+  local temp_id="$1" action confirm
+  while true; do
+    echo; echo "========== 临时中转节点 =========="
+    jq -r --arg id "$temp_id" '.temporary_nodes[]|select(.id==$id)|"名称：\(.name)\n来源：\(.source_name)\n创建时间：\(.created_at)\n自动销毁：\(.expires_at)"' "$STATE_FILE"
+    echo "1. 立即提前销毁"; echo "0. 返回"
+    read -r -p "请选择：" action
+    case "$action" in
+      1) read -r -p "输入 Y 确认提前销毁：" confirm; [[ "$confirm" =~ ^[Yy]$ ]] && retire_temporary_nodes one "$temp_id"; pause_return; return;;
+      0) return;; *) echo "请输入 0 或 1。";;
+    esac
+  done
+}
+
 set_relay_manager_enabled() {
   local tmp
   tmp="$(mktemp --suffix=.json /tmp/jp-manager-enabled.XXXXXX)"
@@ -2077,41 +2432,40 @@ relay_submenu() {
 }
 
 management_menu() {
-  local enabled total new_vps_index new_upstream_index local_index selection entry_type entry_id
+  local enabled total new_vps_index new_upstream_index temp_vps_index temp_upstream_index local_index selection entry_type entry_id entry_name
   local -a entries
   enabled="$(jq -r '.relay_manager_enabled' "$STATE_FILE")"
-  if [[ "$enabled" != "true" ]]; then
-    show_not_enabled_menu
-  fi
+  if [[ "$enabled" != "true" ]]; then show_not_enabled_menu; fi
+  cleanup_expired_temporary || true
   while true; do
     mapfile -t entries < <(jq -r '
       (.relays[]? | ["vps",.id,.name] | @tsv),
-      (.upstream_relays[]? | ["upstream",.id,.name] | @tsv)
+      (.upstream_relays[]? | ["upstream",.id,.name] | @tsv),
+      (.temporary_nodes[]? | ["temp",.id,(.name + " [临时，到期 " + .expires_at + "]")] | @tsv)
     ' "$STATE_FILE")
     total="${#entries[@]}"
-    new_vps_index=$((total + 1))
-    new_upstream_index=$((total + 2))
-    local_index=$((total + 3))
+    new_vps_index=$((total + 1)); new_upstream_index=$((total + 2))
+    temp_vps_index=$((total + 3)); temp_upstream_index=$((total + 4)); local_index=$((total + 5))
     log "中转线路管理"
     local i
-    for ((i=0; i<total; i++)); do
-      IFS=$'\t' read -r entry_type entry_id entry_name <<< "${entries[$i]}"
-      echo "$((i+1)). ${entry_name}"
-    done
+    for ((i=0; i<total; i++)); do IFS=$'\t' read -r entry_type entry_id entry_name <<< "${entries[$i]}"; echo "$((i+1)). ${entry_name}"; done
     echo "${new_vps_index}. 新建 VPS 副机中转线路"
     echo "${new_upstream_index}. 新建 HTTP/HTTPS/SOCKS5 中转线路"
+    echo "${temp_vps_index}. 创建临时 VPS 中转线路（从已有线路复制）"
+    echo "${temp_upstream_index}. 创建临时 HTTP/HTTPS/SOCKS5 中转线路（从已有线路复制）"
     echo "${local_index}. 查看本机客户端配置"
     echo "0. 退出"
     read -r -p "请输入编号：" selection
     [[ "$selection" =~ ^[0-9]+$ ]] || { echo "请输入有效数字。"; continue; }
-    selection="$((10#$selection))"
-    (( selection == 0 )) && return
+    selection="$((10#$selection))"; (( selection == 0 )) && return
     if (( selection == new_vps_index )); then prompt_new_relay; continue; fi
     if (( selection == new_upstream_index )); then prompt_new_upstream_relay; continue; fi
+    if (( selection == temp_vps_index )); then prompt_create_temporary vps; continue; fi
+    if (( selection == temp_upstream_index )); then prompt_create_temporary upstream; continue; fi
     if (( selection == local_index )); then show_local_client_config; pause_return; continue; fi
     (( selection >= 1 && selection <= total )) || { echo "编号超出范围。"; continue; }
     IFS=$'\t' read -r entry_type entry_id entry_name <<< "${entries[$((selection-1))]}"
-    if [[ "$entry_type" == "vps" ]]; then relay_submenu "$entry_id"; else upstream_submenu "$entry_id"; fi
+    case "$entry_type" in vps) relay_submenu "$entry_id";; upstream) upstream_submenu "$entry_id";; temp) temporary_submenu "$entry_id";; esac
   done
 }
 
@@ -2124,12 +2478,13 @@ install_shortcuts() {
 cat /root/日本VPS-客户端节点.txt
 EOF_SHOW
   chmod 700 /usr/local/sbin/jp-show-nodes
+  install_temp_cleanup_timer
 }
 
 check_runtime_environment() {
   [[ -f "$STATE_FILE" ]] || fail "尚未完成日本 VPS 初始化。"
   jq -e '.schema==3 and .role=="japan-hub" and (.relays|type=="array") and ((.upstream_relays // [])|type=="array")' "$STATE_FILE" >/dev/null || fail "JPR3 状态文件损坏。"
-  command -v  >/dev/null || fail "缺少 。"
+  command -v jq >/dev/null || fail "缺少 jq。"
   if mode_has_vless; then
     [[ -x "$XRAY" && -f "$XRAY_CFG" ]] || fail "VLESS 已启用，但 Xray 文件不完整。"
     systemctl is-active --quiet xray || { systemctl restart xray >/dev/null 2>&1 || true; sleep 2; }
@@ -2157,7 +2512,8 @@ bootstrap() {
   else
     INSTALL_MODE="$(jq -r '.protocol_mode' "$STATE_FILE")"
     INSTALL_PORT="$(jq -r '.listen_port' "$STATE_FILE")"
-    echo "检测到现有 JPR3 状态：模式=${INSTALL_MODE}，端口=${INSTALL_PORT}。"
+    HY2_LIMIT_MBPS="$(jq -r '.hy2_limit_mbps // 50' "$STATE_FILE")"
+    echo "检测到现有 JPR3 状态：模式=${INSTALL_MODE}，端口=${INSTALL_PORT}，HY2 每连接强制上限=${HY2_LIMIT_MBPS}M。"
   fi
 
   CURRENT_STEP="刷新软件源并安装依赖"; log "$CURRENT_STEP"; upgrade_system_once
@@ -2205,6 +2561,9 @@ bootstrap() {
 [[ "$EUID" -eq 0 ]] || fail "请使用 root 用户执行。"
 
 case "$RUN_MODE" in
+  --cleanup-temp)
+    CURRENT_STEP="清理过期临时节点"; check_runtime_environment; acquire_manager_lock; cleanup_expired_temporary
+    ;;
   --manage)
     CURRENT_STEP="检查日本运行环境"; log "$CURRENT_STEP"; check_runtime_environment
     acquire_manager_lock

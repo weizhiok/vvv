@@ -112,14 +112,15 @@ def render_clash(nodes):
                 f'      short-id: "{node["short_id"]}"',
             ]
         else:
+            limit = int(node.get('limit_mbps') or 50)
             lines += [
                 f'  - name: {json.dumps(node["name"], ensure_ascii=False)}',
                 '    type: hysteria2',
                 f'    server: {node["server"]}',
                 f'    port: {node["port"]}',
                 f'    password: {json.dumps(node["password"])}',
-                '    up: "50 Mbps"',
-                '    down: "50 Mbps"',
+                f'    up: "{limit} Mbps"',
+                f'    down: "{limit} Mbps"',
                 '    obfs: salamander',
                 f'    obfs-password: {json.dumps(node["obfs_password"])}',
                 f'    sni: {node["sni"]}',
