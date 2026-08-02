@@ -75,16 +75,21 @@ PY_LANDING_VALID
 center_config_valid() {
   [[ -s "$CENTER_CFG" ]] || return 1
   python3 - "$CENTER_CFG" <<'PY_CENTER_VALID'
-import json,sys
+import json,re,sys
 from pathlib import Path
 try:
     s=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
-    assert s.get('schema') == 2
-    assert s.get('mode') in ('domain','ip')
-    assert str(s.get('base_url','')).startswith('https://')
+    assert s.get('schema') == 3
+    assert s.get('address_mode') in ('domain','ip')
+    assert s.get('transport_mode') in ('direct-http','direct-https','tunnel')
+    suffix=str(s.get('subscription_suffix',''))
+    assert re.fullmatch(r'[A-Za-z0-9]{6,32}',suffix)
+    base=str(s.get('base_url',''))
+    if s['transport_mode']=='direct-http': assert base.startswith('http://')
+    else: assert base.startswith('https://')
+    assert s.get('subscription_url') == base.rstrip('/') + '/' + suffix
     assert int(s.get('public_port',0)) > 0
-    assert s.get('subscription_token')
-    assert s.get('master_token')
+    assert s.get('master_token') and s.get('recovery_password')
 except Exception:
     raise SystemExit(1)
 PY_CENTER_VALID
@@ -95,15 +100,19 @@ center_complete() {
   [[ -s /etc/vvv-sub/registration.code ]] &&
   [[ -x /usr/local/sbin/vvv-center ]] &&
   [[ -x /usr/local/lib/vvv/sub_center.py ]] &&
+  [[ -x /usr/local/lib/vvv/client_adapters.py ]] &&
+  [[ -x /usr/local/lib/vvv/adapter_manager.py ]] &&
+  [[ -x /usr/local/lib/vvv/center_transport.sh ]] &&
   [[ -f /etc/systemd/system/vvv-sub.service ]] &&
   [[ -f /etc/systemd/system/caddy.service ]] &&
-  [[ -s /etc/caddy/Caddyfile ]]
+  [[ -s /etc/caddy/Caddyfile ]] &&
+  { [[ "$(json_value "$CENTER_CFG" transport_mode "")" != tunnel ]] || [[ -f /etc/systemd/system/vvv-cloudflared.service ]]; }
 }
 
 center_partial() {
   [[ -e /etc/vvv-sub || -e /var/lib/vvv-sub || -e /usr/local/sbin/vvv-center ||
      -e /etc/systemd/system/vvv-sub.service || -e /etc/systemd/system/caddy.service ||
-     -e /etc/caddy/.vvv-ip-final-active ]]
+     -e /etc/systemd/system/vvv-cloudflared.service || -e /etc/caddy/Caddyfile ]]
 }
 
 relay_enabled() {
@@ -158,7 +167,10 @@ load_existing_proxy_parameters() {
 load_existing_center_parameters() {
   VVV_SUB_DOMAIN="$(json_value "$CENTER_CFG" domain "")"
   VVV_SUB_PORT="$(json_value "$CENTER_CFG" public_port 8443)"
-  export VVV_SUB_DOMAIN VVV_SUB_PORT
+  VVV_SUB_TRANSPORT="$(json_value "$CENTER_CFG" transport_mode direct-https)"
+  VVV_SUB_SUFFIX="$(json_value "$CENTER_CFG" subscription_suffix "")"
+  VVV_CF_TUNNEL_TOKEN=""
+  export VVV_SUB_DOMAIN VVV_SUB_PORT VVV_SUB_TRANSPORT VVV_SUB_SUFFIX VVV_CF_TUNNEL_TOKEN
   REUSE_CENTER=1
 }
 
@@ -172,14 +184,16 @@ backup_and_reset_partial_center() {
   install -d -m700 "$backup_dir"
   [[ ! -e /etc/vvv-sub ]] || cp -a /etc/vvv-sub "$backup_dir/" 2>/dev/null || true
   [[ ! -e /var/lib/vvv-sub ]] || cp -a /var/lib/vvv-sub "$backup_dir/" 2>/dev/null || true
-  systemctl disable --now vvv-ip-cert-renew.timer vvv-sync.timer vvv-sync.path >/dev/null 2>&1 || true
-  systemctl stop vvv-sub.service caddy.service >/dev/null 2>&1 || true
+  systemctl disable --now vvv-ip-cert-renew.timer vvv-cloudflared.service vvv-sync.timer vvv-sync.path >/dev/null 2>&1 || true
+  systemctl stop vvv-sub.service caddy.service vvv-cloudflared.service >/dev/null 2>&1 || true
   rm -f /etc/systemd/system/vvv-sub.service \
         /etc/systemd/system/vvv-ip-cert-renew.service \
         /etc/systemd/system/vvv-ip-cert-renew.timer \
         /etc/systemd/system/caddy.service \
+        /etc/systemd/system/vvv-cloudflared.service \
         /usr/local/sbin/vvv-center \
-        /usr/local/lib/vvv/deploy-ip-cert.sh
+        /usr/local/lib/vvv/deploy-ip-cert.sh \
+        /usr/local/lib/vvv/run-cloudflared.sh
   rm -rf /etc/vvv-sub /var/lib/vvv-sub /etc/caddy/.vvv-ip-final-active /etc/caddy/Caddyfile /etc/caddy/certs
   systemctl daemon-reload
   echo "不完整订阅中心已清理；残留备份：$backup_dir"
@@ -258,31 +272,79 @@ ask_proxy_parameters(){
   export VVV_PROTOCOL_MODE VVV_PROXY_PORT VVV_REALITY_SNI
 }
 
+random_subscription_suffix() {
+  python3 - <<'PY_RANDOM_SUFFIX'
+import secrets,string
+alphabet=string.ascii_letters+string.digits
+print(''.join(secrets.choice(alphabet) for _ in range(8)))
+PY_RANDOM_SUFFIX
+}
+
 ask_center_parameters(){
-  local input
+  local input choice
   echo
   while true; do
-    read -r -p "请输入订阅 HTTPS 域名（直接回车使用本机公网 IP）：" input
+    read -r -p "请输入订阅域名（直接回车使用本机公网 IP）：" input
     input="${input,,}"; input="${input%.}"
-    if [[ -z "$input" ]]; then
-      VVV_SUB_DOMAIN=""
-      break
-    fi
+    if [[ -z "$input" ]]; then VVV_SUB_DOMAIN=""; break; fi
     if valid_domain "$input"; then VVV_SUB_DOMAIN="$input"; break; fi
     echo "域名格式不正确，请重新输入；也可以直接回车使用本机公网 IP。"
   done
+  echo
+  echo "请选择订阅传输方式："
+  echo "1. 直接 HTTPS【默认】"
+  echo "   域名由 Caddy 自动申请公共证书；IP 由 Certbot 申请 Let's Encrypt IP 证书。"
+  echo "2. 直接 HTTP"
+  echo "   不申请证书，适合频繁重装测试；后期可在 vps 菜单开启 HTTPS。"
+  echo "3. 固定 HTTPS 域名（Cloudflare Tunnel）"
+  echo "   公共地址使用标准 443，VPS 只运行本地 HTTP；需提前创建 Tunnel 公共主机名。"
   while true; do
-    read -r -p "请输入订阅 HTTPS 端口 [默认 8443]：" input
-    input="${input//[[:space:]]/}"
-    [[ -n "$input" ]] || input=8443
-    if ! valid_port "$input"; then echo "端口必须是 1–65535 之间的数字。"; continue; fi
-    input="$((10#$input))"
-    if [[ "$input" == 443 ]]; then echo "订阅服务端口不能使用 443。"; continue; fi
-    if [[ "$input" == "${VVV_PROXY_PORT:-}" ]]; then echo "订阅服务端口不能与代理端口相同。"; continue; fi
-    if port_in_use "$input"; then echo "TCP 端口 ${input} 已被占用，请输入其他端口。"; continue; fi
-    VVV_SUB_PORT="$input"; break
+    read -r -p "请输入编号 [默认 1]：" choice
+    [[ -n "$choice" ]] || choice=1
+    case "$choice" in
+      1) VVV_SUB_TRANSPORT=direct-https; break;;
+      2) VVV_SUB_TRANSPORT=direct-http; break;;
+      3) VVV_SUB_TRANSPORT=tunnel; break;;
+      *) echo "请输入 1、2 或 3。";;
+    esac
   done
-  export VVV_SUB_DOMAIN VVV_SUB_PORT
+  if [[ "$VVV_SUB_TRANSPORT" == tunnel ]]; then
+    while [[ -z "$VVV_SUB_DOMAIN" ]]; do
+      read -r -p "Cloudflare Tunnel 模式必须输入订阅域名：" input
+      input="${input,,}"; input="${input%.}"
+      valid_domain "$input" && VVV_SUB_DOMAIN="$input" || echo "域名格式不正确。"
+    done
+    VVV_SUB_PORT=8443
+    while true; do
+      read -r -p "请输入 Cloudflare Tunnel Token：" VVV_CF_TUNNEL_TOKEN
+      VVV_CF_TUNNEL_TOKEN="${VVV_CF_TUNNEL_TOKEN//[[:space:]]/}"
+      [[ -n "$VVV_CF_TUNNEL_TOKEN" ]] && break
+      echo "Tunnel Token 不能为空。"
+    done
+  else
+    VVV_CF_TUNNEL_TOKEN=""
+    while true; do
+      read -r -p "请输入订阅服务端口 [默认 8443]：" input
+      input="${input//[[:space:]]/}"; [[ -n "$input" ]] || input=8443
+      if ! valid_port "$input"; then echo "端口必须是 1-65535 之间的数字。"; continue; fi
+      input="$((10#$input))"
+      if [[ "$input" == 443 ]]; then echo "订阅服务端口不能使用代理端口 443。"; continue; fi
+      if [[ "$input" == "${VVV_PROXY_PORT:-}" ]]; then echo "订阅服务端口不能与代理端口相同。"; continue; fi
+      if port_in_use "$input"; then echo "TCP 端口 ${input} 已被占用，请输入其他端口。"; continue; fi
+      VVV_SUB_PORT="$input"; break
+    done
+  fi
+  while true; do
+    read -r -p "请输入订阅地址后缀（手动 6-32 位大小写字母或数字；直接回车随机生成 8 位）：" input
+    input="${input//[[:space:]]/}"
+    [[ -n "$input" ]] || input="$(random_subscription_suffix)"
+    if [[ "$input" =~ ^[A-Za-z0-9]{6,32}$ ]]; then
+      case "${input,,}" in health|api|admin|debug) echo "该后缀属于系统保留词，请重新输入。"; continue;; esac
+      VVV_SUB_SUFFIX="$input"; break
+    fi
+    echo "订阅后缀只能包含大小写字母和数字，手动输入长度必须为 6-32 位。"
+  done
+  export VVV_SUB_DOMAIN VVV_SUB_PORT VVV_SUB_TRANSPORT VVV_SUB_SUFFIX VVV_CF_TUNNEL_TOKEN
 }
 
 jpr_registration_code(){
@@ -357,16 +419,22 @@ enable_relay(){
 }
 
 refresh_center_runtime_code() {
-  local changed=0
+  local changed=0 file target mode
   install -d -m700 /usr/local/lib/vvv
-  for file in sub_center.py backup_manager.py; do
-    if [[ ! -f "/usr/local/lib/vvv/$file" ]] || ! cmp -s "$BASE_DIR/$file" "/usr/local/lib/vvv/$file"; then
-      install -m755 "$BASE_DIR/$file" "/usr/local/lib/vvv/$file"
+  for file in sub_center.py backup_manager.py rclone_manager.sh client_adapters.py adapter_manager.py center_transport.sh; do
+    target="/usr/local/lib/vvv/$file"
+    if [[ ! -f "$target" ]] || ! cmp -s "$BASE_DIR/$file" "$target"; then
+      install -m755 "$BASE_DIR/$file" "$target"
       changed=1
     fi
   done
+  if [[ ! -f /usr/local/sbin/vvv-center ]] || ! cmp -s "$BASE_DIR/center_manager.sh" /usr/local/sbin/vvv-center; then
+    install -m700 "$BASE_DIR/center_manager.sh" /usr/local/sbin/vvv-center
+    changed=1
+  fi
   if (( changed == 1 )); then
     echo "检测到订阅中心程序更新，保留全部数据并重新启动内部服务。"
+    python3 /usr/local/lib/vvv/client_adapters.py >/dev/null
     timeout 75 systemctl restart vvv-sub.service
   fi
 }
@@ -376,8 +444,12 @@ ensure_center_runtime() {
   systemctl enable vvv-sub.service caddy.service >/dev/null 2>&1 || true
   systemctl is-active --quiet vvv-sub.service || timeout 75 systemctl restart vvv-sub.service
   systemctl is-active --quiet caddy.service || timeout 75 systemctl restart caddy.service
-  systemctl is-active --quiet vvv-sub.service &&
-  systemctl is-active --quiet caddy.service
+  if [[ "$(json_value "$CENTER_CFG" transport_mode "")" == tunnel ]]; then
+    systemctl enable vvv-cloudflared.service >/dev/null 2>&1 || true
+    systemctl is-active --quiet vvv-cloudflared.service || timeout 75 systemctl restart vvv-cloudflared.service
+    systemctl is-active --quiet vvv-cloudflared.service || return 1
+  fi
+  systemctl is-active --quiet vvv-sub.service && systemctl is-active --quiet caddy.service
 }
 
 ensure_center(){
@@ -494,13 +566,13 @@ register_current_main_role(){
 }
 
 show_parameter_summary(){
-  local role_name protocol_name
+  local role_name protocol_name endpoint scheme transport_label
   case "$choice" in
-    1) role_name="安装订阅中心 + 中转主机 + 自身代理" ;;
-    2) role_name="安装订阅中心 + 自身代理" ;;
-    3) role_name="安装中转主机 + 自身代理" ;;
-    4) role_name="安装中转副机" ;;
-    5) role_name="安装直连代理" ;;
+    1) role_name="安装订阅中心 + 中转主机 + 自身代理";;
+    2) role_name="安装订阅中心 + 自身代理";;
+    3) role_name="安装中转主机 + 自身代理";;
+    4) role_name="安装中转副机";;
+    5) role_name="安装直连代理";;
   esac
   echo
   echo "========== 安装参数总览 =========="
@@ -513,11 +585,21 @@ show_parameter_summary(){
     echo "代理端口：$VVV_PROXY_PORT"
     [[ "$VVV_PROTOCOL_MODE" == hy2 ]] || echo "REALITY 伪装域名：$VVV_REALITY_SNI"
     if [[ "$choice" == 1 || "$choice" == 2 ]]; then
-      if [[ -n "$VVV_SUB_DOMAIN" ]]; then
-        echo "订阅入口：https://${VVV_SUB_DOMAIN}:${VVV_SUB_PORT}$([[ "$REUSE_CENTER" == 1 ]] && echo '（复用现有）')"
+      case "$VVV_SUB_TRANSPORT" in
+        direct-http) transport_label="直接 HTTP"; scheme=http;;
+        direct-https) transport_label="直接 HTTPS"; scheme=https;;
+        tunnel) transport_label="固定 HTTPS 域名（Cloudflare Tunnel）"; scheme=https;;
+      esac
+      if [[ "$VVV_SUB_TRANSPORT" == tunnel ]]; then
+        endpoint="https://${VVV_SUB_DOMAIN}/${VVV_SUB_SUFFIX}"
+      elif [[ -n "$VVV_SUB_DOMAIN" ]]; then
+        endpoint="${scheme}://${VVV_SUB_DOMAIN}:${VVV_SUB_PORT}/${VVV_SUB_SUFFIX}"
       else
-        echo "订阅入口：https://本机公网IP:${VVV_SUB_PORT}$([[ "$REUSE_CENTER" == 1 ]] && echo '（复用现有）' || echo '（自动申请免费 IP 证书）')"
+        endpoint="${scheme}://本机公网IP:${VVV_SUB_PORT}/${VVV_SUB_SUFFIX}"
       fi
+      echo "订阅传输：${transport_label}$([[ "$REUSE_CENTER" == 1 ]] && echo '（复用现有）')"
+      echo "统一订阅地址：${endpoint}"
+      echo "订阅后缀：${VVV_SUB_SUFFIX}"
     elif [[ "$choice" == 3 ]]; then
       [[ -n "$code" ]] && echo "订阅中心接入码：已填写或将使用本机订阅中心" || echo "订阅中心接入码：未填写（独立使用）"
     elif [[ "$choice" == 5 ]]; then
@@ -533,6 +615,7 @@ REUSE_CENTER=0
 code=""
 key=""
 center_address=""
+VVV_CF_TUNNEL_TOKEN=""
 
 show_install_menu
 while true; do

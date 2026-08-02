@@ -21,6 +21,8 @@ python3 -m py_compile \
   "$ROOT/core-src/sub_center.py" \
   "$ROOT/core-src/sync_agent.py" \
   "$ROOT/core-src/backup_manager.py" \
+  "$ROOT/core-src/client_adapters.py" \
+  "$ROOT/core-src/adapter_manager.py" \
   "$ROOT/tests/conformance.py" \
   "$ROOT/tests/extract_manager_library.py" \
   "$ROOT/tests/build_slot_fixture.py"
@@ -31,7 +33,10 @@ bash -n "$ROOT/core-src/center_install.sh"
 bash -n "$ROOT/core-src/register_sync.sh"
 bash -n "$ROOT/core-src/vvv_manager.sh"
 bash -n "$ROOT/core-src/rclone_manager.sh"
+bash -n "$ROOT/core-src/center_transport.sh"
+bash -n "$ROOT/core-src/center_manager.sh"
 sh -n "$ROOT/core-src/landing.sh"
+python3 "$ROOT/core-src/client_adapters.py" >/dev/null
 
 log 'Render final installers'
 cp "$ROOT/core-src/host.sh" "$WORK/host.sh"

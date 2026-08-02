@@ -17,7 +17,7 @@ BACKUPS = DATA / 'backups'
 CLOUD_CFG = Path('/etc/vvv-sub/cloud.json')
 RCLONE_CFG = Path('/etc/vvv-sub/rclone.conf')
 
-SOURCES = [
+BASE_SOURCES = [
     Path('/etc/vvv-sub/config.json'),
     Path('/var/lib/vvv-sub/registry.json'),
     Path('/var/lib/vvv-sub/hosts'),
@@ -29,6 +29,23 @@ SOURCES = [
     Path('/etc/vvv-sub/cloud.json'),
     Path('/etc/vvv-sub/rclone.conf'),
 ]
+CLOUD_ONLY_SOURCES = [
+    Path('/etc/letsencrypt'),
+    Path('/etc/caddy'),
+    Path('/var/lib/caddy/.local/share/caddy'),
+    Path('/etc/vvv-sub/cloudflared.token'),
+    Path('/etc/systemd/system/vvv-cloudflared.service'),
+    Path('/usr/local/lib/vvv/run-cloudflared.sh'),
+]
+
+
+def cloud_backup_enabled():
+    cfg = read_json(CLOUD_CFG, {}) or {}
+    return cfg.get('enabled') is True
+
+
+def sources():
+    return BASE_SOURCES + (CLOUD_ONLY_SOURCES if cloud_backup_enabled() else [])
 
 
 def now_iso():
@@ -64,7 +81,7 @@ def add_source(tar, path):
 
 def snapshot_digest():
     h = hashlib.sha256()
-    for path in SOURCES:
+    for path in sources():
         if path.is_file():
             h.update(str(path).encode() + b'\0' + path.read_bytes())
         elif path.is_dir():
@@ -122,7 +139,7 @@ def create_backup(reason, force=False):
     with tempfile.TemporaryDirectory() as td:
         tar_path = Path(td) / 'vvv-backup.tar.gz'
         with tarfile.open(tar_path, 'w:gz') as tar:
-            for src in SOURCES:
+            for src in sources():
                 add_source(tar, src)
             manifest = Path(td) / 'manifest.json'
             manifest.write_text(json.dumps({'created_at': now_iso(), 'reason': reason, 'source_sha256': digest}, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')

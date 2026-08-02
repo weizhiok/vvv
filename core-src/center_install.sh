@@ -242,7 +242,7 @@ fi
 
 install -d -m700 "$CFG_DIR" "$DATA_DIR" "$DATA_DIR/hosts" "$DATA_DIR/output" "$DATA_DIR/backups" /usr/local/lib/vvv
 install -d -m755 /var/www/vvv-acme /etc/caddy
-for file in sub_center.py sync_agent.py backup_manager.py rclone_manager.sh client_adapters.py adapter_manager.py center_transport.sh; do
+for file in sub_center.py sync_agent.py backup_manager.py rclone_manager.sh client_adapters.py adapter_manager.py center_transport.sh center_manager.sh; do
   install -m755 "$BASE_DIR/$file" "/usr/local/lib/vvv/$file"
 done
 client_adapters_result="$(python3 /usr/local/lib/vvv/client_adapters.py)" || fail "客户端适配器自检失败。"
@@ -291,7 +291,7 @@ ensure_service vvv-sub.service restart 60
 /usr/local/lib/vvv/center_transport.sh apply-initial || fail "订阅传输前端安装失败。"
 
 curl -fsS --connect-timeout 2 --max-time 4 "http://127.0.0.1:${SERVICE_PORT}/health" >/dev/null || fail "订阅中心内部服务未就绪。"
-write_center_manager
+install -m700 "$BASE_DIR/center_manager.sh" /usr/local/sbin/vvv-center
 python3 /usr/local/lib/vvv/backup_manager.py create first-install --force >/dev/null
 
 printf '\n订阅中心安装成功，总耗时 %s 秒。\n' "$((SECONDS-CENTER_STARTED))"
