@@ -205,6 +205,7 @@ def test_transports_and_reentrant_installation():
     require('随机生成 8 位' in bootstrap, '默认随机后缀不是8位')
     require('refresh_center_runtime_code' in bootstrap and 'center_manager.sh' in bootstrap, '重复安装不会刷新中心管理器')
     require('migrate_center_config_if_needed' in bootstrap and 'config.schema2-backup.json' in bootstrap, '旧schema2订阅中心不会原地迁移')
+    require('if [[ -f /etc/vvv-sub/.schema3-migrated ]]' in bootstrap and bootstrap.index('refresh_center_runtime_code', bootstrap.index('migrate_center_config_if_needed\nif')) < bootstrap.index('show_install_menu', bootstrap.index('migrate_center_config_if_needed\nif')), '旧中心迁移后没有在显示菜单前立即刷新运行时')
 
 
 def test_apt_lock_policy():

@@ -654,6 +654,10 @@ center_address=""
 VVV_CF_TUNNEL_TOKEN=""
 
 migrate_center_config_if_needed
+if [[ -f /etc/vvv-sub/.schema3-migrated ]]; then
+  refresh_center_runtime_code
+  ensure_center_runtime || fail "旧订阅中心配置已迁移，但新统一入口服务无法启动；原数据和 schema2 备份均已保留。"
+fi
 show_install_menu
 while true; do
   read -r -p "请输入编号：" choice
