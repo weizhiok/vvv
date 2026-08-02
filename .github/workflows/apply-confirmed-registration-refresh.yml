@@ -1,13 +1,15 @@
 name: Apply confirmed registration refresh
 on:
-  push:
-    branches: [agent/confirm-refresh-registration]
+  pull_request:
+    branches: [main]
     paths:
+      - 'tools/apply_confirmed_registration_refresh.py'
       - 'trigger-confirmed-registration-refresh.txt'
+      - '.github/workflows/apply-confirmed-registration-refresh.yml'
 permissions:
   contents: write
 concurrency:
-  group: confirmed-registration-refresh
+  group: confirmed-registration-refresh-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
   apply-and-verify:
