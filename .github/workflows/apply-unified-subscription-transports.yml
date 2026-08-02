@@ -22,7 +22,9 @@ jobs:
           ref: agent/unified-subscription-transports
           fetch-depth: 0
       - name: Apply remaining production patch
-        run: python3 tools/apply_unified_subscription_patch.py
+        run: |
+          python3 tools/fix_unified_patcher.py
+          python3 tools/apply_unified_subscription_patch.py
       - name: Validate source
         run: |
           set -Eeuo pipefail
@@ -45,7 +47,7 @@ jobs:
           set -Eeuo pipefail
           git config user.name weizhiok
           git config user.email 165847692+weizhiok@users.noreply.github.com
-          rm -f tools/apply_unified_subscription_patch.py trigger-unified-subscription-transports.txt .github/workflows/apply-unified-subscription-transports.yml
+          rm -f tools/apply_unified_subscription_patch.py tools/fix_unified_patcher.py trigger-unified-subscription-transports.txt .github/workflows/apply-unified-subscription-transports.yml
           find . -type d -name __pycache__ -prune -exec rm -rf {} +
           find . -type f -name '*.pyc' -delete
           git add -A
