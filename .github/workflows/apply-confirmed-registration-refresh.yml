@@ -1,0 +1,39 @@
+name: Apply confirmed registration refresh
+on:
+  push:
+    branches: [agent/confirm-refresh-registration]
+    paths:
+      - 'trigger-confirmed-registration-refresh.txt'
+permissions:
+  contents: write
+concurrency:
+  group: confirmed-registration-refresh
+  cancel-in-progress: true
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/confirm-refresh-registration
+          fetch-depth: 0
+      - name: Apply production patch
+        run: python3 tools/apply_confirmed_registration_refresh.py
+      - name: Validate registration refresh contract
+        run: |
+          set -Eeuo pipefail
+          bash -n core-src/register_sync.sh
+          python3 -m py_compile core-src/sync_agent.py core-src/sub_center.py tests/conformance.py
+          python3 tests/conformance.py
+      - name: Commit production changes
+        run: |
+          set -Eeuo pipefail
+          git config user.name weizhiok
+          git config user.email 165847692+weizhiok@users.noreply.github.com
+          rm -f tools/apply_confirmed_registration_refresh.py trigger-confirmed-registration-refresh.txt .github/workflows/apply-confirmed-registration-refresh.yml
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          find . -type f -name '*.pyc' -delete
+          git add -A
+          git commit -m "Confirm registration after subscription refresh"
+          git push origin HEAD:agent/confirm-refresh-registration
