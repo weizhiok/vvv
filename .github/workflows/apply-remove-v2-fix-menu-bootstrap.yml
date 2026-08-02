@@ -1,14 +1,15 @@
 name: Apply client and menu fixes
 on:
-  push:
-    branches: [agent/remove-v2-fix-menu-bootstrap]
+  pull_request:
+    branches: [main]
     paths:
       - 'tools/apply_remove_v2_fix_menu_bootstrap.py'
       - 'trigger-remove-v2-fix-menu-bootstrap.txt'
+      - '.github/workflows/apply-remove-v2-fix-menu-bootstrap.yml'
 permissions:
   contents: write
 concurrency:
-  group: apply-remove-v2-fix-menu-bootstrap
+  group: apply-remove-v2-fix-menu-bootstrap-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
   apply-and-verify:
