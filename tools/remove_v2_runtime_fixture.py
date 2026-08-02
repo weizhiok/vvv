@@ -12,13 +12,13 @@ new = '''[[ -s "$WORK/client-files/Quantumult-X.conf" ]]
 [[ -s "$WORK/client-files/Loon.conf" ]]
 [[ -s "$WORK/client-files/Shadowrocket.txt" ]]
 [[ -s "$WORK/client-files/Clash-Verge-Rev.yaml" ]]
-[[ ! -e "$WORK/client-files/v2rayNG.txt" ]]
+! find "$WORK/client-files" -maxdepth 1 -type f -iname '*v2*' | grep -q .
 grep -q '^vless=' "$WORK/client-files/Quantumult-X.conf"
 grep -q 'Hysteria2' "$WORK/client-files/Loon.conf"
 grep -q '^hysteria2://' "$WORK/client-files/Shadowrocket.txt"
 grep -q 'type: hysteria2' "$WORK/client-files/Clash-Verge-Rev.yaml"
 '''
 if text.count(old) != 1:
-    raise SystemExit('runtime fixture v2rayNG block not found exactly once')
+    raise SystemExit('legacy runtime fixture block not found exactly once')
 path.write_text(text.replace(old, new, 1), encoding='utf-8')
 print('RUNTIME FIXTURE UPDATED')
