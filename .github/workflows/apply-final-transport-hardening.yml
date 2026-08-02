@@ -1,0 +1,41 @@
+name: Apply final transport hardening
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: write
+concurrency:
+  group: final-transport-hardening
+  cancel-in-progress: true
+jobs:
+  apply-and-verify:
+    if: github.head_ref == 'agent/unified-subscription-transports'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/unified-subscription-transports
+          fetch-depth: 0
+      - name: Apply hardening patch
+        run: python3 tools/apply_final_transport_hardening.py
+      - name: Validate
+        run: |
+          set -Eeuo pipefail
+          git diff --check
+          bash -n core-src/bootstrap.sh
+          bash -n core-src/center_transport.sh
+          bash -n core-src/center_manager.sh
+          python3 -m py_compile core-src/sub_center.py core-src/backup_manager.py tests/conformance.py
+          python3 tests/conformance.py
+      - name: Commit production changes
+        run: |
+          set -Eeuo pipefail
+          git config user.name weizhiok
+          git config user.email 165847692+weizhiok@users.noreply.github.com
+          rm -f tools/apply_final_transport_hardening.py .github/workflows/apply-final-transport-hardening.yml
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          find . -type f -name '*.pyc' -delete
+          git add -A
+          git commit -m "Harden subscription transport migration and recovery"
+          git push origin HEAD:agent/unified-subscription-transports
