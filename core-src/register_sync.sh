@@ -2,12 +2,16 @@
 set -Eeuo pipefail
 umask 077
 BASE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-role="${1:?role}"; code="${2:-}"
+role="${1:?role}"
+code="${2:-}"
+center_address="${3:-}"
 install -d -m700 /etc/vvv /usr/local/lib/vvv
 install -m755 "$BASE_DIR/sync_agent.py" /usr/local/lib/vvv/sync_agent.py
 
 if [[ -n "$code" ]]; then
   python3 /usr/local/lib/vvv/sync_agent.py register "$code" "$role"
+elif [[ "$role" == direct && -n "$center_address" ]]; then
+  python3 /usr/local/lib/vvv/sync_agent.py register-direct "$center_address"
 fi
 
 state_path=/etc/jp-relay/state.json
@@ -47,5 +51,9 @@ if [[ -f /etc/vvv/client.json ]]; then
   systemctl start vvv-sync.service || true
 else
   systemctl disable --now vvv-sync.timer vvv-sync.path >/dev/null 2>&1 || true
-  echo "未提供订阅中心接入码；以后可在 vps 菜单中注册。"
+  if [[ "$role" == direct ]]; then
+    echo "本次未填写订阅中心地址；以后输入 vps，可只填写 IP 地址或域名完成注册。"
+  else
+    echo "未提供订阅中心接入码；以后可在 vps 菜单中注册。"
+  fi
 fi
