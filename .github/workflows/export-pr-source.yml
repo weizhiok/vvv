@@ -1,8 +1,8 @@
 name: Apply VVV Changes
 
 on:
-  push:
-    branches: [agent/recovery-temp-nodes]
+  pull_request:
+    types: [reopened]
 
 permissions:
   contents: write
