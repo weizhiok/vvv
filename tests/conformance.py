@@ -32,7 +32,7 @@ def test_menu_and_front_loaded_parameters():
         '1. 安装订阅中心 + 中转主机 + 自身代理',
         '2. 安装订阅中心 + 自身代理',
         '3. 安装中转主机 + 自身代理',
-        '4. 安装中转副机（通过主机代理）',
+        '4. 安装中转副机',
         '5. 安装直连代理',
         '0. 退出',
     ]
@@ -184,7 +184,9 @@ def test_backup_policy():
 
 def test_jpr3_and_slot_architecture():
     prepare = read('src/prepare.py')
+    host = read('core-src/host.sh')
     landing = read('core-src/landing.sh')
+    bootstrap = read('core-src/bootstrap.sh')
     for token in (
         'subscription_registration_code', 'build_vless_slot_configs', 'sync_vless_slot_services',
         'vvv-vless-slot@', 'build_hy2_slot_configs', 'sync_hy2_slot_services', 'vvv-hy2-slot@',
@@ -193,7 +195,14 @@ def test_jpr3_and_slot_architecture():
         require(token in prepare, f'最终槽位/JPR3 转换器缺少 {token}')
     require('python3' in landing, '落地脚本没有显式安装 Python 运行时')
     require('.schema==3' in landing and '.type=="jp-relay-landing"' in landing, '落地脚本没有严格校验 JPR3')
-    require('actual_checksum' in landing and 'expected_checksum' in landing, '落地脚本没有校验 JPR3 摘要')
+    require('zlib.compress(raw,9)' in host and 'len(key) >= 3500' in host, '主机没有生成终端安全的压缩 JPR3')
+    require('zlib.decompress(transferred)' in landing and "transferred.startswith(b'{')" in landing, '落地端没有同时兼容新旧 JPR3')
+    require("hashlib.sha256(transferred).hexdigest()[:20]" in landing and 'expected_checksum' in landing, '落地脚本没有校验 JPR3 传输摘要')
+    require('对接密钥已达到终端单行输入上限' in bootstrap, '安装器没有识别 4095 字符截断风险')
+    require('zlib.decompress(transferred)' in bootstrap and 'subscription_registration_code' in bootstrap, '压缩 JPR3 无法提取订阅接入码')
+    require('VVV_REFRESH_MANAGER_ONLY=1 bash "$BASE_DIR/host.sh"' in bootstrap, '重复安装不会刷新现有中转管理程序')
+    require('新建 VPS 副机中转线路' in host and '新建中转线路' not in host, '中转线路菜单名称未按要求修改')
+    require('安装中转副机（通过主机代理）' not in bootstrap, '安装菜单仍保留多余说明文字')
 
 
 def test_no_qr_output():

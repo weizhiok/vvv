@@ -142,7 +142,7 @@ show_install_menu() {
   echo "1. 安装订阅中心 + 中转主机 + 自身代理"
   echo "2. 安装订阅中心 + 自身代理"
   echo "3. 安装中转主机 + 自身代理"
-  echo "4. 安装中转副机（通过主机代理）"
+  echo "4. 安装中转副机"
   echo "5. 安装直连代理"
   echo "0. 退出"
 }
@@ -206,8 +206,13 @@ ask_required_jpr3(){
       echo "中转模式必须输入 JPR3 对接密钥，不能跳过。"
       continue
     fi
-    if [[ "$key" != JPR3.* ]]; then
-      echo "对接密钥格式错误，必须以 JPR3. 开头。"
+    if ((${#key} >= 4095)); then
+      echo "对接密钥已达到终端单行输入上限，内容很可能被截断。"
+      echo "请先在中转主机重新运行统一安装命令刷新程序，再重新查看并复制新的压缩 JPR3 密钥。"
+      continue
+    fi
+    if [[ ! "$key" =~ ^JPR3\.[A-Za-z0-9_-]+\.[0-9a-f]{20}$ ]]; then
+      echo "对接密钥格式错误或复制不完整，必须是完整的 JPR3.数据.校验值。"
       continue
     fi
     break
@@ -281,11 +286,24 @@ ask_center_parameters(){
 }
 
 jpr_registration_code(){
-  local value="$1" rest encoded mod padded
-  rest="${value#JPR3.}"; encoded="${rest%%.*}"
-  mod=$((${#encoded} % 4))
-  case "$mod" in 0) padded="$encoded";; 2) padded="${encoded}==";; 3) padded="${encoded}=";; *) return 1;; esac
-  printf '%s' "$padded" | tr '_-' '/+' | base64 -d 2>/dev/null | jq -r '.subscription_registration_code // empty'
+  local value="$1"
+  python3 - "$value" <<'PY_JPR_REGISTRATION_CODE'
+import base64
+import json
+import sys
+import zlib
+
+parts = ''.join(sys.argv[1].split()).split('.')
+if len(parts) != 3 or parts[0] != 'JPR3':
+    raise SystemExit(1)
+try:
+    transferred = base64.urlsafe_b64decode(parts[1] + '=' * ((4 - len(parts[1]) % 4) % 4))
+    raw = transferred if transferred.startswith(b'{') else zlib.decompress(transferred)
+    value = json.loads(raw.decode('utf-8')).get('subscription_registration_code') or ''
+except Exception:
+    raise SystemExit(1)
+print(value)
+PY_JPR_REGISTRATION_CODE
 }
 
 host_ready() {
@@ -320,7 +338,8 @@ ensure_host_runtime() {
 
 ensure_host(){
   if host_ready && ensure_host_runtime; then
-    echo "本机代理已完整安装，复用现有协议、端口和永久凭证，跳过重复安装。"
+    VVV_REFRESH_MANAGER_ONLY=1 bash "$BASE_DIR/host.sh"
+    echo "本机代理已完整安装，已刷新中转管理程序并复用现有协议、端口和永久凭证。"
     return 0
   fi
   [[ ! -e "$MAIN_STATE" ]] || echo "检测到上次中断或不完整的本机代理，正在从现有状态继续修复。"
@@ -472,7 +491,7 @@ show_parameter_summary(){
     1) role_name="安装订阅中心 + 中转主机 + 自身代理" ;;
     2) role_name="安装订阅中心 + 自身代理" ;;
     3) role_name="安装中转主机 + 自身代理" ;;
-    4) role_name="安装中转副机（通过主机代理）" ;;
+    4) role_name="安装中转副机" ;;
     5) role_name="安装直连代理" ;;
   esac
   echo

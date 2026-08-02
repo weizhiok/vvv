@@ -176,12 +176,42 @@ upgrade_system_once() {
 
 parse_pairing_key() {
   old_ifs="$IFS"; IFS=.; set -- $PAIRING_KEY; IFS="$old_ifs"
-  [ "$#" -eq 3 ] || fail "JPR3 对接密钥格式错误。"
-  [ "$1" = "JPR3" ] || fail "本脚本只接受以 JPR3. 开头的全新对接密钥。"
+  [ "$#" -eq 3 ] || fail "JPR3 对接密钥格式错误；密钥可能被终端单行输入上限截断。"
+  [ "$1" = "JPR3" ] || fail "本脚本只接受以 JPR3. 开头的对接密钥。"
   encoded="$2"; expected_checksum="$3"
-  PAIR_JSON="$(base64url_decode "$encoded")" || fail "JPR3 Base64 解码失败。"
-  actual_checksum="$(printf '%s' "$PAIR_JSON" | sha256sum | awk '{print substr($1,1,20)}')"
-  [ "$actual_checksum" = "$expected_checksum" ] || fail "JPR3 校验失败，密钥可能复制不完整。"
+  PAIR_JSON="$(python3 - "$encoded" "$expected_checksum" <<'PY_JPR3_DECODE'
+import base64
+import hashlib
+import json
+import sys
+import zlib
+
+encoded, expected = sys.argv[1:]
+try:
+    transferred = base64.urlsafe_b64decode(encoded + '=' * ((4 - len(encoded) % 4) % 4))
+except Exception as exc:
+    raise SystemExit(f'Base64 解码失败：{exc}')
+if len(transferred) > 65536:
+    raise SystemExit('JPR3 传输数据异常过大。')
+actual = hashlib.sha256(transferred).hexdigest()[:20]
+if actual != expected:
+    raise SystemExit('JPR3 校验失败，密钥可能复制不完整。')
+if transferred.startswith(b'{'):
+    raw = transferred
+else:
+    try:
+        raw = zlib.decompress(transferred)
+    except Exception as exc:
+        raise SystemExit(f'JPR3 解压失败：{exc}')
+if len(raw) > 131072:
+    raise SystemExit('JPR3 解压后数据异常过大。')
+try:
+    obj = json.loads(raw.decode('utf-8'))
+except Exception as exc:
+    raise SystemExit(f'JPR3 JSON 无效：{exc}')
+sys.stdout.write(json.dumps(obj, ensure_ascii=False, separators=(',', ':')))
+PY_JPR3_DECODE
+)" || fail "JPR3 解码或校验失败，密钥可能复制不完整。"
 
   printf '%s' "$PAIR_JSON" | jq -e '
     .schema==3 and .type=="jp-relay-landing" and

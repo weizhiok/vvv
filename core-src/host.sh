@@ -1620,7 +1620,7 @@ prompt_new_upstream_relay() {
 make_pairing_key() {
   local state_path="$1" relay_id="$2"
   python3 - "$state_path" "$relay_id" <<'PY_JPR3'
-import base64,hashlib,json,sys
+import base64,hashlib,json,sys,zlib
 from datetime import datetime,timezone
 from pathlib import Path
 s=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
@@ -1663,9 +1663,13 @@ if r.get("hy2"):
       "remote_certificate_public_key_sha256":rh["remote_certificate_public_key_sha256"]
     }
 raw=json.dumps(payload,ensure_ascii=False,separators=(",",":")).encode()
-enc=base64.urlsafe_b64encode(raw).decode().rstrip("=")
-chk=hashlib.sha256(raw).hexdigest()[:20]
-print(f"JPR3.{enc}.{chk}")
+packed=zlib.compress(raw,9)
+enc=base64.urlsafe_b64encode(packed).decode().rstrip("=")
+chk=hashlib.sha256(packed).hexdigest()[:20]
+key=f"JPR3.{enc}.{chk}"
+if len(key) >= 3500:
+    raise SystemExit(f"压缩后的 JPR3 对接密钥仍过长（{len(key)} 字符），拒绝生成可能被终端截断的密钥。")
+print(key)
 PY_JPR3
 }
 
@@ -2094,7 +2098,7 @@ management_menu() {
       IFS=$'\t' read -r entry_type entry_id entry_name <<< "${entries[$i]}"
       echo "$((i+1)). ${entry_name}"
     done
-    echo "${new_vps_index}. 新建中转线路"
+    echo "${new_vps_index}. 新建 VPS 副机中转线路"
     echo "${new_upstream_index}. 新建 HTTP/HTTPS/SOCKS5 中转线路"
     echo "${local_index}. 查看本机客户端配置"
     echo "0. 退出"
@@ -2216,4 +2220,7 @@ trap - EXIT
 cleanup_temp
 JP_RELAY_JPR3_MANAGER_EOF
 chmod 700 /usr/local/sbin/jp-relay-manager
+if [[ "${VVV_REFRESH_MANAGER_ONLY:-0}" == 1 ]]; then
+  exit 0
+fi
 /usr/local/sbin/jp-relay-manager
