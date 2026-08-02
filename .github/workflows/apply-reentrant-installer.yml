@@ -1,0 +1,62 @@
+name: Apply reentrant installer
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/apply_reentrant_installer.py'
+      - 'trigger-reentrant-installer.txt'
+      - '.github/workflows/apply-reentrant-installer.yml'
+permissions:
+  contents: write
+concurrency:
+  group: apply-reentrant-installer-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reentrant-role-installer
+          fetch-depth: 0
+      - name: Apply production patch
+        run: python3 tools/apply_reentrant_installer.py
+      - name: Verify repeatable installer
+        run: |
+          set -Eeuo pipefail
+          bash -n vvv-install.sh
+          bash -n core-src/bootstrap.sh
+          bash -n core-src/host.sh
+          sh -n core-src/landing.sh
+          bash -n core-src/center_install.sh
+          bash -n core-src/register_sync.sh
+          bash -n core-src/vvv_manager.sh
+          python3 -m py_compile tests/conformance.py core-src/sync_agent.py
+          python3 tests/conformance.py
+          ! grep -F '当前版本只支持全新安装' vvv-install.sh
+          grep -F '始终进入安装菜单' vvv-install.sh
+          grep -F 'rebuild_roles_from_system' core-src/bootstrap.sh
+          grep -F 'primary=center-relay' core-src/bootstrap.sh
+          grep -F 'backup_and_reset_partial_center' core-src/bootstrap.sh
+          work="$(mktemp -d)"
+          cp core-src/host.sh "$work/host.sh"
+          cp core-src/landing.sh "$work/landing.sh"
+          cp core-src/center_install.sh "$work/center.sh"
+          python3 src/prepare.py "$work/host.sh" "$work/landing.sh" "$work/center.sh"
+          bash -n "$work/host.sh"
+          sh -n "$work/landing.sh"
+          bash -n "$work/center.sh"
+      - name: Commit production changes
+        run: |
+          set -Eeuo pipefail
+          git config user.name weizhiok
+          git config user.email 165847692+weizhiok@users.noreply.github.com
+          rm -f tools/apply_reentrant_installer.py trigger-reentrant-installer.txt .github/workflows/apply-reentrant-installer.yml
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          find . -type f -name '*.pyc' -delete
+          git add -A
+          git commit -m "Make installer repeatable and role-aware"
+          git push origin HEAD:agent/reentrant-role-installer
