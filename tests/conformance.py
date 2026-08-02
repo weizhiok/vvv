@@ -62,6 +62,7 @@ def test_menu_and_front_loaded_parameters():
     require('primary=center-relay' in text, '订阅中心与中转主机不能合并为 center-relay')
     require('register_current_main_role' in text, '追加角色后没有按最终角色重新注册')
     require('bash "$BASE_DIR/register_sync.sh" landing "$code"' in text, '中转副机没有自动注册')
+    require('landing_rc=$?' in text and '已停止后续步骤' in text, '落地安装失败后仍会继续执行并覆盖首次错误')
     require('write_roles true true false true all' not in text, '仍保留旧 all 主角色')
 
 
