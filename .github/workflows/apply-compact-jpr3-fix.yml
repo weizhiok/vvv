@@ -1,0 +1,43 @@
+name: Apply compact JPR3 fix
+on:
+  push:
+    branches: [agent/fix-compact-jpr3-and-menu-labels]
+    paths:
+      - 'trigger-compact-jpr3-fix.txt'
+permissions:
+  contents: write
+concurrency:
+  group: compact-jpr3-fix
+  cancel-in-progress: true
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-compact-jpr3-and-menu-labels
+          fetch-depth: 0
+      - name: Apply production patch
+        run: python3 tools/apply_compact_jpr3_fix.py
+      - name: Validate compact JPR3 and menus
+        run: |
+          set -Eeuo pipefail
+          bash -n core-src/bootstrap.sh
+          bash -n core-src/host.sh
+          sh -n core-src/landing.sh
+          python3 -m py_compile tests/conformance.py src/prepare.py
+          python3 tests/conformance.py
+          ! grep -Fq '安装中转副机（通过主机代理）' core-src/bootstrap.sh
+          grep -Fq '新建 VPS 副机中转线路' core-src/host.sh
+      - name: Commit production changes
+        run: |
+          set -Eeuo pipefail
+          git config user.name weizhiok
+          git config user.email 165847692+weizhiok@users.noreply.github.com
+          rm -f tools/apply_compact_jpr3_fix.py trigger-compact-jpr3-fix.txt .github/workflows/apply-compact-jpr3-fix.yml
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          find . -type f -name '*.pyc' -delete
+          git add -A
+          git commit -m "Fix truncated JPR3 landing installation and menu labels"
+          git push origin HEAD:agent/fix-compact-jpr3-and-menu-labels
