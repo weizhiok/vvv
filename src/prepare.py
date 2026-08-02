@@ -9,6 +9,28 @@ if len(sys.argv) != 4:
 host, landing, center = map(Path, sys.argv[1:])
 h = host.read_text(encoding='utf-8')
 
+# Current repository sources are shipped in their final, parameterized form.
+# Keep legacy template conversion below for older source snapshots, while making
+# the build step idempotent for repeatable installs and validation.
+if 'VVV_PREPARED_SOURCE=1' in h:
+    l = landing.read_text(encoding='utf-8')
+    c = center.read_text(encoding='utf-8')
+    required_host = (
+        'DEFAULT_SNI="${VVV_REALITY_SNI:-www.softbank.jp}"',
+        'HY2_LIMIT_MBPS="${VVV_HY2_LIMIT_MBPS:-50}"',
+        'temporary_nodes',
+        'ignore_client_bandwidth',
+    )
+    for token in required_host:
+        if token not in h:
+            raise SystemExit('已参数化主机源码缺少必要字段：' + token)
+    if 'PAIRING_KEY="${VVV_PAIRING_KEY:-' not in l:
+        raise SystemExit('已参数化副机源码缺少预载 JPR3 字段')
+    for required in ('VVV_SUB_DOMAIN', 'VVV_SUB_PORT', 'VVV_SUB_TRANSPORT', 'VVV_SUB_SUFFIX', 'client_adapters.py', 'center_transport.sh'):
+        if required not in c:
+            raise SystemExit('订阅中心源码缺少必要字段：' + required)
+    raise SystemExit(0)
+
 
 def replace_once(text, old, new, label):
     if old not in text:
@@ -44,7 +66,7 @@ old = '''    local key_output v_private v_public short_id uuid
 new = '''    local key_output v_private v_public short_id uuid reserve_json i slot_uuid slot_email
     uuid="$(new_uuid)"
     reserve_json='[]'
-    for i in $(seq 1 64); do
+    for i in $(seq 1 256); do
       slot_uuid="$(new_uuid)"; slot_email="reserve-$(printf '%02d' "$i")@relay.local"
       reserve_json="$(jq --arg slot "v$(printf '%02d' "$i")" --arg uuid "$slot_uuid" --arg email "$slot_email" '. + [{slot:$slot,uuid:$uuid,email:$email,assigned_id:null}]' <<<"$reserve_json")"
     done
@@ -91,8 +113,8 @@ slot_helpers = r'''vvv_event_backup() {
 
 allocate_vless_slot() {
   local slot_json
-  slot_json="$(jq -c '[.vless.reserve_users[] | select(.assigned_id==null)][0] // empty' "$STATE_FILE")"
-  [[ -n "$slot_json" ]] || fail "VLESS 可用固定凭证槽位已用尽（已分配或退役共 64 条）。"
+  slot_json="$(jq -c '[.vless.reserve_users[] | select(.assigned_id==null and (.retired // false)==false)][0] // empty' "$STATE_FILE")"
+  [[ -n "$slot_json" ]] || fail "VLESS 可用固定凭证槽位已用尽（已分配或退役共 256 条）。"
   ALLOC_VLESS_SLOT="$(jq -r '.slot' <<<"$slot_json")"
   ALLOC_VLESS_UUID="$(jq -r '.uuid' <<<"$slot_json")"
   ALLOC_VLESS_EMAIL="$(jq -r '.email' <<<"$slot_json")"
@@ -258,7 +280,7 @@ old = '''    obfs="$(random_secret)"
 '''
 new = '''    obfs="$(random_secret)"
     reserve_json='[]'
-    for i in $(seq 1 64); do
+    for i in $(seq 1 256); do
       slot_name="reserve-h$(printf '%02d' "$i")"
       slot_password="$(random_secret)"
       reserve_json="$(jq --arg slot "h$(printf '%02d' "$i")" --arg name "$slot_name" --arg password "$slot_password" --argjson local_port "$((21000+i))" '. + [{slot:$slot,name:$name,password:$password,local_port:$local_port,assigned_id:null}]' <<<"$reserve_json")"
@@ -281,7 +303,7 @@ hy2_main = r'''build_sing_config() {
 import json, sys
 from pathlib import Path
 state=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-limit_mbps=int(sys.argv[3])
+limit_mbps=int(state.get("hy2_limit_mbps") or sys.argv[3])
 if state["protocol_mode"] not in ("dual","hy2"):
     Path(sys.argv[2]).write_text("{}\n",encoding="utf-8")
     raise SystemExit
@@ -291,7 +313,7 @@ users=[{"name":h["direct_user"]["name"],"password":h["direct_user"]["password"]}
 users.extend({"name":slot["name"],"password":slot["password"]} for slot in reserve)
 inbounds=[{
  "type":"hysteria2","tag":"hy2-in","listen":"0.0.0.0","listen_port":port,
- "up_mbps":limit_mbps,"down_mbps":limit_mbps,"users":users,
+ "up_mbps":limit_mbps,"down_mbps":limit_mbps,"ignore_client_bandwidth":True,"users":users,
  "obfs":{"type":"salamander","password":h["obfs_password"]},
  "tls":{"enabled":True,"server_name":h["server_name"],"alpn":["h3"],"min_version":"1.3",
         "certificate_path":h["certificate_path"],"key_path":h["key_path"]}
@@ -353,8 +375,8 @@ h = replace_once(h, unit_marker, unit_replacement, 'HY2 槽位 systemd 模板')
 
 hy2_helpers = r'''allocate_hy2_slot() {
   local slot_json
-  slot_json="$(jq -c '[.hy2.reserve_users[] | select(.assigned_id==null)][0] // empty' "$STATE_FILE")"
-  [[ -n "$slot_json" ]] || fail "Hysteria 2 可用固定凭证槽位已用尽（已分配或退役共 64 条）。"
+  slot_json="$(jq -c '[.hy2.reserve_users[] | select(.assigned_id==null and (.retired // false)==false)][0] // empty' "$STATE_FILE")"
+  [[ -n "$slot_json" ]] || fail "Hysteria 2 可用固定凭证槽位已用尽（已分配或退役共 256 条）。"
   ALLOC_HY2_SLOT="$(jq -r '.slot' <<<"$slot_json")"
   ALLOC_HY2_USER="$(jq -r '.name' <<<"$slot_json")"
   ALLOC_HY2_PASSWORD="$(jq -r '.password' <<<"$slot_json")"
@@ -401,13 +423,17 @@ hy2_runtime = r'''build_hy2_slot_configs() {
   python3 - "$state_path" "$out_dir" "$HY2_LIMIT_MBPS" <<'PY_HY2_SLOTS'
 import json,sys
 from pathlib import Path
-state=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8')); out=Path(sys.argv[2]); limit=int(sys.argv[3])
+state=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8')); out=Path(sys.argv[2]); limit=int(state.get('hy2_limit_mbps') or sys.argv[3])
 h=state.get('hy2') or {}; slots={x['slot']:x for x in h.get('reserve_users',[])}
 relays={x.get('id'):x for x in state.get('relays',[])}
+temps={x.get('id'):x for x in state.get('temporary_nodes',[])}
 private_rule={"ip_is_private":True,"action":"reject","method":"drop"}
 for slot_id,slot in slots.items():
     assigned=slot.get('assigned_id')
     relay=relays.get(assigned)
+    if not relay and assigned in temps:
+        temp=temps[assigned]
+        relay=relays.get(temp.get('source_id')) if temp.get('source_type')=='vps' else None
     if not relay: continue
     rh=relay.get('hy2')
     if not rh: continue
@@ -555,16 +581,20 @@ from pathlib import Path
 state=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8')); out=Path(sys.argv[2])
 v=state.get('vless') or {}; slots={x['slot']:x for x in v.get('reserve_users',[])}
 relays={x.get('id'):x for x in state.get('relays',[])}; upstreams={x.get('id'):x for x in state.get('upstream_relays',[])}
+temps={x.get('id'):x for x in state.get('temporary_nodes',[])}
 for slot_id,slot in slots.items():
     assigned=slot.get('assigned_id')
     if not assigned: continue
+    source_id=assigned
+    if assigned in temps:
+        source_id=temps[assigned].get('source_id')
     inbound={"tag":"slot-in","listen":"127.0.0.1","port":int(slot['local_port']),"protocol":"socks","settings":{"udp":False},"sniffing":{"enabled":True,"destOverride":["http","tls"],"routeOnly":True}}
-    if assigned in relays:
-        relay=relays[assigned]; rv=relay.get('vless')
+    if source_id in relays:
+        relay=relays[source_id]; rv=relay.get('vless')
         if not rv: continue
         outbound={"tag":"slot-out","protocol":"vless","settings":{"address":relay['remote_ip'],"port":int(relay['remote_port']),"id":rv['outbound_uuid'],"encryption":"none","flow":"xtls-rprx-vision"},"streamSettings":{"method":"raw","security":"reality","realitySettings":{"serverName":state['sni'],"fingerprint":"chrome","password":rv['remote_reality']['public_key'],"shortId":rv['remote_reality']['short_id'],"spiderX":""}}}
-    elif assigned in upstreams:
-        relay=upstreams[assigned]
+    elif source_id in upstreams:
+        relay=upstreams[source_id]
         outbound={"tag":"slot-out","protocol":relay['proxy_protocol'],"settings":{"address":relay['host'],"port":int(relay['port']),"user":relay['username'],"pass":relay['password']}}
     else:
         continue

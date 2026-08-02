@@ -49,7 +49,7 @@ import json,sys
 from pathlib import Path
 try:
     s=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
-    assert s.get('schema') == 3
+    assert s.get('schema') in (3,4)
     assert s.get('role') == 'japan-hub'
     assert s.get('protocol_mode') in ('dual','vless','hy2')
     assert isinstance(s.get('listen_port'), int)
@@ -74,43 +74,51 @@ PY_LANDING_VALID
 
 migrate_center_config_if_needed() {
   [[ -s "$CENTER_CFG" ]] || return 0
-  [[ "$(json_value "$CENTER_CFG" schema 0)" == 2 ]] || return 0
-  if [[ ! -s /etc/vvv-sub/registration.code || ! -x /usr/local/sbin/vvv-center ||
-        ! -x /usr/local/lib/vvv/sub_center.py || ! -f /etc/systemd/system/vvv-sub.service ||
-        ! -f /etc/systemd/system/caddy.service || ! -s /etc/caddy/Caddyfile ]]; then
+  local schema suffix backup_name
+  schema="$(json_value "$CENTER_CFG" schema 0)"
+  [[ "$schema" == 2 || "$schema" == 3 ]] || return 0
+  if [[ ! -x /usr/local/sbin/vvv-center || ! -x /usr/local/lib/vvv/sub_center.py ||
+        ! -f /etc/systemd/system/vvv-sub.service || ! -f /etc/systemd/system/caddy.service ||
+        ! -s /etc/caddy/Caddyfile ]]; then
     echo "检测到旧版订阅中心残留不完整，暂不迁移；选择带订阅中心的角色后将先备份并按中断恢复流程处理。"
     return 0
   fi
-  local suffix
-  suffix="$(python3 - <<'PY_SUFFIX'
+  suffix="$(json_value "$CENTER_CFG" subscription_suffix "")"
+  if [[ "$schema" == 2 || ! "$suffix" =~ ^[A-Za-z0-9]{6,32}$ ]]; then
+    suffix="$(python3 - <<'PY_SUFFIX'
 import secrets,string
 alphabet=string.ascii_letters+string.digits
 print(''.join(secrets.choice(alphabet) for _ in range(8)))
 PY_SUFFIX
 )"
-  cp -a "$CENTER_CFG" /etc/vvv-sub/config.schema2-backup.json
+  fi
+  backup_name="/etc/vvv-sub/config.schema${schema}-backup.json"
+  cp -a "$CENTER_CFG" "$backup_name"
   python3 - "$CENTER_CFG" "$suffix" <<'PY_MIGRATE_CENTER'
 import json,os,sys,tempfile
 path,suffix=sys.argv[1:]
-with open(path,encoding='utf-8') as f:
-    obj=json.load(f)
+with open(path,encoding='utf-8') as f: obj=json.load(f)
+old_schema=int(obj.get('schema') or 0)
 base=str(obj.get('base_url','')).rstrip('/')
-mode=obj.get('mode') if obj.get('mode') in ('domain','ip') else ('domain' if obj.get('domain') else 'ip')
-obj['schema']=3
-obj['address_mode']=mode
-obj['transport_mode']='direct-https'
+mode=obj.get('address_mode') or obj.get('mode') or ('domain' if obj.get('domain') else 'ip')
+if old_schema==2:
+    obj['transport_mode']='direct-https'
+obj['schema']=4
+obj['address_mode']=mode if mode in ('domain','ip') else ('domain' if obj.get('domain') else 'ip')
 obj['subscription_suffix']=suffix
 obj['subscription_url']=base+'/'+suffix
-obj.pop('mode',None)
-obj.pop('subscription_token',None)
+obj['listen_host']='0.0.0.0'
+obj['listen_port']=18081
+obj['api_base_url']=f"http://{obj.get('public_ip','')}:18081"
+for key in ('mode','subscription_token','https_pinned','https_upgraded_at'):
+    obj.pop(key,None)
 fd,tmp=tempfile.mkstemp(prefix='.config-migrate.',dir=os.path.dirname(path))
 with os.fdopen(fd,'w',encoding='utf-8') as f:
     json.dump(obj,f,ensure_ascii=False,indent=2); f.write('\n')
 os.chmod(tmp,0o600); os.replace(tmp,path)
 PY_MIGRATE_CENTER
-  touch /etc/vvv-sub/.schema3-migrated
-  echo "检测到旧版订阅中心配置，已原地升级为统一订阅地址；令牌、注册主机、节点、备份和证书均保留。"
-  echo "新的8位随机订阅后缀：$suffix"
+  touch /etc/vvv-sub/.schema4-migrated
+  echo "检测到 schema ${schema} 订阅中心，已原地升级到 schema 4；注册主机、节点、备份、证书和传输方式均保留。"
 }
 
 center_config_valid() {
@@ -120,7 +128,7 @@ import json,re,sys
 from pathlib import Path
 try:
     s=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
-    assert s.get('schema') == 3
+    assert s.get('schema') == 4
     assert s.get('address_mode') in ('domain','ip')
     assert s.get('transport_mode') in ('direct-http','direct-https','tunnel')
     suffix=str(s.get('subscription_suffix',''))
@@ -131,6 +139,7 @@ try:
     assert s.get('subscription_url') == base.rstrip('/') + '/' + suffix
     assert int(s.get('public_port',0)) > 0
     assert s.get('master_token') and s.get('recovery_password')
+    assert str(s.get('api_base_url','')).startswith('http://')
 except Exception:
     raise SystemExit(1)
 PY_CENTER_VALID
@@ -190,6 +199,7 @@ show_install_menu() {
   echo "3. 安装中转主机 + 自身代理"
   echo "4. 安装中转副机"
   echo "5. 安装直连代理"
+  echo "6. 从云备份恢复"
   echo "0. 退出"
 }
 
@@ -197,7 +207,8 @@ load_existing_proxy_parameters() {
   VVV_PROTOCOL_MODE="$(json_value "$MAIN_STATE" protocol_mode dual)"
   VVV_PROXY_PORT="$(json_value "$MAIN_STATE" listen_port 443)"
   VVV_REALITY_SNI="$(json_value "$MAIN_STATE" sni www.softbank.jp)"
-  export VVV_PROTOCOL_MODE VVV_PROXY_PORT VVV_REALITY_SNI
+  VVV_HY2_LIMIT_MBPS="$(json_value "$MAIN_STATE" hy2_limit_mbps 50)"
+  export VVV_PROTOCOL_MODE VVV_PROXY_PORT VVV_REALITY_SNI VVV_HY2_LIMIT_MBPS
   REUSE_PROXY=1
 }
 
@@ -236,35 +247,31 @@ backup_and_reset_partial_center() {
   echo "不完整订阅中心已清理；残留备份：$backup_dir"
 }
 
-ask_code(){
-  local __var=$1 prompt=$2 value
-  read -r -p "$prompt（直接回车表示暂不注册）：" value
-  printf -v "$__var" '%s' "$value"
+validate_vvc1(){
+  python3 "$BASE_DIR/sync_agent.py" validate-code "$1" >/dev/null 2>&1
 }
 
-ask_center_address(){
-  local __var=$1 value
-  read -r -p "请输入订阅中心 IP 地址或域名（直接回车暂不注册，默认 HTTPS 端口 8443）：" value
-  value="${value//[[:space:]]/}"
-  printf -v "$__var" '%s' "$value"
+ask_optional_vvc1(){
+  local __var="$1" value
+  while true; do
+    read -r -p "请输入订阅中心对接码（按回车跳过）：" value
+    value="${value//[[:space:]]/}"
+    if [[ -z "$value" ]]; then printf -v "$__var" '%s' ''; return; fi
+    if [[ "$value" == JPR3.* ]]; then echo "对接码错误：这是中转副机安装密钥，不能用于注册订阅中心。"; continue; fi
+    if validate_vvc1 "$value"; then printf -v "$__var" '%s' "$value"; return; fi
+    echo "对接码错误：必须输入完整有效的 VVC1 订阅中心对接码，或直接回车跳过。"
+  done
 }
 
 ask_required_jpr3(){
   while true; do
     read -r -p "请输入完整 JPR3 对接密钥（中转模式必填）：" key
     key="${key//[[:space:]]/}"
-    if [[ -z "$key" ]]; then
-      echo "中转模式必须输入 JPR3 对接密钥，不能跳过。"
-      continue
-    fi
-    if ((${#key} >= 4095)); then
-      echo "对接密钥已达到终端单行输入上限，内容很可能被截断。"
-      echo "请先在中转主机重新运行统一安装命令刷新程序，再重新查看并复制新的压缩 JPR3 密钥。"
-      continue
-    fi
+    if [[ -z "$key" ]]; then echo "中转模式必须输入 JPR3 对接密钥，不能跳过。"; continue; fi
+    if [[ "$key" == VVC1.* ]]; then echo "对接码错误：这是订阅中心对接码，不能用于安装中转副机。"; continue; fi
+    if ((${#key} >= 4095)); then echo "对接密钥已达到终端单行输入上限，内容很可能被截断。"; continue; fi
     if [[ ! "$key" =~ ^JPR3\.[A-Za-z0-9_-]+\.[0-9a-f]{20}$ ]]; then
-      echo "对接密钥格式错误或复制不完整，必须是完整的 JPR3.数据.校验值。"
-      continue
+      echo "对接密钥格式错误或复制不完整，必须是完整的 JPR3.数据.校验值。"; continue
     fi
     break
   done
@@ -306,7 +313,17 @@ ask_proxy_parameters(){
       echo "REALITY 伪装域名格式不正确，请重新输入。"
     done
   fi
-  export VVV_PROTOCOL_MODE VVV_PROXY_PORT VVV_REALITY_SNI
+  VVV_HY2_LIMIT_MBPS=50
+  if [[ "$VVV_PROTOCOL_MODE" != vless ]]; then
+    while true; do
+      read -r -p "请输入 Hysteria 2 每连接服务器强制限速 [默认 50M]：" input
+      input="${input//[[:space:]]/}"; [[ -n "$input" ]] || input=50
+      input="${input%[Mm]}"
+      if [[ "$input" =~ ^[0-9]+$ ]] && ((10#$input>=30 && 10#$input<=100)); then VVV_HY2_LIMIT_MBPS="$((10#$input))"; break; fi
+      echo "限速只允许 30-100 的整数，可写 50、50M 或 50m。"
+    done
+  fi
+  export VVV_PROTOCOL_MODE VVV_PROXY_PORT VVV_REALITY_SNI VVV_HY2_LIMIT_MBPS
 }
 
 random_subscription_suffix() {
@@ -332,7 +349,7 @@ ask_center_parameters(){
   echo "1. 直接 HTTPS【默认】"
   echo "   域名由 Caddy 自动申请公共证书；IP 由 Certbot 申请 Let's Encrypt IP 证书。"
   echo "2. 直接 HTTP"
-  echo "   不申请证书，适合频繁重装测试；后期可在 vps 菜单开启 HTTPS。"
+  echo "   不申请证书，仅限临时调试；请勿长期使用。"
   echo "3. 固定 HTTPS 域名（Cloudflare Tunnel）"
   echo "   公共地址使用标准 443，VPS 只运行本地 HTTP；需提前创建 Tunnel 公共主机名。"
   while true; do
@@ -458,7 +475,7 @@ enable_relay(){
 refresh_center_runtime_code() {
   local changed=0 file target mode
   install -d -m700 /usr/local/lib/vvv
-  for file in sub_center.py backup_manager.py rclone_manager.sh client_adapters.py adapter_manager.py center_transport.sh; do
+  for file in sub_center.py backup_manager.py rclone_manager.sh client_adapters.py adapter_manager.py center_transport.sh restore_manager.py diagnostic_report.py node_probe.py; do
     target="/usr/local/lib/vvv/$file"
     if [[ ! -f "$target" ]] || ! cmp -s "$BASE_DIR/$file" "$target"; then
       install -m755 "$BASE_DIR/$file" "$target"
@@ -474,10 +491,10 @@ refresh_center_runtime_code() {
     python3 /usr/local/lib/vvv/client_adapters.py >/dev/null
     timeout 75 systemctl restart vvv-sub.service
   fi
-  if [[ -f /etc/vvv-sub/.schema3-migrated ]]; then
+  if [[ -f /etc/vvv-sub/.schema4-migrated ]]; then
     echo "正在将旧四路径入口无损切换为新的统一订阅地址。"
     bash /usr/local/lib/vvv/center_transport.sh reapply || fail "旧订阅中心配置已迁移，但统一入口切换失败；原数据和schema2备份均已保留。"
-    rm -f /etc/vvv-sub/.schema3-migrated
+    rm -f /etc/vvv-sub/.schema4-migrated
   fi
 }
 
@@ -581,6 +598,9 @@ install_unified_manager(){
   install -m755 "$BASE_DIR/vvv_manager.sh" /usr/local/lib/vvv/vvv_manager.sh
   install -m755 "$BASE_DIR/register_sync.sh" /usr/local/lib/vvv/register_sync.sh
   install -m755 "$BASE_DIR/sync_agent.py" /usr/local/lib/vvv/sync_agent.py
+  install -m755 "$BASE_DIR/restore_manager.py" /usr/local/lib/vvv/restore_manager.py
+  install -m755 "$BASE_DIR/diagnostic_report.py" /usr/local/lib/vvv/diagnostic_report.py
+  install -m755 "$BASE_DIR/node_probe.py" /usr/local/lib/vvv/node_probe.py
   cat > /usr/local/sbin/vps <<'EOF_VPS'
 #!/usr/bin/env bash
 exec /usr/local/lib/vvv/vvv_manager.sh "$@"
@@ -615,17 +635,21 @@ show_parameter_summary(){
     3) role_name="安装中转主机 + 自身代理";;
     4) role_name="安装中转副机";;
     5) role_name="安装直连代理";;
+    6) role_name="从云备份恢复";;
   esac
   echo
   echo "========== 安装参数总览 =========="
   echo "安装角色：$role_name"
-  if [[ "$choice" == 4 ]]; then
+  if [[ "$choice" == 6 ]]; then
+    echo "云盘目录：vvv/（重新授权后选择恢复日期）"
+  elif [[ "$choice" == 4 ]]; then
     echo "JPR3 密钥：已填写（${#key} 个字符）"
   else
     case "$VVV_PROTOCOL_MODE" in dual) protocol_name="VLESS + Hysteria 2";; vless) protocol_name="仅 VLESS";; hy2) protocol_name="仅 Hysteria 2";; esac
     echo "代理协议：$protocol_name$([[ "$REUSE_PROXY" == 1 ]] && echo '（复用现有）')"
     echo "代理端口：$VVV_PROXY_PORT"
     [[ "$VVV_PROTOCOL_MODE" == hy2 ]] || echo "REALITY 伪装域名：$VVV_REALITY_SNI"
+    [[ "$VVV_PROTOCOL_MODE" == vless ]] || echo "Hysteria 2 每连接服务器强制限速：${VVV_HY2_LIMIT_MBPS}M"
     if [[ "$choice" == 1 || "$choice" == 2 ]]; then
       case "$VVV_SUB_TRANSPORT" in
         direct-http) transport_label="直接 HTTP"; scheme=http;;
@@ -643,9 +667,9 @@ show_parameter_summary(){
       echo "统一订阅地址：${endpoint}"
       echo "订阅后缀：${VVV_SUB_SUFFIX}"
     elif [[ "$choice" == 3 ]]; then
-      [[ -n "$code" ]] && echo "订阅中心接入码：已填写或将使用本机订阅中心" || echo "订阅中心接入码：未填写（独立使用）"
+      [[ -n "$code" ]] && echo "订阅中心 VVC1：已填写或将使用本机订阅中心" || echo "订阅中心 VVC1：未填写（独立使用）"
     elif [[ "$choice" == 5 ]]; then
-      [[ -n "$center_address" ]] && echo "订阅中心地址：$center_address（自动注册直连节点）" || echo "订阅中心地址：未填写（本次暂不注册）"
+      [[ -n "$code" ]] && echo "订阅中心 VVC1：已填写" || echo "订阅中心 VVC1：未填写（本次暂不注册）"
     fi
   fi
   echo "=================================="
@@ -656,18 +680,17 @@ REUSE_PROXY=0
 REUSE_CENTER=0
 code=""
 key=""
-center_address=""
 VVV_CF_TUNNEL_TOKEN=""
 
 migrate_center_config_if_needed
-if [[ -f /etc/vvv-sub/.schema3-migrated ]]; then
+if [[ -f /etc/vvv-sub/.schema4-migrated ]]; then
   refresh_center_runtime_code
   ensure_center_runtime || fail "旧订阅中心配置已迁移，但新统一入口服务无法启动；原数据和 schema2 备份均已保留。"
 fi
 show_install_menu
 while true; do
   read -r -p "请输入编号：" choice
-  case "$choice" in 0|1|2|3|4|5) break ;; *) echo "请输入 0-5。" ;; esac
+  case "$choice" in 0|1|2|3|4|5|6) break ;; *) echo "请输入 0-6。" ;; esac
 done
 [[ "$choice" == 0 ]] && exit 0
 
@@ -687,6 +710,11 @@ case "$choice" in
       fail "中转副机不能与本机代理、订阅中心或中转主机安装在同一台 VPS。菜单仍可重新进入。"
     fi
     ;;
+  6)
+    if main_state_valid || center_complete || landing_state_valid; then
+      fail "检测到当前 VPS 已有完整 VVV 模块。为避免误覆盖，云恢复只允许在干净系统或不完整残留环境执行。"
+    fi
+    ;;
 esac
 
 case "$choice" in
@@ -700,22 +728,15 @@ case "$choice" in
     fi
     ;;
   3)
-    if center_complete; then
-      code="$(cat /etc/vvv-sub/registration.code)"
-    else
-      ask_code code "请输入订阅中心接入码"
-    fi
+    if center_complete; then code="$(cat /etc/vvv-sub/registration.code)"; else ask_optional_vvc1 code; fi
     ;;
   4)
     ask_required_jpr3
     ;;
   5)
-    if center_complete; then
-      center_address="本机订阅中心"
-    else
-      ask_center_address center_address
-    fi
+    if center_complete; then code="$(cat /etc/vvv-sub/registration.code)"; else ask_optional_vvc1 code; fi
     ;;
+  6) ;;
 esac
 
 show_parameter_summary
@@ -749,11 +770,28 @@ case "$choice" in
   5)
     ensure_host
     rebuild_roles_from_system
-    if center_complete; then
-      register_current_main_role
-    else
-      bash "$BASE_DIR/register_sync.sh" direct "" "$center_address"
+    register_current_main_role "$code"
+    ;;
+  6)
+    python3 "$BASE_DIR/restore_manager.py"
+    if main_state_valid; then
+      VVV_PROTOCOL_MODE="$(json_value "$MAIN_STATE" protocol_mode dual)"
+      VVV_PROXY_PORT="$(json_value "$MAIN_STATE" listen_port 443)"
+      VVV_REALITY_SNI="$(json_value "$MAIN_STATE" sni www.softbank.jp)"
+      VVV_HY2_LIMIT_MBPS="$(json_value "$MAIN_STATE" hy2_limit_mbps 50)"
+      export VVV_PROTOCOL_MODE VVV_PROXY_PORT VVV_REALITY_SNI VVV_HY2_LIMIT_MBPS
+      bash "$BASE_DIR/host.sh"
     fi
+    if [[ -s "$CENTER_CFG" ]]; then VVV_RESTORE_MODE=1 bash "$BASE_DIR/center_install.sh"; fi
+    rebuild_roles_from_system
+    if center_complete; then register_current_main_role; elif [[ -s /etc/vvv/client.json ]]; then systemctl start vvv-sync.service || true; fi
+    echo
+    echo "========== 恢复后逐节点检测 =========="
+    restore_log="$(jq -r '.log // empty' /run/vvv-restore-result.json 2>/dev/null || true)"
+    if [[ -n "$restore_log" ]]; then python3 "$BASE_DIR/node_probe.py" | tee -a "$restore_log" || true; else python3 "$BASE_DIR/node_probe.py" || true; fi
+    python3 "$BASE_DIR/backup_manager.py" create restore-completed --force >/dev/null || true
+    echo "云备份恢复和当前最新版程序重建完成。"
+    [[ ! -s /run/vvv-restore-result.json ]] || jq . /run/vvv-restore-result.json
     ;;
 esac
 

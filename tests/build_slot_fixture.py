@@ -16,12 +16,12 @@ remote_pin = base64.b64encode(bytes(range(32))).decode()
 vless_slots = [
     {'slot': f'v{i:02d}', 'uuid': f'00000000-0000-4000-8000-{i:012d}',
      'email': f'reserve-{i:02d}@relay.local', 'local_port': 22000 + i, 'assigned_id': None}
-    for i in range(1, 65)
+    for i in range(1, 257)
 ]
 hy2_slots = [
     {'slot': f'h{i:02d}', 'name': f'reserve-h{i:02d}', 'password': f'hy2-slot-password-{i:02d}',
      'local_port': 21000 + i, 'assigned_id': None}
-    for i in range(1, 65)
+    for i in range(1, 257)
 ]
 base = {
     'schema': 3, 'role': 'japan-hub', 'protocol_mode': 'dual',
@@ -78,5 +78,31 @@ active['upstream_relays'].append({
     'last_exit_ip': '192.0.2.50', 'created_at': '2026-08-01T00:00:02+00:00', 'updated_at': '2026-08-01T00:00:02+00:00',
 })
 active['updated_at'] = '2026-08-01T00:00:02+00:00'
+
+temp = json.loads(json.dumps(active))
+temp['vless']['reserve_users'][2]['assigned_id'] = 'temp-vps-audit'
+temp['hy2']['reserve_users'][1]['assigned_id'] = 'temp-vps-audit'
+temp['vless']['reserve_users'][3]['assigned_id'] = 'temp-upstream-audit'
+temp['temporary_nodes'] = [
+    {
+        'id': 'temp-vps-audit', 'name': 'TEMP-SG-AUDIT', 'source_type': 'vps',
+        'source_id': 'relay-audit', 'source_name': 'SG-AUDIT',
+        'vless': {'reserve_slot': 'v03', 'client_uuid': temp['vless']['reserve_users'][2]['uuid'],
+                  'client_email': temp['vless']['reserve_users'][2]['email']},
+        'hy2': {'reserve_slot': 'h02', 'client_user': temp['hy2']['reserve_users'][1]['name'],
+                'client_password': temp['hy2']['reserve_users'][1]['password']},
+        'created_at': '2026-08-01T00:01:00+00:00', 'expires_ts': 4102444800,
+        'expires_at': '2100-01-01T00:00:00+00:00',
+    },
+    {
+        'id': 'temp-upstream-audit', 'name': 'TEMP-HTTP-AUDIT', 'source_type': 'upstream',
+        'source_id': 'upstream-audit', 'source_name': 'HTTP-AUDIT',
+        'vless': {'reserve_slot': 'v04', 'client_uuid': temp['vless']['reserve_users'][3]['uuid'],
+                  'client_email': temp['vless']['reserve_users'][3]['email']},
+        'hy2': None, 'created_at': '2026-08-01T00:01:01+00:00', 'expires_ts': 4102444800,
+        'expires_at': '2100-01-01T00:00:00+00:00',
+    },
+]
 (out / 'state-empty.json').write_text(json.dumps(empty, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 (out / 'state-active.json').write_text(json.dumps(active, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+(out / 'state-temp.json').write_text(json.dumps(temp, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')

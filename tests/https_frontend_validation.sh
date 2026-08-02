@@ -25,7 +25,7 @@ cat > "$WORK/http.Caddyfile" <<'EOF'
 }
 
 :18081 {
-  @allowed path /Abc12345 /api/v1/* /health
+  @allowed path /Abc12345 /health
   handle @allowed {
     respond "http-ok" 200
   }
@@ -42,7 +42,7 @@ cat > "$WORK/tunnel.Caddyfile" <<'EOF'
 }
 
 http://127.0.0.1:18082 {
-  @allowed path /Abc12345 /api/v1/* /health
+  @allowed path /Abc12345 /health
   handle @allowed {
     respond "tunnel-ok" 200
   }
@@ -65,7 +65,7 @@ sub.example.com:18443 {
     }
   }
 
-  @allowed path /Abc12345 /api/v1/* /health
+  @allowed path /Abc12345 /health
   handle @allowed {
     respond "domain-ok" 200
   }
@@ -98,7 +98,7 @@ http://127.0.0.1:18080 {
 https://127.0.0.1:18444 {
   tls $WORK/ip.crt $WORK/ip.key
 
-  @allowed path /Abc12345 /api/v1/* /health
+  @allowed path /Abc12345 /health
   handle @allowed {
     respond "ip-ok" 200
   }
@@ -129,6 +129,8 @@ done
 curl -fsS http://127.0.0.1:18081/Abc12345 | grep -qx http-ok
 curl -fsS http://127.0.0.1:18082/Abc12345 | grep -qx tunnel-ok
 ! curl -fsS http://127.0.0.1:18081/r/legacy/c >/dev/null 2>&1
+! curl -fsS http://127.0.0.1:18081/api/v1/register >/dev/null 2>&1
+! curl -fsS http://127.0.0.1:18082/api/v1/sync >/dev/null 2>&1
 
 echo 'UNIFIED HTTP HTTPS AND TUNNEL FRONTEND VALIDATION PASSED'
 echo 'CERTBOT IP CERTIFICATE FLAGS VALIDATION PASSED'
