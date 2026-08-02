@@ -120,6 +120,8 @@ detect_installed_modules() {
   center_complete && INST_CENTER=true
   relay_enabled && INST_RELAY=true
   landing_state_valid && INST_LANDING=true
+  # “未安装某模块”是正常检测结果，不能让 set -e 静默退出安装器。
+  return 0
 }
 
 print_mark() {
