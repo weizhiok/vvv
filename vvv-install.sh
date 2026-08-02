@@ -4,7 +4,26 @@ umask 077
 
 RAW="https://raw.githubusercontent.com/weizhiok/vvv/main"
 TMP="$(mktemp -d /tmp/vvv-install.XXXXXX)"
-trap 'rm -rf "$TMP"' EXIT
+SOURCE_TARGET=/usr/local/lib/vvv-source
+SOURCE_STAGING=""
+SOURCE_BACKUP=""
+SOURCE_SWAP_COMMITTED=0
+
+cleanup(){
+  local rc=$?
+  if (( SOURCE_SWAP_COMMITTED == 0 )) && [[ -n "$SOURCE_BACKUP" && -e "$SOURCE_BACKUP" ]]; then
+    if [[ ! -e "$SOURCE_TARGET" ]]; then
+      mv "$SOURCE_BACKUP" "$SOURCE_TARGET" 2>/dev/null || true
+    else
+      rm -rf "$SOURCE_BACKUP"
+    fi
+  fi
+  [[ -z "$SOURCE_STAGING" ]] || rm -rf "$SOURCE_STAGING"
+  (( SOURCE_SWAP_COMMITTED == 0 )) || { [[ -z "$SOURCE_BACKUP" ]] || rm -rf "$SOURCE_BACKUP"; }
+  rm -rf "$TMP"
+  return "$rc"
+}
+trap cleanup EXIT
 fail(){ echo "错误：$*" >&2; exit 1; }
 
 [[ $(id -u) -eq 0 ]] || fail "请使用 root 用户运行。"
@@ -27,7 +46,7 @@ if ! command -v curl >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; th
     install -y curl ca-certificates bash python3 || fail "基础依赖安装失败。若提示锁被占用，脚本已等待最多 10 秒，请稍后重新运行。"
 fi
 
-if [[ -e /etc/vvv || -e /etc/jp-relay || -e /etc/vvv-sub || -e /usr/local/lib/vvv-source ]]; then
+if [[ -e /etc/vvv || -e /etc/jp-relay || -e /etc/vvv-sub || -e "$SOURCE_TARGET" ]]; then
   echo "检测到已有或上次中断留下的 VVV 状态。"
   echo "本次不会拒绝运行：将刷新安装源码并始终进入安装菜单，可续装、修复或追加角色。"
 fi
@@ -52,22 +71,30 @@ done
 sh -n "$TMP/app/landing.sh" || fail "landing.sh 语法检查失败。"
 python3 -m py_compile "$TMP/app/sub_center.py" "$TMP/app/sync_agent.py" "$TMP/app/backup_manager.py" || fail "Python 模块语法检查失败。"
 
-# 只有在新源码全部下载并通过语法检查后才原子替换本地副本。
-# SSH 中断不会留下“半套源码”，下次运行仍会刷新源码并进入安装菜单。
-target=/usr/local/lib/vvv-source
-backup="/usr/local/lib/.vvv-source.previous.$$"
+# 新源码先复制到 /usr/local/lib 同一文件系统的暂存目录。
+# 只有暂存副本完整后才切换；切换失败或进程被中断时，EXIT 清理会恢复旧源码。
 install -d -m700 /usr/local/lib
-rm -rf "$backup"
-if [[ -e "$target" ]]; then
-  mv "$target" "$backup"
+SOURCE_STAGING="/usr/local/lib/.vvv-source.staging.$$"
+SOURCE_BACKUP="/usr/local/lib/.vvv-source.previous.$$"
+rm -rf "$SOURCE_STAGING" "$SOURCE_BACKUP"
+cp -a "$TMP/app" "$SOURCE_STAGING" || fail "无法创建同盘源码暂存目录。"
+chmod 700 "$SOURCE_STAGING"/*
+
+if [[ -e "$SOURCE_TARGET" ]]; then
+  mv "$SOURCE_TARGET" "$SOURCE_BACKUP" || fail "无法备份现有安装源码。"
 fi
-mv "$TMP/app" "$target"
-chmod 700 "$target"/*
-rm -rf "$backup"
+if ! mv "$SOURCE_STAGING" "$SOURCE_TARGET"; then
+  [[ ! -e "$SOURCE_BACKUP" ]] || mv "$SOURCE_BACKUP" "$SOURCE_TARGET" 2>/dev/null || true
+  fail "切换新安装源码失败，已尝试恢复旧源码。"
+fi
+SOURCE_SWAP_COMMITTED=1
+rm -rf "$SOURCE_BACKUP"
+SOURCE_BACKUP=""
+SOURCE_STAGING=""
 
 echo "VVV 普通源码下载和语法检查全部通过。"
 if [[ -r /dev/tty ]]; then
-  exec bash "$target/bootstrap.sh" </dev/tty
+  exec bash "$SOURCE_TARGET/bootstrap.sh" </dev/tty
 else
-  exec bash "$target/bootstrap.sh"
+  exec bash "$SOURCE_TARGET/bootstrap.sh"
 fi
