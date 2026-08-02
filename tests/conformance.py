@@ -154,7 +154,7 @@ def test_subscription_renderers():
 def test_backup_policy():
     backup = read('core-src/backup_manager.py')
     rclone = read('core-src/rclone_manager.sh')
-    for token in ('/etc/letsencrypt', '/var/lib/caddy/.local/share/caddy', '/etc/caddy', 'cloudflared.token', 'vvv-cloudflared.service'):
+    for token in ('/etc/letsencrypt', '/var/lib/caddy/.local/share/caddy', '/etc/caddy', 'cloudflared.token', 'vvv-cloudflared.service', 'vvv-ip-cert-renew.timer', 'deploy-ip-cert.sh'):
         require(token in backup, f'云备份未包含证书或Tunnel数据：{token}')
     require('cloud_backup_enabled' in backup and 'CLOUD_ONLY_SOURCES' in backup, '证书/Tunnel数据没有只随云备份启用')
     require("'copyto'" in backup and "'sync'" not in backup, '云上传必须使用copyto')
@@ -196,6 +196,10 @@ def test_transports_and_reentrant_installation():
     for token in ('direct-http', 'direct-https', 'tunnel', 'subscription_suffix', 'subscription_url'):
         require(token in center and token in transport, f'传输架构缺少：{token}')
     require('Cloudflare Tunnel模式必须输入 Tunnel Token' in center, 'Tunnel缺少Token校验')
+    require("cfg.get('transport_mode') == 'tunnel'" in read('core-src/sub_center.py'), '直连模式仍会信任可伪造的Cloudflare来源头')
+    require('valid_ip_cert_files' in transport and 'write_ip_renew_units' in transport and 'seq 1 120' in transport, '证书恢复或公网入口等待机制不完整')
+    require('旧版订阅中心残留不完整' in bootstrap, '不完整schema2中心仍会被提前迁移')
+    require('rm -f "$flag" "$log"' in manager, '请求头调试结束后没有删除临时日志')
     require('http://127.0.0.1:${port}' in transport, 'Tunnel源站不是本地HTTP')
     require('HTTPS 已开启；原 HTTP 订阅入口已失效' in transport, 'HTTP升级HTTPS没有强制失效旧入口')
     require('原 HTTP 配置已恢复并继续可用' in transport, 'HTTPS失败没有事务回滚')

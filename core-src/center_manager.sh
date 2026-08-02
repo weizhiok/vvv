@@ -24,13 +24,13 @@ debug_headers(){
   echo "请在客户端中立即刷新统一订阅地址。"
   echo "监听时间：5 分钟；按 Ctrl+C 可提前结束。"
   echo "Authorization、Cookie、完整订阅后缀等敏感内容会自动隐藏。"
-  trap 'rm -f "$flag"' EXIT INT TERM
+  trap 'rm -f "$flag" "$log"' EXIT INT TERM
   timeout --foreground 300 bash -c '
     tail -n0 -F /run/vvv-sub-header-debug.jsonl 2>/dev/null | while IFS= read -r line; do
       echo; echo "---------- 收到订阅请求 ----------"; printf "%s\n" "$line" | jq .
     done
   ' || true
-  rm -f "$flag"
+  rm -f "$flag" "$log"
   trap - EXIT INT TERM
 }
 change_suffix(){

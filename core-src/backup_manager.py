@@ -35,7 +35,10 @@ CLOUD_ONLY_SOURCES = [
     Path('/var/lib/caddy/.local/share/caddy'),
     Path('/etc/vvv-sub/cloudflared.token'),
     Path('/etc/systemd/system/vvv-cloudflared.service'),
+    Path('/etc/systemd/system/vvv-ip-cert-renew.service'),
+    Path('/etc/systemd/system/vvv-ip-cert-renew.timer'),
     Path('/usr/local/lib/vvv/run-cloudflared.sh'),
+    Path('/usr/local/lib/vvv/deploy-ip-cert.sh'),
 ]
 
 

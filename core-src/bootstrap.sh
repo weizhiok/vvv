@@ -75,6 +75,12 @@ PY_LANDING_VALID
 migrate_center_config_if_needed() {
   [[ -s "$CENTER_CFG" ]] || return 0
   [[ "$(json_value "$CENTER_CFG" schema 0)" == 2 ]] || return 0
+  if [[ ! -s /etc/vvv-sub/registration.code || ! -x /usr/local/sbin/vvv-center ||
+        ! -x /usr/local/lib/vvv/sub_center.py || ! -f /etc/systemd/system/vvv-sub.service ||
+        ! -f /etc/systemd/system/caddy.service || ! -s /etc/caddy/Caddyfile ]]; then
+    echo "检测到旧版订阅中心残留不完整，暂不迁移；选择带订阅中心的角色后将先备份并按中断恢复流程处理。"
+    return 0
+  fi
   local suffix
   suffix="$(python3 - <<'PY_SUFFIX'
 import secrets,string

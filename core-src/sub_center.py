@@ -190,11 +190,14 @@ def auth_token(handler):
 
 
 def request_ip(handler):
-    candidates = [
-        handler.headers.get('CF-Connecting-IP', '').strip(),
+    cfg = read_json(CFG, {}) or {}
+    candidates = []
+    if cfg.get('transport_mode') == 'tunnel':
+        candidates.append(handler.headers.get('CF-Connecting-IP', '').strip())
+    candidates.extend([
         handler.headers.get('X-Forwarded-For', '').split(',')[0].strip(),
         handler.client_address[0],
-    ]
+    ])
     for candidate in candidates:
         if not candidate:
             continue

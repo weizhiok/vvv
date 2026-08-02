@@ -186,13 +186,18 @@ install_certbot(){
   python3 -m venv --clear "$CERTBOT_DIR"
   timeout 600 "$CERTBOT_DIR/bin/pip" install --disable-pip-version-check --no-cache-dir --retries 5 --timeout 30 'certbot>=5.4,<6'
 }
-valid_ip_certificate(){
-  local ip cert
+valid_ip_cert_files(){
+  local cert="$1" key="$2" ip cert_pub key_pub
   ip="$(value '.public_ip')"
-  cert="${CADDY_CERT_DIR}/ip-fullchain.pem"
-  [[ -s "$cert" && -s "${CADDY_CERT_DIR}/ip-privkey.pem" ]] || return 1
+  [[ -s "$cert" && -s "$key" ]] || return 1
   openssl x509 -checkend 43200 -noout -in "$cert" >/dev/null 2>&1 || return 1
-  openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null | grep -Fq "IP Address:${ip}"
+  openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null | grep -Fq "IP Address:${ip}" || return 1
+  cert_pub="$(openssl x509 -in "$cert" -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | sha256sum | awk '{print $1}')"
+  key_pub="$(openssl pkey -in "$key" -pubout -outform DER 2>/dev/null | sha256sum | awk '{print $1}')"
+  [[ -n "$cert_pub" && "$cert_pub" == "$key_pub" ]]
+}
+valid_ip_certificate(){
+  valid_ip_cert_files "${CADDY_CERT_DIR}/ip-fullchain.pem" "${CADDY_CERT_DIR}/ip-privkey.pem"
 }
 write_ip_deploy_hook(){
   local cert_name live_dir
@@ -240,7 +245,18 @@ obtain_ip_certificate(){
   local ip cert_name live_dir log_file
   ip="$(value '.public_ip')"; cert_name="vvv-ip-${ip//./-}"; live_dir="/etc/letsencrypt/live/${cert_name}"
   if valid_ip_certificate; then
-    echo "检测到仍有效且匹配当前 IP 的证书，直接复用。"
+    echo "检测到仍有效且匹配当前 IP 的已部署证书，直接复用。"
+    install_certbot
+    write_ip_deploy_hook
+    write_ip_renew_units
+    return 0
+  fi
+  if valid_ip_cert_files "$live_dir/fullchain.pem" "$live_dir/privkey.pem"; then
+    echo "检测到仍有效的 Certbot IP 证书 lineage，正在恢复部署并重建续期服务。"
+    install_certbot
+    write_ip_deploy_hook
+    /usr/local/lib/vvv/deploy-ip-cert.sh
+    write_ip_renew_units
     return 0
   fi
   install_certbot
@@ -360,7 +376,7 @@ VVV 订阅中心恢复信息
 EOF
   chmod 600 /root/VVV-订阅中心恢复信息.txt
 }
-check_public(){
+check_public_once(){
   local mode base suffix
   mode="$(value '.transport_mode')"; base="$(value '.base_url')"; suffix="$(value '.subscription_suffix')"
   if [[ "$mode" == direct-http ]]; then
@@ -371,6 +387,16 @@ check_public(){
   else
     curl -fsS --connect-timeout 5 --max-time 15 -H 'User-Agent: Clash-Verge-Rev' "${base}/${suffix}" >/dev/null
   fi
+}
+check_public(){
+  local attempt
+  for attempt in $(seq 1 120); do
+    check_public_once && return 0
+    (( attempt % 10 != 0 )) || echo "统一订阅入口仍在准备：已等待 $((attempt*2)) 秒……"
+    sleep 2
+  done
+  echo "统一订阅入口在 240 秒内未通过健康检查。" >&2
+  return 1
 }
 apply_direct_http(){
   open_port "$(value '.public_port')"
