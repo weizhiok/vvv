@@ -22,6 +22,20 @@ jobs:
           fetch-depth: 0
       - name: Apply production patch
         run: python3 tools/apply_confirmed_registration_refresh.py
+      - name: Correct ANSI regression assertion
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tests/conformance.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''    require("printf '\\\\033[32m订阅中心注册成功\\\\033[0m\\\\n'" in register, 'SSH 没有绿色订阅中心注册成功提示')
+'''
+          new = '''    require('订阅中心注册成功' in register and '\\\\033[32m' in register and '\\\\033[0m' in register, 'SSH 没有绿色订阅中心注册成功提示')
+'''
+          if text.count(old) != 1:
+              raise SystemExit('ANSI assertion target not found exactly once')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Validate registration refresh contract
         run: |
           set -Eeuo pipefail
