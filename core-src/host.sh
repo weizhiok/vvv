@@ -319,7 +319,7 @@ upgrade_system_once() {
     -o DPkg::Lock::Timeout=10 \
     -o Acquire::Retries=2 \
     -o Acquire::PDiffs=false \
-    -o Acquire::IndexTargets::deb::Sources::DefaultEnabled=false \
+    -o Acquire::IndexTargets::deb-src::Sources::DefaultEnabled=false \
     update || fail "APT 更新失败。若提示锁被占用，已等待最多 10 秒，请稍后重新运行。"
   apt-get \
     -o DPkg::Lock::Timeout=10 \
@@ -1224,7 +1224,7 @@ elif kind=="upstream":
 else:
     raise SystemExit(f"unknown client kind: {kind}")
 
-qx_lines=[]; share_links=[]; v2rayng_links=[]; loon_lines=[]; clash_entries=[]
+qx_lines=[]; share_links=[]; loon_lines=[]; clash_entries=[]
 
 if enabled_vless:
     v=state["vless"]
@@ -1254,7 +1254,7 @@ if enabled_vless:
       public-key: {v["reality"]["public_key"]}
       short-id: "{v["reality"]["short_id"]}"
 '''
-    qx_lines.append(qx); share_links.append((name,uri)); v2rayng_links.append((name,uri)); loon_lines.append(loon); clash_entries.append(clash)
+    qx_lines.append(qx); share_links.append((name,uri)); loon_lines.append(loon); clash_entries.append(clash)
 
 if enabled_hy2:
     h=state["hy2"]
@@ -1262,8 +1262,6 @@ if enabled_hy2:
     name=protocol_name(base,"HY2")
     share_params=[("obfs","salamander"),("obfs-password",h["obfs_password"]),("sni",h["server_name"]),("insecure","1"),("pinSHA256",h["certificate_pin_hex"])]
     uri=f"hysteria2://{quote(password,safe='')}@{ip}:{port}/?{urlencode(share_params)}#{quote(name,safe='')}"
-    v2_params=[("obfs","salamander"),("obfs-password",h["obfs_password"]),("sni",h["server_name"]),("pinSHA256",h["certificate_pin_hex"])]
-    v2_uri=f"hysteria2://{quote(password,safe='')}@{ip}:{port}/?{urlencode(v2_params)}#{quote(name,safe='')}"
     loon=f"{loon_name(name)} = Hysteria2,{ip},{port},{loon_q(password)},skip-cert-verify=true,sni={h['server_name']},udp=true,fast-open=true,salamander-password={loon_q(h['obfs_password'])}"
     clash=f'''  - name: "{name}"
     type: hysteria2
@@ -1281,11 +1279,10 @@ if enabled_hy2:
       - h3
     udp: true
 '''
-    share_links.append((name,uri)); v2rayng_links.append((name,v2_uri)); loon_lines.append(loon); clash_entries.append(clash)
+    share_links.append((name,uri)); loon_lines.append(loon); clash_entries.append(clash)
 
 qx_text="\n".join(qx_lines)
 share_text="\n".join(uri for _,uri in share_links)
-v2rayng_text="\n".join(uri for _,uri in v2rayng_links)
 loon_text="\n".join(loon_lines)
 clash_text="proxies:\n"+"".join(clash_entries)
 
@@ -1300,9 +1297,6 @@ if qx_lines: lines += ["","【Quantumult X】",qx_text]
 if share_links:
     lines += ["","【Loon / Shadowrocket】","Loon 原生配置：",loon_text,"","分享链接："]
     for name,uri in share_links: lines += [f"[{name}]",uri]
-if v2rayng_links:
-    lines += ["","【v2rayNG 2.2.6+】"]
-    for name,uri in v2rayng_links: lines += [f"[{name}]",uri]
 if clash_entries: lines += ["","【Clash Verge Rev / Mihomo】",clash_text]
 summary="\n".join(lines).rstrip()+"\n"
 
@@ -1312,7 +1306,6 @@ summary="\n".join(lines).rstrip()+"\n"
 (out/"Loon-Shadowrocket.txt").write_text((share_text+"\n") if share_text else "",encoding="utf-8")
 # 同时保留旧文件名，便于已有运维习惯和第三方工具读取。
 (out/"Shadowrocket.txt").write_text((share_text+"\n") if share_text else "",encoding="utf-8")
-(out/"v2rayNG.txt").write_text((v2rayng_text+"\n") if v2rayng_text else "",encoding="utf-8")
 (out/"Clash-Verge-Rev.yaml").write_text(clash_text,encoding="utf-8")
 print(summary,end="")
 PY_CLIENTS
@@ -2120,12 +2113,8 @@ management_menu() {
 
 install_shortcuts() {
   mkdir -p /usr/local/sbin
-  cat > /usr/local/sbin/vps <<'EOF_VPS_CMD'
-#!/usr/bin/env bash
-# JP_RELAY_JPR3_MANAGER
-/usr/local/sbin/jp-relay-manager --manage
-EOF_VPS_CMD
-  chmod 700 /usr/local/sbin/vps
+  # /usr/local/sbin/vps 只能由统一 VVV 管理器创建。
+  # 中转管理器每次启动时仅维护自己的专用快捷命令，不能覆盖首页入口。
   cat > /usr/local/sbin/jp-show-nodes <<'EOF_SHOW'
 #!/usr/bin/env bash
 cat /root/日本VPS-客户端节点.txt

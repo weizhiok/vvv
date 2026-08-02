@@ -5,7 +5,7 @@ VVV 使用一个固定安装入口，在全新的 **Debian 13 + systemd** VPS �
 ## 永久固定安装地址
 
 ```bash
-curl -fsSL --retry 5 "https://raw.githubusercontent.com/weizhiok/vvv/install/vvv-install.sh?$(date +%s)" | bash
+{ command -v curl >/dev/null 2>&1 || { apt-get -o DPkg::Lock::Timeout=10 -o Acquire::Retries=2 -o Acquire::IndexTargets::deb-src::Sources::DefaultEnabled=false update && DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=10 -o Acquire::Retries=2 install -y curl ca-certificates; }; } && curl -fsSL --retry 5 "https://raw.githubusercontent.com/weizhiok/vvv/install/vvv-install.sh?$(date +%s)" | bash
 ```
 
 `install` 是固定入口分支，会自动取得 `main` 分支经过验证的最新安装程序。安装完成后统一输入：
@@ -47,20 +47,20 @@ vps
 
 ## 客户端订阅
 
-每个订阅令牌提供五个独立短路径：
+每个订阅令牌提供四个独立短路径：
 
 ```text
 /c   Clash Verge Rev / Mihomo
 /qx  Quantumult X
 /ln  Loon
 /sr  Shadowrocket
-/v2  v2rayNG
 ```
 
-- 五种客户端均只显示订阅地址或文本配置，不生成二维码；
+- 四种客户端均只显示订阅地址或文本配置，不生成二维码；
 - Quantumult X 只输出 VLESS；
 - Loon 使用无多余引号的 Salamander 混淆密码；
-- v2rayNG 2.2.6 使用独立 `hysteria2://` 链接，并写入 `pinSHA256` 证书指纹，不再依赖 `insecure`。
+- Shadowrocket 使用 Base64 编码的 VLESS/Hysteria 2 分享链接；
+- 已移除 v2rayNG 的节点配置、文件和订阅入口。
 
 ## 订阅中心与 HTTPS
 
@@ -87,6 +87,7 @@ vps
 - 仅支持全新 Debian 13；
 - 必须使用 systemd；
 - 使用 root 用户执行；
+- 固定安装命令会在缺少 curl 时先通过 APT 安装 curl 和 CA 证书；
 - APT/dpkg 锁最多等待 10 秒，超过后立即显示错误，不删除锁文件、不强行终止系统更新；
 - 主安装阶段一次性安装订阅中心所需的 `python3-venv`，避免代理完成后再次调用 APT；
 - 安装时关闭无用的 `deb-src` 索引下载，减少软件源警告和等待；

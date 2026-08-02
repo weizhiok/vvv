@@ -85,10 +85,6 @@ def sample_host_state():
     }
 
 
-def decoded_v2rayng(module, nodes):
-    return base64.b64decode(module.render_v2rayng(nodes)).decode('utf-8').splitlines()
-
-
 def test_subscription_renderers():
     module = load_sub_center()
     nodes = module.nodes_from_host({'host_id': 'audit-host-001', 'role': 'center-relay', 'state': sample_host_state()})
@@ -97,20 +93,16 @@ def test_subscription_renderers():
     qx = module.render_qx(nodes)
     loon = module.render_loon(nodes)
     shadowrocket = base64.b64decode(module.render_shadowrocket(nodes)).decode('utf-8')
-    v2_lines = decoded_v2rayng(module, nodes)
     require('type: vless' in clash and 'type: hysteria2' in clash, 'Clash 订阅缺少双协议节点')
     require('vless=' in qx and 'hysteria' not in qx.lower(), 'Quantumult X 应只输出 VLESS')
     require('salamander-password=salamander-secret' in loon, 'Loon HY2 混淆密码格式错误')
     require('salamander-password="' not in loon, 'Loon HY2 混淆密码仍带双引号')
-    require('hysteria2://' in shadowrocket, 'Shadowrocket 缺少 Hysteria 2 链接')
-    hy2 = next((line for line in v2_lines if line.startswith('hysteria2://')), '')
-    require(hy2, 'v2rayNG 没有独立 hysteria2:// 链接')
-    require('pinSHA256=' in hy2 and 'insecure=' not in hy2, 'v2rayNG HY2 指纹或安全参数错误')
-    for token in ('sni=', 'pinSHA256=', 'obfs=salamander', 'obfs-password='):
-        require(token in hy2, f'v2rayNG HY2 缺少 {token}')
+    require('vless://' in shadowrocket and 'hysteria2://' in shadowrocket, 'Shadowrocket 缺少双协议链接')
     source = read('core-src/sub_center.py')
-    short_paths = "{'c': 'clash', 'qx': 'quantumultx', 'ln': 'loon', 'sr': 'shadowrocket', 'v2': 'v2rayng'}"
+    short_paths = "{'c': 'clash', 'qx': 'quantumultx', 'ln': 'loon', 'sr': 'shadowrocket'}"
     require(short_paths in source, '订阅短路径集合不正确')
+    for token in ('v2rayNG', 'v2rayng', "'v2':"):
+        require(token not in source, f'订阅中心仍保留已弃用客户端：{token}')
 
 
 def test_backup_policy():
@@ -187,6 +179,7 @@ def test_https_and_fresh_install_only():
     require('.vvv-ip-final-active' in center, 'IP 证书首次部署和续期部署没有使用状态标记分流')
     require('timeout 75 systemctl restart caddy.service' in center, 'IP 证书续期没有使用有界 Caddy 重启')
     require('跳过重复 apt update' in center, '订阅中心仍可能静默重复刷新软件源')
+    require('caddy fmt --overwrite /etc/caddy/Caddyfile' in center, 'Caddyfile 没有在验证前自动格式化')
     require('继续安装订阅中心' in bootstrap and '当前 SSH 不受影响' in bootstrap, '代理安装后没有明确显示订阅中心进度')
     require('检查并升级 VVV' not in manager and 'update_vvv' not in manager, '仍保留原地升级兼容入口')
     require('sync_role' not in manager, '仍保留旧 all 角色兼容映射')
@@ -206,8 +199,22 @@ def test_apt_lock_policy():
         require('DPkg::Lock::Timeout=10' in source, f'{label} 没有使用 10 秒 APT 锁上限')
     require('python3 python3-venv iproute2' in sources['host installer'], '主安装阶段没有一次性安装 python3-venv')
     for label in ('network installer', 'host installer', 'landing installer', 'subscription center', 'rclone manager'):
-        require('Acquire::IndexTargets::deb::Sources::DefaultEnabled=false' in sources[label], f'{label} 没有关闭无用的 deb-src 索引下载')
+        require('Acquire::IndexTargets::deb-src::Sources::DefaultEnabled=false' in sources[label], f'{label} 没有关闭无用的 deb-src 索引下载')
     require('APT/dpkg 锁等待超过 10 秒' in sources['subscription center'], '订阅中心没有明确的 10 秒锁超时错误')
+
+
+def test_manager_entrypoint_and_bootstrap_command():
+    host = read('core-src/host.sh')
+    bootstrap = read('core-src/bootstrap.sh')
+    readme = read('README.md')
+    production = '\n'.join((host, read('core-src/landing.sh'), read('core-src/center_install.sh'), read('core-src/sub_center.py')))
+    require('cat > /usr/local/sbin/vps' not in host, '中转管理器仍会覆盖统一 vps 首页入口')
+    require('exec /usr/local/lib/vvv/vvv_manager.sh "$@"' in bootstrap, '统一 vps 首页入口没有指向 vvv_manager.sh')
+    require('vvv-host-original' not in bootstrap, '统一安装仍保存会误导的中转 vps 包装器')
+    require('command -v curl >/dev/null 2>&1 || {' in readme, '固定安装命令没有处理 curl 缺失')
+    require('DPkg::Lock::Timeout=10' in readme, 'curl 自举安装没有 10 秒 APT 锁上限')
+    for token in ('v2rayNG', 'v2rayng'):
+        require(token not in production, f'生产脚本仍保留已弃用客户端：{token}')
 
 
 def test_hy2_leaf_certificate():
@@ -255,6 +262,7 @@ def main():
         test_no_qr_output,
         test_https_and_fresh_install_only,
         test_apt_lock_policy,
+        test_manager_entrypoint_and_bootstrap_command,
         test_hy2_leaf_certificate,
         test_debian13_only,
         test_no_obsolete_role_terms,
