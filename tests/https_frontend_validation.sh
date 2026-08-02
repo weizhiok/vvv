@@ -23,9 +23,13 @@ cat > "$WORK/http.Caddyfile" <<'EOF'
   admin off
   auto_https off
 }
+
 :18081 {
   @allowed path /Abc12345 /api/v1/* /health
-  handle @allowed { respond "http-ok" 200 }
+  handle @allowed {
+    respond "http-ok" 200
+  }
+
   respond 404
 }
 EOF
@@ -36,9 +40,13 @@ cat > "$WORK/tunnel.Caddyfile" <<'EOF'
   admin off
   auto_https off
 }
+
 http://127.0.0.1:18082 {
   @allowed path /Abc12345 /api/v1/* /health
-  handle @allowed { respond "tunnel-ok" 200 }
+  handle @allowed {
+    respond "tunnel-ok" 200
+  }
+
   respond 404
 }
 EOF
@@ -49,14 +57,19 @@ cat > "$WORK/domain.Caddyfile" <<'EOF'
   admin off
   auto_https disable_redirects
 }
+
 sub.example.com:18443 {
   tls {
     issuer acme {
       disable_tlsalpn_challenge
     }
   }
+
   @allowed path /Abc12345 /api/v1/* /health
-  handle @allowed { respond "domain-ok" 200 }
+  handle @allowed {
+    respond "domain-ok" 200
+  }
+
   respond 404
 }
 EOF
@@ -76,14 +89,20 @@ cat > "$WORK/ip.Caddyfile" <<EOF
   auto_https off
   default_sni 127.0.0.1
 }
+
 http://127.0.0.1:18080 {
   respond /acme-ready "ready" 200
   respond 404
 }
+
 https://127.0.0.1:18444 {
   tls $WORK/ip.crt $WORK/ip.key
+
   @allowed path /Abc12345 /api/v1/* /health
-  handle @allowed { respond "ip-ok" 200 }
+  handle @allowed {
+    respond "ip-ok" 200
+  }
+
   respond 404
 }
 EOF
