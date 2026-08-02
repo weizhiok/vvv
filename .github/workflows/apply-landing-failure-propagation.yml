@@ -1,0 +1,39 @@
+name: Apply landing failure propagation fix
+on:
+  push:
+    branches: [agent/fix-landing-failure-propagation]
+    paths:
+      - 'trigger-landing-failure-propagation.txt'
+permissions:
+  contents: write
+concurrency:
+  group: landing-failure-propagation
+  cancel-in-progress: true
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-landing-failure-propagation
+          fetch-depth: 0
+      - name: Apply patch
+        run: python3 tools/apply_landing_failure_propagation.py
+      - name: Validate
+        run: |
+          set -Eeuo pipefail
+          bash -n core-src/bootstrap.sh
+          python3 -m py_compile tests/conformance.py
+          python3 tests/conformance.py
+      - name: Commit production changes
+        run: |
+          set -Eeuo pipefail
+          git config user.name weizhiok
+          git config user.email 165847692+weizhiok@users.noreply.github.com
+          rm -f tools/apply_landing_failure_propagation.py trigger-landing-failure-propagation.txt .github/workflows/apply-landing-failure-propagation.yml
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          find . -type f -name '*.pyc' -delete
+          git add -A
+          git commit -m "Stop after landing installer failure"
+          git push origin HEAD:agent/fix-landing-failure-propagation
