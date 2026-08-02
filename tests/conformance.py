@@ -165,7 +165,16 @@ def test_https_and_reentrant_installation():
     manager = read('core-src/vvv_manager.sh')
     require('当前版本只支持全新安装' not in installer, '网络入口仍拒绝已有或中断状态')
     require('始终进入安装菜单' in installer, '网络入口没有承诺重复运行仍进入菜单')
-    require('mv "$TMP/app" "$target"' in installer and '.vvv-source.previous' in installer, '下载源码没有通过原子替换防止中断残留')
+    for token in (
+        'SOURCE_STAGING="/usr/local/lib/.vvv-source.staging.$$"',
+        'SOURCE_BACKUP="/usr/local/lib/.vvv-source.previous.$$"',
+        'cp -a "$TMP/app" "$SOURCE_STAGING"',
+        'mv "$SOURCE_STAGING" "$SOURCE_TARGET"',
+        'mv "$SOURCE_BACKUP" "$SOURCE_TARGET"',
+        'SOURCE_SWAP_COMMITTED=1',
+    ):
+        require(token in installer, f'源码安全替换缺少：{token}')
+    require('mv "$TMP/app" "$SOURCE_TARGET"' not in installer, '仍从 /tmp 跨文件系统直接替换正式源码')
     for token in (
         'show_install_menu',
         'center_complete',
