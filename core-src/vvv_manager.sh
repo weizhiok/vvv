@@ -2,6 +2,8 @@
 set -Eeuo pipefail
 umask 077
 ROLE_FILE=/etc/vvv/roles.json
+SYNC=/usr/local/lib/vvv/sync_agent.py
+DIAG=/usr/local/lib/vvv/diagnostic_report.py
 role_has(){ jq -e --arg k "$1" '.roles[$k]==true' "$ROLE_FILE" >/dev/null 2>&1; }
 pause(){ read -r -p "按回车返回……" _; }
 show_roles(){
@@ -13,21 +15,24 @@ show_roles(){
 }
 primary(){ jq -r .primary_role "$ROLE_FILE"; }
 register_center(){
-  local current address code
-  current="$(primary)"
-  if [[ "$current" == direct ]]; then
-    read -r -p "请输入订阅中心 IP 地址或域名（默认 HTTPS 端口 8443）：" address
-    address="${address//[[:space:]]/}"
-    [[ -n "$address" ]] || { echo "订阅中心地址不能为空。"; return; }
-    /usr/local/lib/vvv/register_sync.sh direct "" "$address"
-  else
-    read -r -p "请输入 VVV 主机接入码：" code
-    [[ -n "$code" ]] || { echo "接入码不能为空。"; return; }
-    /usr/local/lib/vvv/register_sync.sh "$current" "$code"
-  fi
+  local code
+  while true; do
+    read -r -p "请输入订阅中心 VVC1 对接码（按回车取消）：" code
+    code="${code//[[:space:]]/}"
+    [[ -n "$code" ]] || return
+    if [[ "$code" == JPR3.* ]]; then echo "对接码错误：这是中转副机安装密钥。"; continue; fi
+    if python3 "$SYNC" validate-code "$code" >/dev/null 2>&1; then break; fi
+    echo "对接码错误，请重新输入完整 VVC1。"
+  done
+  /usr/local/lib/vvv/register_sync.sh "$(primary)" "$code"
 }
 show_sync(){
-  [[ -f /etc/vvv/client.json ]] && jq '{base_url,host_id,role,registered_at,last_sync,last_result}' /etc/vvv/client.json || echo "尚未注册订阅中心。"
+  [[ -f /etc/vvv/client.json ]] && jq '{api_base_url,center_ip,host_id,role,registered_at,last_sync,last_result}' /etc/vvv/client.json || echo "尚未注册订阅中心。"
+}
+update_center_ip(){
+  local ip
+  read -r -p "请输入新的订阅中心公网 IPv4：" ip
+  python3 "$SYNC" update-center-ip "$ip"
 }
 landing_menu(){
   [[ -x /usr/local/sbin/vvv-landing-original ]] && exec /usr/local/sbin/vvv-landing-original
@@ -44,9 +49,10 @@ while true; do
   if [[ -f /etc/vvv/client.json ]]; then
     echo "$n. 立即同步订阅"; act[$n]=sync; ((n++))
     echo "$n. 查看订阅同步状态"; act[$n]=status; ((n++))
+    if ! role_has center; then echo "$n. 修改订阅中心 IP 地址"; act[$n]=update_ip; ((n++)); fi
   fi
   echo "$n. 注册或更换订阅中心"; act[$n]=register; ((n++))
-  role_has center && { echo "$n. 查看已注册副机"; act[$n]=hosts; ((n++)); }
+  echo "$n. 生成故障诊断报告"; act[$n]=diagnostic; ((n++))
   echo "0. 退出"
   read -r -p "请输入编号：" x
   [[ $x == 0 ]] && exit 0
@@ -56,8 +62,9 @@ while true; do
     center) /usr/local/sbin/vvv-center;;
     sync) systemctl start vvv-sync.service; show_sync; pause;;
     status) show_sync; systemctl --no-pager status vvv-sync.timer vvv-sync.path 2>/dev/null || true; pause;;
+    update_ip) update_center_ip; pause;;
     register) register_center; pause;;
-    hosts) /usr/local/sbin/vvv-center hosts; pause;;
+    diagnostic) python3 "$DIAG"; pause;;
     *) echo "请输入有效编号。";;
   esac
 done

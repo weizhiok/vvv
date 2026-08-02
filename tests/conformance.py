@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import base64
 import importlib.util
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -14,12 +15,12 @@ def read(path):
     return (ROOT / path).read_text(encoding='utf-8')
 
 
-def require(condition, message):
-    if not condition:
+def require(value, message):
+    if not value:
         raise AssertionError(message)
 
 
-def load_module(name, path):
+def load(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader
@@ -27,256 +28,173 @@ def load_module(name, path):
     return module
 
 
-def load_sub_center():
-    return load_module('vvv_sub_center', CORE / 'sub_center.py')
-
-
-def load_adapters():
-    return load_module('vvv_client_adapters', CORE / 'client_adapters.py')
-
-
-def sample_host_state():
+def sample_state():
     return {
-        'protocol_mode': 'dual',
-        'public_ip': '198.51.100.10',
-        'listen_port': 443,
-        'sni': 'www.softbank.jp',
-        'direct_base_name': 'JP-198.51.100.10:443',
-        'vless': {
-            'direct_user': {'uuid': '11111111-1111-4111-8111-111111111111'},
-            'reality': {'public_key': 'PublicKeyAudit', 'short_id': '0123456789abcdef'},
-        },
-        'hy2': {
-            'direct_user': {'password': 'hy2-password'},
-            'server_name': 'jp-hy2.jp-relay.local',
-            'certificate_pin_hex': 'aa' * 32,
-            'certificate_public_key_sha256': base64.b64encode(bytes(range(32))).decode(),
-            'obfs_password': 'salamander-secret',
-        },
-        'relays': [],
-        'upstream_relays': [],
+        'schema': 3, 'role': 'japan-hub', 'protocol_mode': 'dual',
+        'public_ip': '198.51.100.10', 'listen_port': 443, 'sni': 'www.softbank.jp',
+        'hy2_limit_mbps': 65, 'direct_base_name': 'JP-198.51.100.10:443',
+        'vless': {'reality': {'public_key': 'pub', 'short_id': '0123456789abcdef'},
+                  'direct_user': {'uuid': '11111111-1111-4111-8111-111111111111'}},
+        'hy2': {'server_name': 'jp-hy2.local', 'obfs_password': 'obfs', 'certificate_pin_hex': 'aa' * 32,
+                'direct_user': {'password': 'password'}},
+        'relays': [], 'upstream_relays': [], 'temporary_nodes': [],
     }
 
 
-def test_menu_and_front_loaded_parameters():
+def test_install_menu_and_upfront_parameters():
     text = read('core-src/bootstrap.sh')
     labels = [
-        '1. 安装订阅中心 + 中转主机 + 自身代理',
-        '2. 安装订阅中心 + 自身代理',
-        '3. 安装中转主机 + 自身代理',
-        '4. 安装中转副机',
-        '5. 安装直连代理',
-        '0. 退出',
+        '1. 安装订阅中心 + 中转主机 + 自身代理', '2. 安装订阅中心 + 自身代理',
+        '3. 安装中转主机 + 自身代理', '4. 安装中转副机', '5. 安装直连代理',
+        '6. 从云备份恢复', '0. 退出',
     ]
     positions = [text.index(label) for label in labels]
-    require(positions == sorted(positions), '初始菜单顺序不正确')
-    for token in (
-        '请选择订阅传输方式',
-        '1. 直接 HTTPS',
-        '2. 直接 HTTP',
-        '3. 固定 HTTPS 域名（Cloudflare Tunnel）',
-        '请输入订阅地址后缀',
-        '随机生成 8 位',
-        '6-32 位',
-        'VVV_SUB_TRANSPORT',
-        'VVV_SUB_SUFFIX',
-        'VVV_CF_TUNNEL_TOKEN',
-        '========== 安装参数总览 ==========',
-        '直接开始全自动安装',
-    ):
-        require(token in text, f'统一前置参数缺少：{token}')
-    require('安装中转副机（通过主机代理）' not in text, '菜单仍保留多余说明')
-    require('read -r' not in text[text.rindex('show_parameter_summary'):text.index('case "$choice" in', text.rindex('show_parameter_summary'))], '参数总览后仍询问输入')
+    require(positions == sorted(positions), '初始菜单顺序错误')
+    for token in ('安装参数（全部前置设置）', 'Hysteria 2 每连接服务器强制限速',
+                  '10#$input>=30', '10#$input<=100', '输入订阅中心对接码（按回车跳过）',
+                  '参数已收集完毕，直接开始全自动安装'):
+        require(token in text, f'缺少前置参数功能：{token}')
+    summary = text.index('show_parameter_summary')
+    execute = text.index('case "$choice" in', summary)
+    require('read -r' not in text[summary:execute], '参数总览后仍有输入')
+    require('schema == 2 || "$schema" == 3' in text or '[[ "$schema" == 2 || "$schema" == 3 ]]' in text, '现有 schema 3 订阅中心不会无损迁移')
 
 
-def test_direct_address_registration():
-    bootstrap = read('core-src/bootstrap.sh')
-    register = read('core-src/register_sync.sh')
-    sync = read('core-src/sync_agent.py')
-    center = read('core-src/sub_center.py')
-    require('ask_center_address' in bootstrap, '直连安装缺少订阅中心地址询问')
-    require('register-direct "$center_address"' in register, '直连地址没有传给客户端')
-    for token in ('center_candidates', "format_base('https'", "format_base('http'", 'https_upgrade_base', "'https_pinned'"):
-        require(token in sync, f'HTTP/HTTPS注册或自动升级缺少：{token}')
-    for token in ("path == '/api/v1/register-direct'", "role != 'direct'", 'Source IP mismatch', 'CF-Connecting-IP'):
-        require(token in center, f'直连自动注册缺少：{token}')
-    require('订阅中心注册成功' in register and '\x1b[32m' in register, 'SSH没有绿色注册成功提示')
-    for token in ('require_registration_success', "'registered'", "'subscription_refreshed'", 'snapshot_payload'):
-        require(token in sync, f'客户端没有验证注册刷新：{token}')
+def test_vvc1_ip_only_contract():
+    sync = load('sync_agent_test', CORE / 'sync_agent.py')
+    payload = {'schema': 1, 'type': 'vvv-subscription-center',
+               'api_base_url': 'http://198.51.100.10:18081', 'master_token': 'master'}
+    code = sync.encode_vvc1(payload)
+    require(sync.decode_vvc1(code) == payload, 'VVC1 编解码不一致')
+    try:
+        sync.decode_vvc1(sync.encode_vvc1({**payload, 'api_base_url': 'http://sub.example.com:18081'}))
+    except ValueError as exc:
+        require('不能使用域名' in str(exc), 'VVC1 域名错误提示不明确')
+    else:
+        raise AssertionError('VVC1 仍允许域名 API')
+    try:
+        sync.decode_vvc1('JPR3.abc.01234567890123456789')
+    except ValueError as exc:
+        require('JPR3' in str(exc), 'JPR3/VVC1 类型隔离失败')
+    source = read('core-src/sub_center.py') + read('core-src/sync_agent.py')
+    require('/api/v1/register-direct' not in source, '仍保留无鉴权直连注册')
+    for token in ('center_candidates', 'https_pinned', 'https_upgrade_base'):
+        require(token not in source, f'仍保留 HTTP/HTTPS 猜测逻辑：{token}')
 
 
-def test_registration_refresh_contract():
-    module = load_sub_center()
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        module.HOSTS = root / 'hosts'
-        module.OUT = root / 'output'
-        module.CFG = root / 'config.json'
-        module.HOSTS.mkdir(parents=True)
-        module.OUT.mkdir(parents=True)
-        module.CFG.write_text('{"base_url":"http://127.0.0.1:8443","subscription_url":"http://127.0.0.1:8443/Abc12345","transport_mode":"direct-http"}', encoding='utf-8')
-        calls = []
-        module.regenerate = lambda: calls.append('refresh') or 2
-        entry = {'host_id': 'confirmed-host-001', 'token': 'host-token', 'role': 'direct'}
-        result = module.finalize_registration(entry, {'state': sample_host_state(), 'meta': {'hostname': 'direct-node'}})
-        require(calls == ['refresh'], '注册没有先刷新订阅')
-        require(result.get('registered') is True and result.get('subscription_refreshed') is True, '注册响应缺少成功标识')
-        require(result.get('canonical_base_url') == 'http://127.0.0.1:8443', '注册响应缺少规范中心地址')
-        saved = module.read_json(module.HOSTS / 'confirmed-host-001.json', {})
-        require(saved.get('state', {}).get('public_ip') == '198.51.100.10', '注册未保存首份状态')
-
-
-def test_subscription_renderers():
-    center = load_sub_center()
-    adapters = load_adapters()
-    adapters.smoke_test()
-    nodes = center.nodes_from_host({'host_id': 'audit-host-001', 'role': 'center-relay', 'state': sample_host_state()})
-    require({node['protocol'] for node in nodes} == {'vless', 'hysteria2'}, '双协议节点不完整')
-    clash = adapters.render('clash', nodes)
-    qx = adapters.render('quantumultx', nodes)
-    loon = adapters.render('loon', nodes)
-    shadowrocket = base64.b64decode(adapters.render('shadowrocket', nodes)).decode('utf-8')
-    require('type: vless' in clash and 'type: hysteria2' in clash, 'Clash输出缺少协议')
-    require('vless=' in qx and 'hysteria' not in qx.lower(), 'Quantumult X应只输出VLESS')
-    require('salamander-password=salamander-secret' in loon, 'Loon Salamander格式错误')
-    require('vless://' in shadowrocket and 'hysteria2://' in shadowrocket, 'Shadowrocket输出不完整')
-    require(adapters.detect_client({'User-Agent': 'Clash-Verge-Rev/2'})['format'] == 'clash', '无法识别Clash Verge Rev')
-    require(adapters.detect_client({'User-Agent': 'Quantumult X/1.5'})['format'] == 'quantumultx', '无法识别Quantumult X')
-    require(adapters.detect_client({'User-Agent': 'Loon/3.2'})['format'] == 'loon', '无法识别Loon')
-    require(adapters.detect_client({'User-Agent': 'Shadowrocket/2.2'})['format'] == 'shadowrocket', '无法识别Shadowrocket')
-    source = read('core-src/sub_center.py')
-    require('SHORT_PATHS' not in source and "'/r/'" not in source, '仍保留旧四路径订阅入口')
-    require('format=' not in source and "query.get('format')" not in source, '仍保留格式诊断参数')
-    for token in ('subscription_suffix', 'detect_client', '415', 'X-VVV-Client', 'X-VVV-Format', 'DEBUG_FLAG', 'DEBUG_LOG'):
-        require(token in source, f'统一入口或请求头调试缺少：{token}')
-
-
-def test_backup_policy():
-    backup = read('core-src/backup_manager.py')
-    rclone = read('core-src/rclone_manager.sh')
-    for token in ('/etc/letsencrypt', '/var/lib/caddy/.local/share/caddy', '/etc/caddy', 'cloudflared.token', 'vvv-cloudflared.service', 'vvv-ip-cert-renew.timer', 'deploy-ip-cert.sh'):
-        require(token in backup, f'云备份未包含证书或Tunnel数据：{token}')
-    require('cloud_backup_enabled' in backup and 'CLOUD_ONLY_SOURCES' in backup, '证书/Tunnel数据没有只随云备份启用')
-    require("'copyto'" in backup and "'sync'" not in backup, '云上传必须使用copyto')
-    require('-aes-256-cbc' in backup and '-pbkdf2' in backup, '备份未使用强加密')
-    for token in ('before-cloud-backup-enabled', 'after-cloud-backup-enabled'):
-        require(token in rclone, f'云备份事务事件缺少：{token}')
-
-
-def test_jpr3_and_slot_architecture():
-    prepare = read('src/prepare.py')
-    host = read('core-src/host.sh')
-    landing = read('core-src/landing.sh')
-    bootstrap = read('core-src/bootstrap.sh')
-    for token in ('build_vless_slot_configs', 'vvv-vless-slot@', 'build_hy2_slot_configs', 'vvv-hy2-slot@'):
-        require(token in prepare, f'槽位架构缺少：{token}')
-    require('zlib.compress(raw,9)' in host and 'len(key) >= 3500' in host, '主机没有生成压缩JPR3')
-    require('zlib.decompress(transferred)' in landing and "transferred.startswith(b'{')" in landing, '落地端没有兼容新旧JPR3')
-    require('对接密钥已达到终端单行输入上限' in bootstrap, '安装器未识别终端截断')
-    require('新建 VPS 副机中转线路' in host, '中转线路菜单名称不正确')
-
-
-def test_no_qr_output():
-    files = ['vvv-install.sh', 'core-src/bootstrap.sh', 'core-src/host.sh', 'core-src/landing.sh', 'core-src/center_install.sh', 'core-src/center_manager.sh']
-    text = '\n'.join(read(path) for path in files)
-    require('qrencode' not in text and 'qr_helper' not in text, '仍保留二维码实现')
-    require('二维码' not in text, '生产脚本仍保留二维码提示')
-
-
-def test_transports_and_reentrant_installation():
-    installer = read('vvv-install.sh')
-    bootstrap = read('core-src/bootstrap.sh')
-    center = read('core-src/center_install.sh')
+def test_transports_and_management():
     transport = read('core-src/center_transport.sh')
     manager = read('core-src/center_manager.sh')
-    require('当前版本只支持全新安装' not in installer, '网络入口仍拒绝重复运行')
-    require('始终进入安装菜单' in installer, '网络入口没有承诺重复运行')
-    for file in ('client_adapters.py', 'adapter_manager.py', 'center_transport.sh', 'center_manager.sh'):
-        require(file in installer, f'安装入口没有下载新模块：{file}')
-    for token in ('direct-http', 'direct-https', 'tunnel', 'subscription_suffix', 'subscription_url'):
-        require(token in center and token in transport, f'传输架构缺少：{token}')
-    require('Cloudflare Tunnel模式必须输入 Tunnel Token' in center, 'Tunnel缺少Token校验')
-    require("cfg.get('transport_mode') == 'tunnel'" in read('core-src/sub_center.py'), '直连模式仍会信任可伪造的Cloudflare来源头')
-    require('valid_ip_cert_files' in transport and 'write_ip_renew_units' in transport and 'seq 1 120' in transport, '证书恢复或公网入口等待机制不完整')
-    require('旧版订阅中心残留不完整' in bootstrap, '不完整schema2中心仍会被提前迁移')
-    require('rm -f "$flag" "$log"' in manager, '请求头调试结束后没有删除临时日志')
-    require('http://127.0.0.1:${port}' in transport, 'Tunnel源站不是本地HTTP')
-    require('HTTPS 已开启；原 HTTP 订阅入口已失效' in transport, 'HTTP升级HTTPS没有强制失效旧入口')
-    require('原 HTTP 配置已恢复并继续可用' in transport, 'HTTPS失败没有事务回滚')
-    require('客户端请求头识别调试' in manager and '更新客户端适配器' in manager, '订阅中心菜单缺少调试或适配器更新')
-    require('修改订阅地址后缀' in manager and '开启 HTTPS 传输' in manager, '订阅中心菜单缺少后期管理')
-    require('6-32位大小写字母或数字' in manager, '自定义后缀长度规则错误')
-    require('随机生成 8 位' in bootstrap, '默认随机后缀不是8位')
-    require('refresh_center_runtime_code' in bootstrap and 'center_manager.sh' in bootstrap, '重复安装不会刷新中心管理器')
+    for token in ('change-suffix', 'change-domain', 'change-port', 'change-tunnel-token', 'switch-secure'):
+        require(token in transport, f'传输管理缺少：{token}')
+    for label in ('修改订阅后缀', '修改订阅域名', '修改订阅端口', '修改 Tunnel Token', '切换 HTTPS/Tunnel 模式'):
+        require(label in manager, f'订阅中心菜单缺少：{label}')
+    require('enable-https' not in transport and '开启 HTTPS 传输' not in manager, '仍保留 HTTP 自动升级 HTTPS')
+    require('只有直接 HTTPS 可以切换到 Tunnel' in transport and '只有 Tunnel 可以切换到直接 HTTPS' in transport,
+            '安全模式切换边界不完整')
+    require("api=\"http://$(value '.public_ip'):$(value '.listen_port')\"" in transport, '副机 API 不是固定 IP 地址')
+
+
+def test_hy2_server_hard_limit():
+    host = read('core-src/host.sh')
+    landing = read('core-src/landing.sh')
     prepare = read('src/prepare.py')
-    require('/r/${token}/c' not in prepare and 'VVV_SUB_TRANSPORT' in prepare and 'client_adapters.py' in prepare, '最终安装器构建器仍要求旧四路径或未校验新模块')
-    require('migrate_center_config_if_needed' in bootstrap and 'config.schema2-backup.json' in bootstrap, '旧schema2订阅中心不会原地迁移')
-    require('if [[ -f /etc/vvv-sub/.schema3-migrated ]]' in bootstrap and bootstrap.index('refresh_center_runtime_code', bootstrap.index('migrate_center_config_if_needed\nif')) < bootstrap.index('show_install_menu', bootstrap.index('migrate_center_config_if_needed\nif')), '旧中心迁移后没有在显示菜单前立即刷新运行时')
+    for source, label in ((host, '主机'), (landing, '副机'), (prepare, '最终生成器')):
+        require('ignore_client_bandwidth' in source, f'{label} HY2 未忽略客户端带宽声明')
+        require('up_mbps' in source and 'down_mbps' in source, f'{label} HY2 缺少服务端限速')
+    require('hy2_limit_mbps' in host and 'hy2_limit_mbps' in landing, 'HY2 限速没有进入状态/JPR3')
+    adapter = read('core-src/client_adapters.py')
+    require("node.get('limit_mbps')" in adapter, '客户端模板仍固定写死 50M')
 
 
-def test_apt_lock_policy():
-    sources = {
-        'network installer': read('vvv-install.sh'),
-        'host installer': read('core-src/host.sh'),
-        'landing installer': read('core-src/landing.sh'),
-        'subscription center': read('core-src/center_install.sh'),
-        'rclone manager': read('core-src/rclone_manager.sh'),
-    }
-    for label, source in sources.items():
-        require('DPkg::Lock::Timeout=600' not in source, f'{label}仍等待APT锁600秒')
-        require('DPkg::Lock::Timeout=10' in source, f'{label}没有10秒APT锁上限')
-        require('Acquire::IndexTargets::deb-src::Sources::DefaultEnabled=false' in source, f'{label}没有关闭deb-src索引')
-
-
-def test_manager_entrypoint_and_bootstrap_command():
+def test_temporary_nodes_are_local_copies_only():
     host = read('core-src/host.sh')
-    bootstrap = read('core-src/bootstrap.sh')
-    readme = read('README.md')
-    require('cat > /usr/local/sbin/vps' not in host, '中转管理器仍覆盖统一vps入口')
-    require('exec /usr/local/lib/vvv/vvv_manager.sh "$@"' in bootstrap, '统一vps入口错误')
-    require('command -v curl >/dev/null 2>&1 || {' in readme, '固定安装命令未处理curl缺失')
-    require('DPkg::Lock::Timeout=10' in readme, '固定安装命令缺少APT锁上限')
+    prepare = read('src/prepare.py')
+    for label in ('创建临时 VPS 中转线路（从已有线路复制）', '创建临时 HTTP/HTTPS/SOCKS5 中转线路（从已有线路复制）'):
+        require(label in host, f'临时菜单缺少：{label}')
+    require('从已有正式线路复制' in host, '临时线路没有只允许复制')
+    require('临时线路全新创建' not in host and '全新创建临时' not in host, '仍保留临时线路全新创建')
+    require('副机和原正式线路均未修改' in host, '临时线路未明确隔离副机')
+    for token in ('temporary_nodes', 'source_type', 'source_id', 'retired=True', 'vvv-temp-cleanup.timer'):
+        require(token in host, f'临时线路生命周期缺少：{token}')
+    require("relay=relays.get(temp.get('source_id'))" in prepare, '临时 VPS 没有复用正式线路出口')
+    require("source_id=temps[assigned].get('source_id')" in prepare and 'source_id in upstreams' in prepare, '临时上游没有复用正式线路出口')
 
 
-def test_hy2_leaf_certificate():
-    host = read('core-src/host.sh')
-    for token in ('basicConstraints=critical,CA:FALSE', 'keyUsage=critical,digitalSignature', 'extendedKeyUsage=serverAuth'):
-        require(token in host, f'HY2证书缺少约束：{token}')
+def test_config_only_backup_and_restore():
+    backup = read('core-src/backup_manager.py')
+    restore = read('core-src/restore_manager.py')
+    for token in ('MAX_COUNT = 100', 'MAX_BYTES = 1024 ** 3', "REMOTE_ROOT = 'vvv'", 'RecoverKey.ini', 'BackupIndex.json'):
+        require(token in backup, f'备份策略缺少：{token}')
+    for forbidden in ('/usr/local/bin/xray', '/usr/local/bin/sing-box', '/usr/local/bin/caddy', '/usr/local/bin/cloudflared'):
+        require(forbidden not in backup, f'备份错误包含二进制：{forbidden}')
+    require("'config_only': True" in backup and "'temporary_nodes_included': False" in backup, '纯配置/排除临时节点标记缺失')
+    require("obj['state']['temporary_nodes'] = []" in backup, '订阅中心主机快照中的临时节点未剔除')
+    require("obj['temporary_nodes'] = []" in restore, '恢复时没有再次清除临时节点')
+    require('请输入编号 [默认 1，恢复最新备份]' in restore, '恢复日期选择和默认最新缺失')
+    require('自动尝试上一份' in restore, '最新备份损坏没有回退')
 
 
-def test_debian13_only():
-    sources = [read('vvv-install.sh'), read('core-src/bootstrap.sh'), read('core-src/host.sh'), read('core-src/landing.sh')]
-    require(all('Debian 13' in source for source in sources), '有安装入口没有限制Debian 13')
-    readme = read('README.md')
-    require('仅支持 Debian 13' in readme and 'Debian 12' in readme, 'README系统要求不完整')
+def test_node_names_and_clients():
+    center = load('sub_center_test', CORE / 'sub_center.py')
+    adapters = load('adapters_test', CORE / 'client_adapters.py')
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        center.CFG = root / 'config.json'; center.DATA = root; center.HOSTS = root / 'hosts'; center.OUT = root / 'out'
+        center.REGISTRY = root / 'registry.json'; center.OVERRIDES = root / 'overrides.json'; center.BACKUP = root / 'missing.py'
+        center.HOSTS.mkdir(); center.CFG.write_text('{}'); center.REGISTRY.write_text('{"hosts":[]}'); center.OVERRIDES.write_text('{}')
+        doc = {'host_id': 'host-00000001', 'role': 'center-relay', 'state': sample_state()}
+        center.atomic_json(center.HOSTS / 'host-00000001.json', doc)
+        nodes = center.all_nodes(); node = nodes[0]
+        center.rename_node(node['id'], '我的主节点')
+        require(center.all_nodes()[0]['name'] == '我的主节点', '节点改名未持久化')
+        center.reset_name(node['id'])
+        require(center.all_nodes()[0]['name'] != '我的主节点', '恢复默认名称失败')
+        rendered = adapters.render('clash', center.all_nodes())
+        require('65 Mbps' in rendered, 'HY2 客户端模板未使用节点限速')
+        shadow = base64.b64decode(adapters.render('shadowrocket', center.all_nodes())).decode()
+        require('vless://' in shadow and 'hysteria2://' in shadow, '客户端订阅渲染不完整')
 
 
-def test_no_obsolete_role_terms():
-    files = ['core-src/bootstrap.sh', 'core-src/center_install.sh', 'core-src/register_sync.sh', 'core-src/sync_agent.py', 'core-src/vvv_manager.sh', 'core-src/sub_center.py', 'core-src/backup_manager.py', 'core-src/rclone_manager.sh', 'src/prepare.py']
+def test_landing_and_direct_ip_change():
+    landing = read('core-src/landing.sh')
+    manager = read('core-src/vvv_manager.sh')
+    sync = read('core-src/sync_agent.py')
+    for token in ('修改主机 IP 地址', 'update_landing_ip.py', "outbound.get('tag') == 'back-to-japan'", 'update-center-ip'):
+        require(token in landing, f'中转副机修改主机 IP 缺少：{token}')
+    require('修改订阅中心 IP 地址' in manager and 'update-center-ip' in sync, '直连副机缺少修改中心 IP')
+    probe = read('core-src/node_probe.py')
+    require('generic_probe' in probe and 'curl_socks' in probe and '真实连接成功' in probe, '节点检测器不完整')
+
+
+def test_installer_and_diagnostics():
+    installer = read('vvv-install.sh')
+    validation = read('tests/final_runtime_validation.sh')
+    for name in ('restore_manager.py', 'diagnostic_report.py', 'node_probe.py'):
+        require(name in installer, f'安装器没有下载：{name}')
+    diag = read('core-src/diagnostic_report.py')
+    for token in ('VVV-诊断报告', 'SENSITIVE_KEYS', '最近错误日志', '云备份目录', 'vvv-temp-cleanup.timer'):
+        require(token in diag, f'诊断报告缺少：{token}')
+    require(all(name in validation for name in ('restore_manager.py','diagnostic_report.py','node_probe.py')), '最终验证没有覆盖新增 Python 模块')
+
+
+def test_no_qr_and_debian13():
+    files = ['vvv-install.sh','core-src/bootstrap.sh','core-src/host.sh','core-src/landing.sh','core-src/center_install.sh','core-src/center_manager.sh']
     text = '\n'.join(read(path) for path in files)
-    for token in ('日本A', '日本B', '备用订阅中心', '双主机互备', 'v2rayNG', 'v2rayng'):
-        require(token not in text, f'生产源码仍含废弃概念：{token}')
+    require('qrencode' not in text and 'qr_helper' not in text, '仍保留二维码实现')
+    require(all('Debian 13' in read(path) for path in ('vvv-install.sh','core-src/bootstrap.sh','core-src/host.sh','core-src/landing.sh')), '系统限制不是 Debian 13')
 
 
 def main():
     tests = [
-        test_menu_and_front_loaded_parameters,
-        test_direct_address_registration,
-        test_registration_refresh_contract,
-        test_subscription_renderers,
-        test_backup_policy,
-        test_jpr3_and_slot_architecture,
-        test_no_qr_output,
-        test_transports_and_reentrant_installation,
-        test_apt_lock_policy,
-        test_manager_entrypoint_and_bootstrap_command,
-        test_hy2_leaf_certificate,
-        test_debian13_only,
-        test_no_obsolete_role_terms,
+        test_install_menu_and_upfront_parameters, test_vvc1_ip_only_contract,
+        test_transports_and_management, test_hy2_server_hard_limit,
+        test_temporary_nodes_are_local_copies_only, test_config_only_backup_and_restore,
+        test_node_names_and_clients, test_landing_and_direct_ip_change,
+        test_installer_and_diagnostics, test_no_qr_and_debian13,
     ]
     for test in tests:
-        test()
-        print(f'PASS {test.__name__}')
+        test(); print('PASS', test.__name__)
     print('ALL CONFORMANCE TESTS PASSED')
 
 

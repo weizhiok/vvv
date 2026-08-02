@@ -67,7 +67,7 @@ write_http_caddyfile(){
     output discard
   }
 
-  @allowed path /${suffix} /api/v1/* /health
+  @allowed path /${suffix} /health
   handle @allowed {
     reverse_proxy 127.0.0.1:18081
   }
@@ -90,7 +90,7 @@ http://127.0.0.1:${port} {
     output discard
   }
 
-  @allowed path /${suffix} /api/v1/* /health
+  @allowed path /${suffix} /health
   handle @allowed {
     reverse_proxy 127.0.0.1:18081
   }
@@ -119,7 +119,7 @@ ${domain}:${port} {
     output discard
   }
 
-  @allowed path /${suffix} /api/v1/* /health
+  @allowed path /${suffix} /health
   handle @allowed {
     reverse_proxy 127.0.0.1:18081
   }
@@ -171,7 +171,7 @@ https://${ip}:${port} {
   log {
     output discard
   }
-  @allowed path /${suffix} /api/v1/* /health
+  @allowed path /${suffix} /health
   handle @allowed {
     reverse_proxy 127.0.0.1:18081
   }
@@ -273,7 +273,7 @@ obtain_ip_certificate(){
       2>&1 | tee "$log_file"; then
     if grep -q 'too many certificates' "$log_file"; then
       grep -oE 'retry after [^:]+' "$log_file" | head -n1 > /etc/vvv-sub/certificate-rate-limit.txt || true
-      echo "Let's Encrypt 已触发相同 IP 证书签发限制。可先继续使用 HTTP，等待官方提示时间后再开启 HTTPS。" >&2
+      echo "Let's Encrypt 已触发相同 IP 证书签发限制，请等待官方提示时间后重试。" >&2
     fi
     rm -f "$log_file"
     return 1
@@ -335,47 +335,61 @@ base_for(){
   local mode domain ip port
   mode="$1"; domain="$(value '.domain')"; ip="$(value '.public_ip')"; port="$(value '.public_port')"
   case "$mode" in
-    direct-http)
-      [[ -n "$domain" ]] && printf 'http://%s:%s' "$domain" "$port" || printf 'http://%s:%s' "$ip" "$port"
-      ;;
-    direct-https)
-      [[ -n "$domain" ]] && printf 'https://%s:%s' "$domain" "$port" || printf 'https://%s:%s' "$ip" "$port"
-      ;;
+    direct-http) [[ -n "$domain" ]] && printf 'http://%s:%s' "$domain" "$port" || printf 'http://%s:%s' "$ip" "$port";;
+    direct-https) [[ -n "$domain" ]] && printf 'https://%s:%s' "$domain" "$port" || printf 'https://%s:%s' "$ip" "$port";;
     tunnel) printf 'https://%s' "$domain";;
     *) return 1;;
   esac
 }
+
+atomic_jq(){
+  local filter="$1" tmp
+  shift
+  tmp="$(mktemp)"
+  jq "$@" "$filter" "$CFG" > "$tmp"
+  install -m600 "$tmp" "$CFG"
+  rm -f "$tmp"
+}
+
 update_config_urls(){
-  local mode="$1" base suffix tmp
-  base="$(base_for "$mode")"; suffix="$(value '.subscription_suffix')"; tmp="$(mktemp)"
-  jq --arg mode "$mode" --arg base "$base" --arg url "${base}/${suffix}" \
-    '.schema=3 | .transport_mode=$mode | .base_url=$base | .subscription_url=$url | .updated_at=(now|todate)' \
-    "$CFG" > "$tmp"
-  install -m600 "$tmp" "$CFG"; rm -f "$tmp"
+  local mode="$1" base suffix api
+  base="$(base_for "$mode")"; suffix="$(value '.subscription_suffix')"
+  api="http://$(value '.public_ip'):$(value '.listen_port')"
+  atomic_jq '.schema=4 | .transport_mode=$mode | .base_url=$base | .subscription_url=$url | .api_base_url=$api | .updated_at=(now|todate)' \
+    --arg mode "$mode" --arg base "$base" --arg url "${base}/${suffix}" --arg api "$api"
   rewrite_registration_artifacts
 }
+
 rewrite_registration_artifacts(){
-  local base master registration_json registration_code
-  base="$(value '.base_url')"; master="$(value '.master_token')"
-  registration_json="$(jq -nc --arg base "$base" --arg token "$master" '{base_url:$base,master_token:$token}')"
-  registration_code="VVV1.$(printf %s "$registration_json" | base64 -w0 | tr '+/' '-_' | tr -d '=')"
+  local api master registration_code
+  api="$(value '.api_base_url')"; master="$(value '.master_token')"
+  registration_code="$(python3 - "$api" "$master" <<'PY_VVC1'
+import base64,hashlib,json,sys
+api,master=sys.argv[1:]
+obj={'schema':1,'type':'vvv-subscription-center','api_base_url':api,'master_token':master}
+raw=json.dumps(obj,ensure_ascii=False,separators=(',',':')).encode()
+enc=base64.urlsafe_b64encode(raw).decode().rstrip('=')
+digest=hashlib.sha256(b'VVV-VVC1\0'+raw).hexdigest()[:20]
+print(f'VVC1.{enc}.{digest}')
+PY_VVC1
+)"
   printf '%s' "$registration_code" > /etc/vvv-sub/registration.code
   chmod 600 /etc/vvv-sub/registration.code
   cat > /root/VVV-订阅中心恢复信息.txt <<EOF
-VVV 订阅中心恢复信息
-====================
-订阅中心：$(value '.base_url')
+VVV 订阅中心信息
+=================
 统一订阅地址：$(value '.subscription_url')
+副机 API（固定 IP 通讯）：${api}
 传输模式：$(value '.transport_mode')
 订阅后缀：$(value '.subscription_suffix')
 订阅端口：$(value '.public_port')
-主机接入码：${registration_code}
-备份解密密码：$(value '.recovery_password')
+订阅中心对接码：${registration_code}
 本地备份目录：/var/lib/vvv-sub/backups
-云备份：$([[ -f /etc/vvv-sub/cloud.json ]] && echo 已开启 || echo 默认关闭)
+云备份固定目录：vvv/
 EOF
   chmod 600 /root/VVV-订阅中心恢复信息.txt
 }
+
 check_public_once(){
   local mode base suffix
   mode="$(value '.transport_mode')"; base="$(value '.base_url')"; suffix="$(value '.subscription_suffix')"
@@ -388,6 +402,7 @@ check_public_once(){
     curl -fsS --connect-timeout 5 --max-time 15 -H 'User-Agent: Clash-Verge-Rev' "${base}/${suffix}" >/dev/null
   fi
 }
+
 check_public(){
   local attempt
   for attempt in $(seq 1 120); do
@@ -398,97 +413,43 @@ check_public(){
   echo "统一订阅入口在 240 秒内未通过健康检查。" >&2
   return 1
 }
+
 apply_direct_http(){
   open_port "$(value '.public_port')"
-  write_http_caddyfile
-  validate_caddy
-  ensure_service caddy.service restart 75
+  write_http_caddyfile; validate_caddy; ensure_service caddy.service restart 75
   systemctl disable --now vvv-cloudflared.service >/dev/null 2>&1 || true
   systemctl disable --now vvv-ip-cert-renew.timer >/dev/null 2>&1 || true
   update_config_urls direct-http
   check_public
 }
+
 apply_direct_https(){
-  open_port "$(value '.public_port')"
+  open_port "$(value '.public_port')"; open_port 80
   if [[ -n "$(value '.domain')" ]]; then
-    open_port 80
-    write_domain_https_caddyfile
-    validate_caddy
-    ensure_service caddy.service restart 75
+    write_domain_https_caddyfile; validate_caddy; ensure_service caddy.service restart 75
   else
-    open_port 80
     obtain_ip_certificate
-    write_ip_https_caddyfile
-    validate_caddy
-    ensure_service caddy.service restart 75
+    write_ip_https_caddyfile; validate_caddy; ensure_service caddy.service restart 75
   fi
   systemctl disable --now vvv-cloudflared.service >/dev/null 2>&1 || true
   update_config_urls direct-https
   check_public
 }
+
 apply_tunnel(){
   [[ -n "$(value '.domain')" ]] || fail "Cloudflare Tunnel 模式必须配置订阅域名。"
   install_cloudflared
-  write_tunnel_caddyfile
-  validate_caddy
-  ensure_service caddy.service restart 75
-  write_cloudflared_service
-  ensure_service vvv-cloudflared.service restart 75
+  write_tunnel_caddyfile; validate_caddy; ensure_service caddy.service restart 75
+  write_cloudflared_service; ensure_service vvv-cloudflared.service restart 75
   close_port "$(value '.public_port')"
   systemctl disable --now vvv-ip-cert-renew.timer >/dev/null 2>&1 || true
   update_config_urls tunnel
-  echo "正在验证 Cloudflare 公共主机名。该主机名必须已在 Cloudflare Tunnel 中指向 http://127.0.0.1:$(value '.public_port')。"
+  echo "正在验证 Cloudflare 公共主机名；源站应指向 http://127.0.0.1:$(value '.public_port')。"
   check_public
 }
-transaction(){
-  local action="$1" tmp cfg_backup caddy_backup
-  tmp="$(mktemp -d /tmp/vvv-transport.XXXXXX)"; cfg_backup="$tmp/config.json"; caddy_backup="$tmp/Caddyfile"
-  cp -a "$CFG" "$cfg_backup"
-  [[ ! -f "$CADDYFILE" ]] || cp -a "$CADDYFILE" "$caddy_backup"
-  backup_event before-transport-change
-  if "$action"; then
-    backup_event after-transport-change
-    rm -rf "$tmp"
-    return 0
-  fi
-  echo "传输方式切换失败，正在恢复原配置……" >&2
-  install -m600 "$cfg_backup" "$CFG"
-  if [[ -f "$caddy_backup" ]]; then install -m640 -o root -g caddy "$caddy_backup" "$CADDYFILE"; fi
-  systemctl daemon-reload
-  systemctl restart caddy.service >/dev/null 2>&1 || true
-  rm -rf "$tmp"
-  return 1
-}
-apply_initial(){
-  local mode
-  mode="$(value '.transport_mode')"
-  case "$mode" in
-    direct-http) apply_direct_http;;
-    direct-https) apply_direct_https;;
-    tunnel) apply_tunnel;;
-    *) fail "未知订阅传输模式：$mode";;
-  esac
-}
-enable_https(){
-  [[ "$(value '.transport_mode')" == direct-http ]] || fail "当前不是 HTTP 模式，不能执行此操作。"
-  transaction apply_direct_https || fail "HTTPS 开启失败，原 HTTP 配置已恢复并继续可用。"
-  echo "HTTPS 已开启；原 HTTP 订阅入口已失效。"
-  echo "统一订阅地址：$(value '.subscription_url')"
-}
-change_suffix(){
-  local suffix="$1" old tmp
-  [[ "$suffix" =~ ^[A-Za-z0-9]{6,32}$ ]] || fail "订阅后缀必须是 6-32 位大小写字母或数字。"
-  case "${suffix,,}" in health|api|admin|debug) fail "该后缀属于系统保留词。";; esac
-  old="$(value '.subscription_suffix')"; [[ "$suffix" != "$old" ]] || { echo "订阅后缀没有变化。"; return 0; }
-  tmp="$(mktemp)"; jq --arg suffix "$suffix" '.subscription_suffix=$suffix' "$CFG" > "$tmp"; install -m600 "$tmp" "$CFG"; rm -f "$tmp"
-  if ! transaction reapply_current; then
-    tmp="$(mktemp)"; jq --arg suffix "$old" '.subscription_suffix=$suffix' "$CFG" > "$tmp"; install -m600 "$tmp" "$CFG"; rm -f "$tmp"
-    fail "订阅后缀修改失败，已恢复原后缀。"
-  fi
-  echo "订阅后缀修改成功，原订阅地址立即失效。"
-  echo "新统一订阅地址：$(value '.subscription_url')"
-}
-reapply_current(){
+
+reapply_current_no_transaction(){
+  open_port "$(value '.listen_port')"
   case "$(value '.transport_mode')" in
     direct-http) apply_direct_http;;
     direct-https) apply_direct_https;;
@@ -496,22 +457,137 @@ reapply_current(){
     *) return 1;;
   esac
 }
+
+transaction(){
+  local action="$1" tmp rc=0
+  shift
+  tmp="$(mktemp -d /tmp/vvv-transport.XXXXXX)"
+  cp -a "$CFG" "$tmp/config.json"
+  [[ ! -f "$CADDYFILE" ]] || cp -a "$CADDYFILE" "$tmp/Caddyfile"
+  [[ ! -f "$CLOUDFLARED_TOKEN_FILE" ]] || cp -a "$CLOUDFLARED_TOKEN_FILE" "$tmp/cloudflared.token"
+  backup_event before-transport-change
+  "$action" "$@" || rc=$?
+  if (( rc==0 )); then
+    backup_event after-transport-change
+    rm -rf "$tmp"
+    return 0
+  fi
+  echo "订阅入口修改失败，正在恢复原配置……" >&2
+  install -m600 "$tmp/config.json" "$CFG"
+  [[ ! -f "$tmp/Caddyfile" ]] || install -m640 -o root -g caddy "$tmp/Caddyfile" "$CADDYFILE"
+  if [[ -f "$tmp/cloudflared.token" ]]; then install -m600 "$tmp/cloudflared.token" "$CLOUDFLARED_TOKEN_FILE"; else rm -f "$CLOUDFLARED_TOKEN_FILE"; fi
+  systemctl daemon-reload
+  reapply_current_no_transaction >/dev/null 2>&1 || true
+  rm -rf "$tmp"
+  return "$rc"
+}
+
+apply_initial(){ reapply_current_no_transaction; }
+
+valid_suffix(){
+  [[ "$1" =~ ^[A-Za-z0-9]{6,32}$ ]] || return 1
+  case "${1,,}" in health|api|admin|debug) return 1;; esac
+}
+
+change_suffix_impl(){
+  local suffix="$1"
+  valid_suffix "$suffix" || fail "订阅后缀必须是 6-32 位大小写字母或数字，且不能使用保留词。"
+  atomic_jq '.subscription_suffix=$suffix' --arg suffix "$suffix"
+  reapply_current_no_transaction
+}
+change_suffix(){ transaction change_suffix_impl "$1" || fail "订阅后缀修改失败，原配置已恢复。"; echo "新订阅地址：$(value '.subscription_url')"; }
+
+validate_domain_for_direct(){
+  local domain="$1" ip
+  [[ -z "$domain" ]] && return 0
+  [[ "$domain" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]] || return 1
+  ip="$(value '.public_ip')"
+  getent ahostsv4 "$domain" | awk '{print $1}' | sort -u | grep -Fxq "$ip"
+}
+
+change_domain_impl(){
+  local domain="${1,,}" mode
+  domain="${domain%.}"; mode="$(value '.transport_mode')"
+  [[ "$mode" != tunnel || -n "$domain" ]] || fail "Tunnel 模式的订阅域名不能为空。"
+  if [[ "$mode" == direct-https ]]; then validate_domain_for_direct "$domain" || fail "域名格式错误，或 A 记录尚未指向本机 IP $(value '.public_ip')。"; fi
+  [[ -z "$domain" || "$domain" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]] || fail "域名格式错误。"
+  atomic_jq '.domain=$domain | .address_mode=(if $domain=="" then "ip" else "domain" end)' --arg domain "$domain"
+  reapply_current_no_transaction
+}
+change_domain(){ transaction change_domain_impl "$1" || fail "订阅域名修改失败，原配置已恢复。"; echo "新订阅地址：$(value '.subscription_url')"; }
+
+change_port_impl(){
+  local port="$1" old mode
+  [[ "$port" =~ ^[0-9]+$ ]] && ((10#$port>=1 && 10#$port<=65535)) || fail "端口必须是 1-65535 的数字。"
+  port="$((10#$port))"; mode="$(value '.transport_mode')"; old="$(value '.public_port')"
+  [[ "$mode" != tunnel ]] || fail "Tunnel 公网端口固定为 443；无需修改本地源站端口。"
+  [[ "$port" != "$(jq -r '.listen_port // 0' /etc/jp-relay/state.json 2>/dev/null || echo 0)" ]] || fail "订阅端口不能与代理端口相同。"
+  atomic_jq '.public_port=$port' --argjson port "$port"
+  reapply_current_no_transaction
+  [[ "$old" == "$port" ]] || close_port "$old"
+}
+change_port(){ transaction change_port_impl "$1" || fail "订阅端口修改失败，原配置已恢复。"; echo "新订阅地址：$(value '.subscription_url')"; }
+
+change_tunnel_token_impl(){
+  local token="$1"
+  [[ "$(value '.transport_mode')" == tunnel ]] || fail "当前不是 Tunnel 模式。"
+  [[ -n "$token" ]] || fail "Tunnel Token 不能为空。"
+  printf '%s' "$token" > "$CLOUDFLARED_TOKEN_FILE"; chmod 600 "$CLOUDFLARED_TOKEN_FILE"
+  reapply_current_no_transaction
+}
+change_tunnel_token(){ transaction change_tunnel_token_impl "$1" || fail "Tunnel Token 修改失败，原配置已恢复。"; echo "Tunnel Token 修改成功。"; }
+
+switch_to_tunnel_impl(){
+  local domain="$1" token="$2"
+  [[ "$(value '.transport_mode')" == direct-https ]] || fail "只有直接 HTTPS 可以切换到 Tunnel。"
+  [[ "$domain" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]] || fail "Tunnel 域名格式错误。"
+  [[ -n "$token" ]] || fail "Tunnel Token 不能为空。"
+  printf '%s' "$token" > "$CLOUDFLARED_TOKEN_FILE"; chmod 600 "$CLOUDFLARED_TOKEN_FILE"
+  atomic_jq '.domain=$domain | .address_mode="domain" | .transport_mode="tunnel"' --arg domain "${domain,,}"
+  apply_tunnel
+}
+
+switch_to_https_impl(){
+  local domain="$1" port="$2"
+  [[ "$(value '.transport_mode')" == tunnel ]] || fail "只有 Tunnel 可以切换到直接 HTTPS。"
+  [[ "$port" =~ ^[0-9]+$ ]] && ((10#$port>=1 && 10#$port<=65535)) || fail "HTTPS 端口必须是 1-65535 的数字。"
+  port="$((10#$port))"
+  [[ "$port" != "$(jq -r '.listen_port // 0' /etc/jp-relay/state.json 2>/dev/null || echo 0)" ]] || fail "HTTPS 端口不能与代理端口相同。"
+  validate_domain_for_direct "${domain,,}" || fail "域名格式错误，或 A 记录尚未指向本机 IP $(value '.public_ip')。"
+  atomic_jq '.domain=$domain | .address_mode=(if $domain=="" then "ip" else "domain" end) | .public_port=$port | .transport_mode="direct-https"' \
+    --arg domain "${domain,,}" --argjson port "$port"
+  apply_direct_https
+}
+
+switch_secure(){
+  local target="$1" a="${2:-}" b="${3:-}"
+  case "$target" in
+    tunnel) transaction switch_to_tunnel_impl "$a" "$b" || fail "切换 Tunnel 失败，原 HTTPS 已恢复。";;
+    https) transaction switch_to_https_impl "$a" "$b" || fail "切换 HTTPS 失败，原 Tunnel 已恢复。";;
+    *) fail "仅支持 https 或 tunnel。";;
+  esac
+  echo "切换成功，新订阅地址：$(value '.subscription_url')"
+}
+
 status(){
   echo "传输模式：$(value '.transport_mode')"
   echo "统一订阅地址：$(value '.subscription_url')"
+  echo "副机 API：$(value '.api_base_url')（仅 IP 通讯）"
   echo "订阅后缀：$(value '.subscription_suffix')"
   systemctl --no-pager --full status caddy.service vvv-sub.service 2>/dev/null || true
   [[ "$(value '.transport_mode')" != tunnel ]] || systemctl --no-pager --full status vvv-cloudflared.service 2>/dev/null || true
-  [[ ! -f /etc/vvv-sub/certificate-rate-limit.txt ]] || { echo "最近证书限额提示："; cat /etc/vvv-sub/certificate-rate-limit.txt; }
 }
 
 [[ $(id -u) -eq 0 ]] || fail "请使用 root 用户运行。"
 [[ -s "$CFG" ]] || fail "订阅中心配置不存在。"
 case "${1:-status}" in
-  apply-initial) apply_initial;;
-  enable-https) enable_https;;
+  apply-initial|reapply) transaction reapply_current_no_transaction;;
   change-suffix) change_suffix "${2:-}";;
-  reapply) transaction reapply_current;;
+  change-domain) change_domain "${2:-}";;
+  change-port) change_port "${2:-}";;
+  change-tunnel-token) change_tunnel_token "${2:-}";;
+  switch-secure) switch_secure "${2:-}" "${3:-}" "${4:-}";;
+  rewrite-registration) rewrite_registration_artifacts;;
   status) status;;
-  *) echo "用法：$0 apply-initial|enable-https|change-suffix 后缀|reapply|status" >&2; exit 2;;
+  *) echo "用法：$0 apply-initial|reapply|change-suffix|change-domain|change-port|change-tunnel-token|switch-secure|rewrite-registration|status" >&2; exit 2;;
 esac

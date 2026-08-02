@@ -56,7 +56,7 @@ mkdir -p "$TMP/app"
 echo "正在下载 VVV 普通源码……"
 curl -fsSL --retry 5 --retry-all-errors "$RAW/core-src/bootstrap.sh?v=$nonce" -o "$TMP/app/bootstrap.sh" || fail "下载 bootstrap.sh 失败。"
 curl -fsSL --retry 5 --retry-all-errors "$RAW/src/prepare.py?v=$nonce" -o "$TMP/prepare.py" || fail "下载 prepare.py 失败。"
-files=(host.sh landing.sh center_install.sh register_sync.sh vvv_manager.sh sub_center.py sync_agent.py backup_manager.py rclone_manager.sh client_adapters.py adapter_manager.py center_transport.sh center_manager.sh)
+files=(host.sh landing.sh center_install.sh register_sync.sh vvv_manager.sh sub_center.py sync_agent.py backup_manager.py rclone_manager.sh client_adapters.py adapter_manager.py center_transport.sh center_manager.sh restore_manager.py diagnostic_report.py node_probe.py)
 for file in "${files[@]}"; do
   printf '  下载 %s\n' "$file"
   curl -fsSL --retry 5 --retry-all-errors "$RAW/core-src/$file?v=$nonce-$file" -o "$TMP/app/$file" || fail "下载 $file 失败。"
@@ -69,7 +69,7 @@ for file in bootstrap.sh center_install.sh register_sync.sh vvv_manager.sh rclon
   bash -n "$TMP/app/$file" || fail "$file 语法检查失败。"
 done
 sh -n "$TMP/app/landing.sh" || fail "landing.sh 语法检查失败。"
-python3 -m py_compile "$TMP/app/sub_center.py" "$TMP/app/sync_agent.py" "$TMP/app/backup_manager.py" "$TMP/app/client_adapters.py" "$TMP/app/adapter_manager.py" || fail "Python 模块语法检查失败。"
+python3 -m py_compile "$TMP/app/sub_center.py" "$TMP/app/sync_agent.py" "$TMP/app/backup_manager.py" "$TMP/app/client_adapters.py" "$TMP/app/adapter_manager.py" "$TMP/app/restore_manager.py" "$TMP/app/diagnostic_report.py" "$TMP/app/node_probe.py" || fail "Python 模块语法检查失败。"
 python3 "$TMP/app/client_adapters.py" >/dev/null || fail "客户端适配器自检失败。"
 
 # 新源码先复制到 /usr/local/lib 同一文件系统的暂存目录。

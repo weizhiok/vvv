@@ -23,6 +23,9 @@ python3 -m py_compile \
   "$ROOT/core-src/backup_manager.py" \
   "$ROOT/core-src/client_adapters.py" \
   "$ROOT/core-src/adapter_manager.py" \
+  "$ROOT/core-src/restore_manager.py" \
+  "$ROOT/core-src/diagnostic_report.py" \
+  "$ROOT/core-src/node_probe.py" \
   "$ROOT/tests/conformance.py" \
   "$ROOT/tests/extract_manager_library.py" \
   "$ROOT/tests/build_slot_fixture.py"
@@ -84,11 +87,17 @@ cmp "$WORK/xray-empty.json" "$WORK/xray-active.json"
 build_sing_config "$WORK/state-empty.json" "$WORK/sing-empty.json"
 build_sing_config "$WORK/state-active.json" "$WORK/sing-active.json"
 cmp "$WORK/sing-empty.json" "$WORK/sing-active.json"
-mkdir -p "$WORK/vless-empty" "$WORK/vless-active" "$WORK/hy2-empty" "$WORK/hy2-active"
+build_xray_config "$WORK/state-temp.json" "$WORK/xray-temp.json"
+cmp "$WORK/xray-active.json" "$WORK/xray-temp.json"
+build_sing_config "$WORK/state-temp.json" "$WORK/sing-temp.json"
+cmp "$WORK/sing-active.json" "$WORK/sing-temp.json"
+mkdir -p "$WORK/vless-empty" "$WORK/vless-active" "$WORK/vless-temp" "$WORK/hy2-empty" "$WORK/hy2-active" "$WORK/hy2-temp"
 build_vless_slot_configs "$WORK/state-empty.json" "$WORK/vless-empty"
 build_vless_slot_configs "$WORK/state-active.json" "$WORK/vless-active"
 build_hy2_slot_configs "$WORK/state-empty.json" "$WORK/hy2-empty"
 build_hy2_slot_configs "$WORK/state-active.json" "$WORK/hy2-active"
+build_vless_slot_configs "$WORK/state-temp.json" "$WORK/vless-temp"
+build_hy2_slot_configs "$WORK/state-temp.json" "$WORK/hy2-temp"
 mkdir -p "$WORK/client-files"
 generate_client_files "$WORK/state-active.json" "" "$WORK/client-files" direct >/dev/null
 [[ -s "$WORK/client-files/Quantumult-X.conf" ]]
@@ -106,6 +115,12 @@ grep -q 'type: hysteria2' "$WORK/client-files/Clash-Verge-Rev.yaml"
 [[ "$(find "$WORK/vless-active" -name '*.json' | wc -l)" -eq 2 ]]
 [[ "$(find "$WORK/hy2-active" -name '*.json' | wc -l)" -eq 1 ]]
 [[ -f "$WORK/vless-active/v01.json" && -f "$WORK/vless-active/v02.json" && -f "$WORK/hy2-active/h01.json" ]]
+[[ "$(find "$WORK/vless-temp" -name '*.json' | wc -l)" -eq 4 ]]
+[[ "$(find "$WORK/hy2-temp" -name '*.json' | wc -l)" -eq 2 ]]
+grep -q 'proxy.example.com' "$WORK/vless-temp/v04.json"
+grep -q '203.0.113.20' "$WORK/vless-temp/v03.json"
+grep -q '203.0.113.20' "$WORK/hy2-temp/h02.json"
+grep -q '"ignore_client_bandwidth": true' "$WORK/sing-active.json"
 
 log 'Run actual core configuration checks'
 "$XRAY" run -test -format=json -config "$WORK/xray-active.json"

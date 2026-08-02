@@ -7,7 +7,7 @@
 umask 077
 
 # ============================================================
-PAIRING_KEY='请粘贴以JPR3.开头的完整对接密钥'
+PAIRING_KEY="${VVV_PAIRING_KEY:-请粘贴以JPR3.开头的完整对接密钥}"
 # ============================================================
 
 export PAIRING_KEY
@@ -264,11 +264,13 @@ PY_JPR3_DECODE
   SNI="$(printf '%s' "$PAIR_JSON" | jq -er '.sni')"
   PAIR_XRAY_VERSION="$(printf '%s' "$PAIR_JSON" | jq -er '.xray_version')"
   PAIR_SING_BOX_VERSION="$(printf '%s' "$PAIR_JSON" | jq -er '.sing_box_version')"
+  HY2_LIMIT_MBPS="$(printf '%s' "$PAIR_JSON" | jq -er '.hy2_limit_mbps // 50')"
 
   valid_ipv4 "$JAPAN_PUBLIC_IP" || fail "JPR3 中的日本公网 IPv4 无效。"
   valid_ipv4 "$REMOTE_PUBLIC_IP" || fail "JPR3 中的落地公网 IPv4 无效。"
   valid_port "$JAPAN_PORT" || fail "JPR3 中的日本端口无效。"
   valid_port "$REMOTE_PUBLIC_PORT" || fail "JPR3 中的落地端口无效。"
+  is_numeric "$HY2_LIMIT_MBPS" && [ "$HY2_LIMIT_MBPS" -ge 30 ] && [ "$HY2_LIMIT_MBPS" -le 100 ] || fail "JPR3 中的 Hysteria 2 限速必须为 30-100 Mbps。"
 
   if mode_has_vless; then
     JAPAN_CLIENT_UUID="$(printf '%s' "$PAIR_JSON" | jq -er '.vless.japan_client_uuid')"
@@ -800,6 +802,7 @@ write_sing_config() {
       "users": [{"name": "landing-user", "password": "${REMOTE_HY2_PASSWORD}"}],
       "up_mbps": ${HY2_LIMIT_MBPS},
       "down_mbps": ${HY2_LIMIT_MBPS},
+      "ignore_client_bandwidth": true,
       "obfs": {"type": "salamander", "password": "${REMOTE_HY2_OBFS}"},
       "tls": {
         "enabled": true,
@@ -1040,26 +1043,198 @@ save_state() {
 }
 
 install_shortcuts() {
-  mkdir -p /usr/local/sbin
+  mkdir -p /usr/local/sbin /usr/local/lib/vvv
+  cat > /usr/local/lib/vvv/update_landing_ip.py <<'PY_UPDATE_LANDING_IP'
+#!/usr/bin/env python3
+import ipaddress
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+STATE = Path('/etc/jp-relay/landing-state.json')
+XRAY_CFG = Path('/usr/local/etc/xray/config.json')
+SING_CFG = Path('/etc/sing-box/config.json')
+CLIENT_DIR = Path('/root/中转客户端配置')
+CLIENT_NODES = Path('/root/中转客户端节点.txt')
+SYNC_CFG = Path('/etc/vvv/client.json')
+SYNC_AGENT = Path('/usr/local/lib/vvv/sync_agent.py')
+
+
+def load(path):
+    return json.loads(path.read_text(encoding='utf-8'))
+
+
+def atomic_json(path, obj, mode=None):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix='.' + path.name + '.', dir=str(path.parent))
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+            json.dump(obj, handle, ensure_ascii=False, indent=2)
+            handle.write('\n')
+            handle.flush()
+            os.fsync(handle.fileno())
+        if mode is None and path.exists():
+            mode = path.stat().st_mode & 0o777
+        os.chmod(tmp, mode or 0o600)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def patch_xray(obj, new_ip):
+    changed = False
+    for outbound in obj.get('outbounds', []):
+        if outbound.get('tag') == 'back-to-japan':
+            settings = outbound.setdefault('settings', {})
+            settings['address'] = new_ip
+            changed = True
+    if not changed:
+        raise RuntimeError('Xray 配置中未找到 back-to-japan。')
+
+
+def patch_sing(obj, new_ip):
+    changed = False
+    for outbound in obj.get('outbounds', []):
+        if outbound.get('tag') == 'back-to-japan':
+            outbound['server'] = new_ip
+            changed = True
+    if not changed:
+        raise RuntimeError('sing-box 配置中未找到 back-to-japan。')
+
+
+def validate(candidate, kind):
+    if kind == 'xray':
+        subprocess.run(['/usr/local/bin/xray', 'run', '-test', '-format=json', '-config', str(candidate)], check=True, timeout=60)
+    else:
+        subprocess.run(['/usr/local/bin/sing-box', 'check', '-c', str(candidate)], check=True, timeout=60)
+
+
+def restart_active(service):
+    subprocess.run(['systemctl', 'restart', service], check=True, timeout=75)
+    subprocess.run(['systemctl', 'is-active', '--quiet', service], check=True, timeout=20)
+
+
+def update_text_files(old_ip, new_ip):
+    paths = list(CLIENT_DIR.glob('*')) if CLIENT_DIR.exists() else []
+    if CLIENT_NODES.exists():
+        paths.append(CLIENT_NODES)
+    for path in paths:
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding='utf-8')
+        except UnicodeDecodeError:
+            continue
+        if old_ip in text:
+            path.write_text(text.replace(old_ip, new_ip), encoding='utf-8')
+            os.chmod(path, 0o600)
+
+
+def update_sync_center(old_ip, new_ip):
+    if not (SYNC_CFG.exists() and SYNC_AGENT.exists()):
+        return
+    try:
+        cfg = load(SYNC_CFG)
+    except Exception:
+        return
+    base = str(cfg.get('api_base_url') or cfg.get('base_url') or '')
+    if old_ip not in base:
+        return
+    subprocess.run(['python3', str(SYNC_AGENT), 'update-center-ip', new_ip], check=True, timeout=45)
+
+
+def main():
+    if len(sys.argv) != 2:
+        raise SystemExit('用法：update_landing_ip.py 新主机IP')
+    try:
+        new_ip = str(ipaddress.IPv4Address(sys.argv[1].strip()))
+    except ipaddress.AddressValueError as exc:
+        raise SystemExit('主机 IP 格式错误。') from exc
+    state = load(STATE)
+    old_ip = str(state.get('japan_public_ip') or '')
+    if not old_ip:
+        raise SystemExit('落地状态中没有旧主机 IP。')
+    if new_ip == old_ip:
+        print('主机 IP 没有变化。')
+        return
+    mode = str(state.get('protocol_mode') or '')
+    paths = [STATE, XRAY_CFG, SING_CFG, SYNC_CFG, CLIENT_NODES]
+    if CLIENT_DIR.exists():
+        paths.extend(p for p in CLIENT_DIR.iterdir() if p.is_file())
+    with tempfile.TemporaryDirectory(prefix='vvv-landing-ip.') as work:
+        work = Path(work)
+        backups = {}
+        for path in paths:
+            if path.exists():
+                target = work / (str(len(backups)) + '-' + path.name)
+                shutil.copy2(path, target)
+                backups[path] = target
+        candidates = {}
+        try:
+            if mode in ('dual', 'vless'):
+                xray = load(XRAY_CFG)
+                patch_xray(xray, new_ip)
+                candidate = work / 'xray.json'
+                candidate.write_text(json.dumps(xray, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+                validate(candidate, 'xray')
+                candidates[XRAY_CFG] = candidate
+            if mode in ('dual', 'hy2'):
+                sing = load(SING_CFG)
+                patch_sing(sing, new_ip)
+                candidate = work / 'sing.json'
+                candidate.write_text(json.dumps(sing, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+                validate(candidate, 'sing')
+                candidates[SING_CFG] = candidate
+            state['japan_public_ip'] = new_ip
+            state['main_ip_updated_at'] = __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()
+            atomic_json(STATE, state)
+            for target, candidate in candidates.items():
+                shutil.copy2(candidate, target)
+                os.chmod(target, 0o640)
+            update_text_files(old_ip, new_ip)
+            update_sync_center(old_ip, new_ip)
+            if mode in ('dual', 'vless'):
+                restart_active('xray.service')
+            if mode in ('dual', 'hy2'):
+                restart_active('sing-box.service')
+        except Exception:
+            for path, backup in backups.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(backup, path)
+            subprocess.run(['systemctl', 'restart', 'xray.service'], check=False, timeout=75)
+            subprocess.run(['systemctl', 'restart', 'sing-box.service'], check=False, timeout=75)
+            raise
+    print(f'主机 IP 修改成功：{old_ip} → {new_ip}')
+    print('代理配置、客户端节点文件及订阅同步地址已同步更新。')
+
+
+if __name__ == '__main__':
+    main()
+PY_UPDATE_LANDING_IP
+  chmod 700 /usr/local/lib/vvv/update_landing_ip.py
+
   cat > /usr/local/sbin/landing-vps <<'EOF_LANDING_VPS'
 #!/bin/sh
 set -u
 state=/etc/jp-relay/landing-state.json
 nodes=/root/中转客户端节点.txt
+updater=/usr/local/lib/vvv/update_landing_ip.py
 [ -f "$state" ] || { echo "尚未安装落地节点。"; exit 1; }
-
-show_nodes() {
-  cat "$nodes"
-}
 
 valid_ipv4() {
   ip="$1"; old_ifs="$IFS"; IFS=.; set -- $ip; IFS="$old_ifs"
   [ "$#" -eq 4 ] || return 1
   for octet in "$@"; do case "$octet" in ''|*[!0-9]*) return 1;; esac; [ "$octet" -le 255 ] || return 1; done
+  [ "$ip" != "0.0.0.0" ]
 }
 
 probe_proxy() {
-  socks_port="$1"; expected_ip="$2"; label="$3"
+  socks_port="$1"; expected_ip="$2"
   exit_ip=""; last_error=""
   for url in https://api.ipify.org https://ipv4.icanhazip.com; do
     err_file="$(mktemp /tmp/landing-vps-probe.XXXXXX)"
@@ -1072,7 +1247,7 @@ probe_proxy() {
   for url in https://www.gstatic.com/generate_204 https://www.google.com/generate_204; do
     result="$(curl -sS --socks5-hostname "127.0.0.1:${socks_port}" --connect-timeout 8 --max-time 25 -o /dev/null -w '%{http_code}|%{time_total}' "$url" 2>/dev/null || true)"
     code="${result%%|*}"; seconds="${result#*|}"
-    if [ "$code" = "204" ]; then
+    if [ "$code" = 204 ]; then
       PROBE_EXIT_IP="$exit_ip"
       PROBE_TIME="$(awk -v t="$seconds" 'BEGIN{printf "%.0f",t*1000}')"
       return 0
@@ -1084,31 +1259,53 @@ probe_proxy() {
 
 print_online() { if [ -t 1 ]; then printf '\033[1;32m%s\033[0m\n' "$1"; else printf '%s\n' "$1"; fi; }
 print_offline() { if [ -t 1 ]; then printf '\033[1;31m%s\033[0m\n' "$1"; else printf '%s\n' "$1"; fi; }
+pause() { read -r -p "按回车返回……" _; }
 
-show_nodes
-mode="$(jq -r '.protocol_mode' "$state")"
-expected="$(jq -r '.remote_public_ip' "$state")"
-echo
-echo "Xray-core：$([ -x /usr/local/bin/xray ] && /usr/local/bin/xray version 2>/dev/null | awk 'NR==1{print "v"$2}' || echo 未安装)"
-echo "sing-box：$([ -x /usr/local/bin/sing-box ] && /usr/local/bin/sing-box version 2>/dev/null | awk '/sing-box version/{print "v"$3;exit}' || echo 未安装)"
-echo
-echo "========== 执行真实双向闭环检测 =========="
-case "$mode" in dual|vless)
-  port="$(jq -r '.vless_test_port' "$state")"
-  if probe_proxy "$port" "$expected" "VLESS + REALITY"; then
-    print_online "VLESS + REALITY：在线，出口 ${PROBE_EXIT_IP}，${PROBE_TIME} ms"
-  else
-    print_offline "VLESS + REALITY：离线，${PROBE_REASON}"
-  fi
-;; esac
-case "$mode" in dual|hy2)
-  port="$(jq -r '.hy2_test_port' "$state")"
-  if probe_proxy "$port" "$expected" "Hysteria 2"; then
-    print_online "Hysteria 2：在线，出口 ${PROBE_EXIT_IP}，${PROBE_TIME} ms"
-  else
-    print_offline "Hysteria 2：离线，${PROBE_REASON}"
-  fi
-;; esac
+show_status() {
+  [ ! -f "$nodes" ] || cat "$nodes"
+  mode="$(jq -r '.protocol_mode' "$state")"
+  expected="$(jq -r '.remote_public_ip' "$state")"
+  echo
+  echo "当前主机 IP：$(jq -r '.japan_public_ip' "$state")"
+  echo "Xray-core：$([ -x /usr/local/bin/xray ] && /usr/local/bin/xray version 2>/dev/null | awk 'NR==1{print "v"$2}' || echo 未安装)"
+  echo "sing-box：$([ -x /usr/local/bin/sing-box ] && /usr/local/bin/sing-box version 2>/dev/null | awk '/sing-box version/{print "v"$3;exit}' || echo 未安装)"
+  echo
+  echo "========== 执行真实双向闭环检测 =========="
+  case "$mode" in dual|vless)
+    port="$(jq -r '.vless_test_port' "$state")"
+    if probe_proxy "$port" "$expected"; then print_online "VLESS + REALITY：在线，出口 ${PROBE_EXIT_IP}，${PROBE_TIME} ms"; else print_offline "VLESS + REALITY：离线，${PROBE_REASON}"; fi
+  ;; esac
+  case "$mode" in dual|hy2)
+    port="$(jq -r '.hy2_test_port' "$state")"
+    if probe_proxy "$port" "$expected"; then print_online "Hysteria 2：在线，出口 ${PROBE_EXIT_IP}，${PROBE_TIME} ms"; else print_offline "Hysteria 2：离线，${PROBE_REASON}"; fi
+  ;; esac
+}
+
+change_main_ip() {
+  old="$(jq -r '.japan_public_ip' "$state")"
+  while true; do
+    read -r -p "请输入新的主机公网 IPv4（当前 ${old}，按回车取消）：" ip
+    [ -n "$ip" ] || return 0
+    if valid_ipv4 "$ip"; then break; fi
+    echo "IP 格式错误，请重新输入。"
+  done
+  python3 "$updater" "$ip"
+}
+
+while true; do
+  echo
+  echo "========== 中转副机管理 =========="
+  echo "1. 查看节点与线路状态"
+  echo "2. 修改主机 IP 地址"
+  echo "0. 退出"
+  read -r -p "请输入编号：" choice
+  case "$choice" in
+    1) show_status; pause;;
+    2) change_main_ip; pause;;
+    0) exit 0;;
+    *) echo "请输入有效编号。";;
+  esac
+done
 EOF_LANDING_VPS
   chmod 700 /usr/local/sbin/landing-vps
   cat > /usr/local/sbin/vps <<'EOF_VPS'
