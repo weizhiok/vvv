@@ -23,7 +23,23 @@ jobs:
           ref: agent/reentrant-role-installer
           fetch-depth: 0
       - name: Apply production patch
-        run: python3 tools/apply_reentrant_installer.py
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path=Path('tools/apply_reentrant_installer.py')
+          text=path.read_text(encoding='utf-8')
+          old='    "\\n" + new_menu_test.strip() + "\\n",\n'
+          new='    lambda _: "\\n" + new_menu_test.strip() + "\\n",\n'
+          if text.count(old) != 1:
+              raise SystemExit('menu replacement target not found')
+          text=text.replace(old,new,1)
+          old='    "\\n" + new_reentrant_test.strip() + "\\n",\n'
+          new='    lambda _: "\\n" + new_reentrant_test.strip() + "\\n",\n'
+          if text.count(old) != 1:
+              raise SystemExit('reentrant replacement target not found')
+          path.write_text(text.replace(old,new,1),encoding='utf-8')
+          PY
+          python3 tools/apply_reentrant_installer.py
       - name: Verify repeatable installer
         run: |
           set -Eeuo pipefail
