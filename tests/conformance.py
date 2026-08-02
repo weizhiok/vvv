@@ -51,15 +51,15 @@ def test_menu_and_front_loaded_parameters():
         'export VVV_SUB_DOMAIN VVV_SUB_PORT',
     ):
         require(token in text, f'缺少前置参数功能：{token}')
-    collect = text.index('# 真正安装前，一次性收集该角色需要的全部参数。')
-    execute = text.index('case "$choice" in', collect + 1)
-    execute = text.index('install_host', execute)
-    summary_end = text.index('case "$choice" in', text.index('show_parameter_summary', collect))
-    require('read -r' not in text[summary_end:execute], '参数总览后仍存在确认输入')
-    require('write_roles true true false true center-relay' in text, '菜单 1 没有安装订阅中心+中转主机')
-    require('register_sync.sh" center-relay "$code"' in text, '菜单 1 没有按 center-relay 注册')
+    require(text.index('show_install_menu') < text.index('landing_state_valid && fail'), '兼容性判断发生在菜单显示之前')
+    summary_call = text.rindex('show_parameter_summary')
+    execute = text.index('case "$choice" in', summary_call)
+    require('read -r' not in text[summary_call:execute], '参数总览后仍存在确认输入')
+    require('rebuild_roles_from_system' in text, '角色状态没有根据实际模块合并重建')
+    require('primary=center-relay' in text, '订阅中心与中转主机不能合并为 center-relay')
+    require('register_current_main_role' in text, '追加角色后没有按最终角色重新注册')
+    require('bash "$BASE_DIR/register_sync.sh" landing "$code"' in text, '中转副机没有自动注册')
     require('write_roles true true false true all' not in text, '仍保留旧 all 主角色')
-    require('register_sync.sh" landing "$code"' in text, '中转副机没有自动注册')
 
 
 def sample_host_state():
@@ -158,12 +158,37 @@ def test_no_qr_output():
     require(not (ROOT / 'core-src/qr_helper.sh').exists(), '二维码辅助文件仍存在')
 
 
-def test_https_and_fresh_install_only():
+def test_https_and_reentrant_installation():
     installer = read('vvv-install.sh')
     bootstrap = read('core-src/bootstrap.sh')
     center = read('core-src/center_install.sh')
     manager = read('core-src/vvv_manager.sh')
-    require('当前版本只支持全新安装' in installer, '网络入口没有拒绝旧安装状态')
+    require('当前版本只支持全新安装' not in installer, '网络入口仍拒绝已有或中断状态')
+    require('始终进入安装菜单' in installer, '网络入口没有承诺重复运行仍进入菜单')
+    for token in (
+        'SOURCE_STAGING="/usr/local/lib/.vvv-source.staging.$$"',
+        'SOURCE_BACKUP="/usr/local/lib/.vvv-source.previous.$$"',
+        'cp -a "$TMP/app" "$SOURCE_STAGING"',
+        'mv "$SOURCE_STAGING" "$SOURCE_TARGET"',
+        'mv "$SOURCE_BACKUP" "$SOURCE_TARGET"',
+        'SOURCE_SWAP_COMMITTED=1',
+    ):
+        require(token in installer, f'源码安全替换缺少：{token}')
+    require('mv "$TMP/app" "$SOURCE_TARGET"' not in installer, '仍从 /tmp 跨文件系统直接替换正式源码')
+    for token in (
+        'show_install_menu',
+        'center_complete',
+        'center_partial',
+        'backup_and_reset_partial_center',
+        'ensure_host',
+        'ensure_center',
+        'rebuild_roles_from_system',
+        'register_current_main_role',
+        '复用现有协议、端口和永久凭证',
+        '保留现有订阅密钥、已注册主机和备份数据',
+    ):
+        require(token in bootstrap, f'重复安装或断点续装缺少：{token}')
+    require('rm -rf /etc/vvv /etc/jp-relay' not in installer, '网络入口仍会删除已有代理或角色状态')
     require('直接回车使用本机公网 IP' in bootstrap and 'VVV_SUB_DOMAIN=""' in bootstrap, '订阅域名不能留空使用公网 IP')
     require('域名不能为空' not in bootstrap, '仍强制要求输入订阅域名')
     require('mode=domain' in center and 'mode=ip' in center, '没有同时实现域名与 IP HTTPS 模式')
@@ -238,7 +263,7 @@ def test_debian13_only():
     for token in ('Debian 12', 'Alpine', 'alpine', 'OpenRC', 'openrc', 'rc-service', 'rc-update', '/etc/init.d', 'apk add', 'apk update', 'apk upgrade'):
         require(token not in landing, f'落地脚本仍保留旧系统兼容逻辑：{token}')
     readme = read('README.md')
-    require('仅支持全新 Debian 13' in readme, 'README 没有说明仅支持全新 Debian 13')
+    require('仅支持 Debian 13' in readme, 'README 没有说明仅支持 Debian 13')
     require('Debian 12' in readme and '不包含' in readme, 'README 没有说明移除 Debian 12 兼容')
 
 
@@ -260,7 +285,7 @@ def main():
         test_backup_policy,
         test_jpr3_and_slot_architecture,
         test_no_qr_output,
-        test_https_and_fresh_install_only,
+        test_https_and_reentrant_installation,
         test_apt_lock_policy,
         test_manager_entrypoint_and_bootstrap_command,
         test_hy2_leaf_certificate,
