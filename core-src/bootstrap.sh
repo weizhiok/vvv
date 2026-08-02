@@ -400,9 +400,17 @@ install_landing(){
   tmp="$(mktemp /tmp/vvv-landing.XXXXXX.sh)"
   awk -v key="$key" 'BEGIN{done=0} !done && /^PAIRING_KEY=/ {print "PAIRING_KEY=\047" key "\047"; done=1; next} {print}' "$BASE_DIR/landing.sh" > "$tmp"
   chmod 700 "$tmp"
-  sh "$tmp"
+  local landing_rc
+  if sh "$tmp"; then
+    landing_rc=0
+  else
+    landing_rc=$?
+  fi
   rm -f "$tmp"
-  [[ -x /usr/local/sbin/landing-vps ]] || fail "中转副机安装后管理命令不存在。"
+  if (( landing_rc != 0 )); then
+    fail "中转副机安装程序失败（退出码 ${landing_rc}）；已停止后续步骤，请以上方首次失败信息为准。"
+  fi
+  [[ -x /usr/local/sbin/landing-vps ]] || fail "中转副机安装程序返回成功，但管理命令不存在。"
   cat > /usr/local/sbin/vvv-landing-original <<'EOF_LANDING_ORIGINAL'
 #!/usr/bin/env bash
 exec /usr/local/sbin/landing-vps "$@"
