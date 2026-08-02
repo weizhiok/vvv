@@ -1,0 +1,47 @@
+name: Apply reentrant rollback test
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/update_reentrant_rollback_test.py'
+      - 'trigger-reentrant-rollback-test.txt'
+      - '.github/workflows/apply-reentrant-rollback-test.yml'
+permissions:
+  contents: write
+concurrency:
+  group: apply-reentrant-rollback-test-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reentrant-role-installer
+          fetch-depth: 0
+      - name: Update rollback regression
+        run: python3 tools/update_reentrant_rollback_test.py
+      - name: Verify installer and tests
+        run: |
+          set -Eeuo pipefail
+          bash -n vvv-install.sh
+          bash -n core-src/bootstrap.sh
+          python3 -m py_compile tests/conformance.py
+          python3 tests/conformance.py
+          grep -F 'SOURCE_STAGING="/usr/local/lib/.vvv-source.staging.$$"' vvv-install.sh
+          grep -F 'mv "$SOURCE_BACKUP" "$SOURCE_TARGET"' vvv-install.sh
+          ! grep -F 'mv "$TMP/app" "$SOURCE_TARGET"' vvv-install.sh
+      - name: Commit final production changes
+        run: |
+          set -Eeuo pipefail
+          git config user.name weizhiok
+          git config user.email 165847692+weizhiok@users.noreply.github.com
+          rm -f tools/update_reentrant_rollback_test.py trigger-reentrant-rollback-test.txt .github/workflows/apply-reentrant-rollback-test.yml
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          find . -type f -name '*.pyc' -delete
+          git add -A
+          git commit -m "Make installer source swap rollback-safe"
+          git push origin HEAD:agent/reentrant-role-installer
