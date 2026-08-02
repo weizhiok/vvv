@@ -19,7 +19,7 @@ if ! command -v curl >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; th
     -o DPkg::Lock::Timeout=10 \
     -o Acquire::Retries=2 \
     -o Acquire::PDiffs=false \
-    -o Acquire::IndexTargets::deb::Sources::DefaultEnabled=false \
+    -o Acquire::IndexTargets::deb-src::Sources::DefaultEnabled=false \
     update || fail "APT 更新失败。若提示锁被占用，脚本已等待最多 10 秒，请稍后重新运行。"
   DEBIAN_FRONTEND=noninteractive apt-get \
     -o DPkg::Lock::Timeout=10 \

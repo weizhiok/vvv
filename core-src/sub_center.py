@@ -22,7 +22,7 @@ OUT = DATA / 'output'
 REGISTRY = DATA / 'registry.json'
 BACKUP = Path('/usr/local/lib/vvv/backup_manager.py')
 LOCK = threading.RLock()
-SHORT_PATHS = {'c': 'clash', 'qx': 'quantumultx', 'ln': 'loon', 'sr': 'shadowrocket', 'v2': 'v2rayng'}
+SHORT_PATHS = {'c': 'clash', 'qx': 'quantumultx', 'ln': 'loon', 'sr': 'shadowrocket'}
 
 
 def now():
@@ -151,11 +151,6 @@ def hy2_uri_shadowrocket(node):
     return f"hysteria2://{quote(node['password'],safe='')}@{node['server']}:{node['port']}/?{urlencode(params)}#{quote(node['name'],safe='')}"
 
 
-def hy2_uri_v2rayng(node):
-    params=[('obfs','salamander'),('obfs-password',node['obfs_password']),('sni',node['sni']),('pinSHA256',node['pin'])]
-    return f"hysteria2://{quote(node['password'],safe='')}@{node['server']}:{node['port']}/?{urlencode(params)}#{quote(node['name'],safe='')}"
-
-
 def render_qx(nodes):
     lines=[]
     for node in nodes:
@@ -179,11 +174,6 @@ def render_shadowrocket(nodes):
     return b64std(text+('\n' if text else ''))+'\n'
 
 
-def render_v2rayng(nodes):
-    text='\n'.join(vless_uri(n) if n['protocol']=='vless' else hy2_uri_v2rayng(n) for n in nodes)
-    return b64std(text+('\n' if text else ''))+'\n'
-
-
 def render_clash(nodes):
     lines=['mixed-port: 7890','allow-lan: false','mode: rule','log-level: info','proxies:']; names=[]
     for node in nodes:
@@ -199,7 +189,7 @@ def render_clash(nodes):
 
 def regenerate():
     OUT.mkdir(parents=True,exist_ok=True); nodes=all_nodes()
-    files={'clash':render_clash(nodes),'quantumultx':render_qx(nodes),'loon':render_loon(nodes),'shadowrocket':render_shadowrocket(nodes),'v2rayng':render_v2rayng(nodes)}
+    files={'clash':render_clash(nodes),'quantumultx':render_qx(nodes),'loon':render_loon(nodes),'shadowrocket':render_shadowrocket(nodes)}
     for name,content in files.items():
         path=OUT/name; tmp=path.with_suffix('.tmp'); tmp.write_text(content,encoding='utf-8'); os.chmod(tmp,0o600); os.replace(tmp,path)
     atomic_json(OUT/'nodes.json',{'generated_at':now(),'count':len(nodes),'nodes':nodes})

@@ -107,6 +107,7 @@ WantedBy=multi-user.target
 UNIT
 }
 validate_caddy(){
+  /usr/local/bin/caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null || fail "Caddy 配置格式化失败。"
   chown root:caddy /etc/caddy/Caddyfile
   chmod 640 /etc/caddy/Caddyfile
   runuser -u caddy -- /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile || fail "Caddy 配置验证失败。"
@@ -315,7 +316,7 @@ if ((${#missing_packages[@]})); then
         -o DPkg::Lock::Timeout=10 \
         -o Acquire::Retries=2 \
         -o Acquire::PDiffs=false \
-        -o Acquire::IndexTargets::deb::Sources::DefaultEnabled=false \
+        -o Acquire::IndexTargets::deb-src::Sources::DefaultEnabled=false \
         update || fail "APT 索引刷新失败。"
     apt_run "订阅中心依赖安装" \
       env DEBIAN_FRONTEND=noninteractive apt-get \
@@ -469,7 +470,6 @@ show_urls(){
   echo "Quantumult X：${base}/r/${token}/qx"
   echo "Loon：${base}/r/${token}/ln"
   echo "Shadowrocket：${base}/r/${token}/sr"
-  echo "v2rayNG：${base}/r/${token}/v2"
 }
 show_hosts(){ curl -fsS -H "Authorization: Bearer $master" "http://127.0.0.1:$(jq -r .listen_port "$cfg")/api/v1/hosts" | jq .; }
 case "${1:-menu}" in

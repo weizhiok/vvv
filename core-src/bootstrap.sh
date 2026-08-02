@@ -14,7 +14,6 @@ valid_domain(){ [[ "${1:-}" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,6
 port_in_use(){ ss -H -lnt "sport = :$1" 2>/dev/null | grep -q .; }
 install_host(){
   bash "$BASE_DIR/host.sh"
-  [[ -x /usr/local/sbin/vps ]] && cp -f /usr/local/sbin/vps /usr/local/sbin/vvv-host-original
 }
 enable_relay(){
   [[ -f /etc/jp-relay/state.json ]] || return 1

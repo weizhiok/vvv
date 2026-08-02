@@ -162,7 +162,7 @@ upgrade_system_once() {
     -o DPkg::Lock::Timeout=10 \
     -o Acquire::Retries=2 \
     -o Acquire::PDiffs=false \
-    -o Acquire::IndexTargets::deb::Sources::DefaultEnabled=false \
+    -o Acquire::IndexTargets::deb-src::Sources::DefaultEnabled=false \
     update || fail "APT 更新失败。若提示锁被占用，已等待最多 10 秒，请稍后重新运行。"
   apt-get \
     -o DPkg::Lock::Timeout=10 \
@@ -891,7 +891,6 @@ generate_client_files() {
   : > "$CLIENT_DIR/Loon.conf"
   : > "$CLIENT_DIR/Loon-Shadowrocket.txt"
   : > "$CLIENT_DIR/Shadowrocket.txt"
-  : > "$CLIENT_DIR/v2rayNG.txt"
   echo 'proxies:' > "$CLIENT_DIR/Clash-Verge-Rev.yaml"
   {
     echo "中转客户端节点"
@@ -913,7 +912,6 @@ generate_client_files() {
     printf '%s\n' "$loon" >> "$CLIENT_DIR/Loon.conf"
     printf '%s\n' "$vless_uri" >> "$CLIENT_DIR/Loon-Shadowrocket.txt"
     printf '%s\n' "$vless_uri" >> "$CLIENT_DIR/Shadowrocket.txt"
-    printf '%s\n' "$vless_uri" >> "$CLIENT_DIR/v2rayNG.txt"
     cat >> "$CLIENT_DIR/Clash-Verge-Rev.yaml" <<EOF_CLASH_VLESS
   - name: "${vless_name}"
     type: vless
@@ -949,12 +947,10 @@ EOF_CLASH_VLESS
     hy2_name="$(protocol_name "$NODE_NAME" HY2)"
     encoded_hy2_name="$(urlencode "$hy2_name")"
     hy2_uri="hysteria2://$(urlencode "$JAPAN_HY2_PASSWORD")@${JAPAN_PUBLIC_IP}:${JAPAN_PORT}/?obfs=salamander&obfs-password=$(urlencode "$JAPAN_HY2_OBFS")&sni=$(urlencode "$JAPAN_HY2_SERVER_NAME")&insecure=1&pinSHA256=$(urlencode "$JAPAN_HY2_PIN_HEX")#${encoded_hy2_name}"
-    v2rayng_hy2_uri="hysteria2://$(urlencode "$JAPAN_HY2_PASSWORD")@${JAPAN_PUBLIC_IP}:${JAPAN_PORT}/?obfs=salamander&obfs-password=$(urlencode "$JAPAN_HY2_OBFS")&sni=$(urlencode "$JAPAN_HY2_SERVER_NAME")&pinSHA256=$(urlencode "$JAPAN_HY2_PIN_HEX")#${encoded_hy2_name}"
     loon="${hy2_name} = Hysteria2,${JAPAN_PUBLIC_IP},${JAPAN_PORT},\"${JAPAN_HY2_PASSWORD}\",skip-cert-verify=true,sni=${JAPAN_HY2_SERVER_NAME},udp=true,fast-open=true,salamander-password=\"${JAPAN_HY2_OBFS}\""
     printf '%s\n' "$loon" >> "$CLIENT_DIR/Loon.conf"
     printf '%s\n' "$hy2_uri" >> "$CLIENT_DIR/Loon-Shadowrocket.txt"
     printf '%s\n' "$hy2_uri" >> "$CLIENT_DIR/Shadowrocket.txt"
-    printf '%s\n' "$v2rayng_hy2_uri" >> "$CLIENT_DIR/v2rayNG.txt"
     cat >> "$CLIENT_DIR/Clash-Verge-Rev.yaml" <<EOF_CLASH_HY2
   - name: "${hy2_name}"
     type: hysteria2
@@ -982,9 +978,6 @@ EOF_CLASH_HY2
       echo "$loon"
       echo "分享链接："
       echo "$hy2_uri"
-      echo
-      echo "【v2rayNG 2.2.6+：${hy2_name}】"
-      echo "$v2rayng_hy2_uri"
     } >> "$CLIENT_DIR/客户端节点.txt"
   fi
 

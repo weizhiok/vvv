@@ -18,7 +18,7 @@ install_rclone(){
     -o DPkg::Lock::Timeout=10 \
     -o Acquire::Retries=2 \
     -o Acquire::PDiffs=false \
-    -o Acquire::IndexTargets::deb::Sources::DefaultEnabled=false \
+    -o Acquire::IndexTargets::deb-src::Sources::DefaultEnabled=false \
     update >/dev/null || { echo "错误：APT 更新失败；若锁被占用，已等待最多 10 秒。" >&2; return 1; }
   DEBIAN_FRONTEND=noninteractive apt-get \
     -o DPkg::Lock::Timeout=10 \
