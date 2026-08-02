@@ -86,10 +86,15 @@ build_hy2_slot_configs "$WORK/state-empty.json" "$WORK/hy2-empty"
 build_hy2_slot_configs "$WORK/state-active.json" "$WORK/hy2-active"
 mkdir -p "$WORK/client-files"
 generate_client_files "$WORK/state-active.json" "" "$WORK/client-files" direct >/dev/null
-[[ -s "$WORK/client-files/v2rayNG.txt" ]]
-grep -q '^hysteria2://' "$WORK/client-files/v2rayNG.txt"
-grep -q 'pinSHA256=' "$WORK/client-files/v2rayNG.txt"
-! grep -q 'insecure=' "$WORK/client-files/v2rayNG.txt"
+[[ -s "$WORK/client-files/Quantumult-X.conf" ]]
+[[ -s "$WORK/client-files/Loon.conf" ]]
+[[ -s "$WORK/client-files/Shadowrocket.txt" ]]
+[[ -s "$WORK/client-files/Clash-Verge-Rev.yaml" ]]
+! find "$WORK/client-files" -maxdepth 1 -type f -iname '*v2*' | grep -q .
+grep -q '^vless=' "$WORK/client-files/Quantumult-X.conf"
+grep -q 'Hysteria2' "$WORK/client-files/Loon.conf"
+grep -q '^hysteria2://' "$WORK/client-files/Shadowrocket.txt"
+grep -q 'type: hysteria2' "$WORK/client-files/Clash-Verge-Rev.yaml"
 ! find "$WORK/client-files" -type f -name '*二维码*' | grep -q .
 [[ "$(find "$WORK/vless-empty" -type f | wc -l)" -eq 0 ]]
 [[ "$(find "$WORK/hy2-empty" -type f | wc -l)" -eq 0 ]]
