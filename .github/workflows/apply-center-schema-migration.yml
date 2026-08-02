@@ -1,0 +1,39 @@
+name: Apply center schema migration
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: write
+concurrency:
+  group: center-schema-migration
+  cancel-in-progress: true
+jobs:
+  apply-and-verify:
+    if: github.head_ref == 'agent/unified-subscription-transports'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/unified-subscription-transports
+          fetch-depth: 0
+      - name: Apply migration patch
+        run: python3 tools/apply_center_schema_migration.py
+      - name: Validate
+        run: |
+          set -Eeuo pipefail
+          git diff --check
+          bash -n core-src/bootstrap.sh
+          python3 -m py_compile tests/conformance.py
+          python3 tests/conformance.py
+      - name: Commit production changes
+        run: |
+          set -Eeuo pipefail
+          git config user.name weizhiok
+          git config user.email 165847692+weizhiok@users.noreply.github.com
+          rm -f tools/apply_center_schema_migration.py .github/workflows/apply-center-schema-migration.yml
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          find . -type f -name '*.pyc' -delete
+          git add -A
+          git commit -m "Migrate existing subscription centers in place"
+          git push origin HEAD:agent/unified-subscription-transports
