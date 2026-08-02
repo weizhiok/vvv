@@ -1,0 +1,58 @@
+name: Apply client and menu fixes
+on:
+  push:
+    branches: [agent/remove-v2-fix-menu-bootstrap]
+    paths:
+      - 'tools/apply_remove_v2_fix_menu_bootstrap.py'
+      - 'trigger-remove-v2-fix-menu-bootstrap.txt'
+permissions:
+  contents: write
+concurrency:
+  group: apply-remove-v2-fix-menu-bootstrap
+  cancel-in-progress: true
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/remove-v2-fix-menu-bootstrap
+          fetch-depth: 0
+      - name: Apply production patch
+        run: python3 tools/apply_remove_v2_fix_menu_bootstrap.py
+      - name: Verify source and rendered installers
+        run: |
+          set -Eeuo pipefail
+          bash -n vvv-install.sh
+          bash -n core-src/bootstrap.sh
+          bash -n core-src/host.sh
+          sh -n core-src/landing.sh
+          bash -n core-src/center_install.sh
+          bash -n core-src/vvv_manager.sh
+          bash -n core-src/rclone_manager.sh
+          python3 -m py_compile src/prepare.py core-src/sub_center.py tests/conformance.py
+          python3 tests/conformance.py
+          work="$(mktemp -d)"
+          cp core-src/host.sh "$work/host.sh"
+          cp core-src/landing.sh "$work/landing.sh"
+          cp core-src/center_install.sh "$work/center.sh"
+          python3 src/prepare.py "$work/host.sh" "$work/landing.sh" "$work/center.sh"
+          bash -n "$work/host.sh"
+          sh -n "$work/landing.sh"
+          bash -n "$work/center.sh"
+          ! grep -RInE 'v2rayNG|v2rayng' core-src/host.sh core-src/landing.sh core-src/center_install.sh core-src/sub_center.py
+          ! grep -F 'cat > /usr/local/sbin/vps' core-src/host.sh
+      - name: Commit production changes to branch
+        run: |
+          set -Eeuo pipefail
+          git config user.name weizhiok
+          git config user.email 165847692+weizhiok@users.noreply.github.com
+          rm -f tools/apply_remove_v2_fix_menu_bootstrap.py trigger-remove-v2-fix-menu-bootstrap.txt .github/workflows/apply-remove-v2-fix-menu-bootstrap.yml
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          find . -type f -name '*.pyc' -delete
+          git add -A
+          git commit -m "Remove v2rayNG and restore unified vps menu"
+          git push origin HEAD:agent/remove-v2-fix-menu-bootstrap
