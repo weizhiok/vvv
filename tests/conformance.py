@@ -204,6 +204,8 @@ def test_transports_and_reentrant_installation():
     require('6-32位大小写字母或数字' in manager, '自定义后缀长度规则错误')
     require('随机生成 8 位' in bootstrap, '默认随机后缀不是8位')
     require('refresh_center_runtime_code' in bootstrap and 'center_manager.sh' in bootstrap, '重复安装不会刷新中心管理器')
+    prepare = read('src/prepare.py')
+    require('/r/${token}/c' not in prepare and 'VVV_SUB_TRANSPORT' in prepare and 'client_adapters.py' in prepare, '最终安装器构建器仍要求旧四路径或未校验新模块')
     require('migrate_center_config_if_needed' in bootstrap and 'config.schema2-backup.json' in bootstrap, '旧schema2订阅中心不会原地迁移')
     require('if [[ -f /etc/vvv-sub/.schema3-migrated ]]' in bootstrap and bootstrap.index('refresh_center_runtime_code', bootstrap.index('migrate_center_config_if_needed\nif')) < bootstrap.index('show_install_menu', bootstrap.index('migrate_center_config_if_needed\nif')), '旧中心迁移后没有在显示菜单前立即刷新运行时')
 
