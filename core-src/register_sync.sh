@@ -8,10 +8,18 @@ center_address="${3:-}"
 install -d -m700 /etc/vvv /usr/local/lib/vvv
 install -m755 "$BASE_DIR/sync_agent.py" /usr/local/lib/vvv/sync_agent.py
 
+registered=0
+registration_result=""
 if [[ -n "$code" ]]; then
-  python3 /usr/local/lib/vvv/sync_agent.py register "$code" "$role"
+  registration_result="$(python3 /usr/local/lib/vvv/sync_agent.py register "$code" "$role")"
+  registered=1
 elif [[ "$role" == direct && -n "$center_address" ]]; then
-  python3 /usr/local/lib/vvv/sync_agent.py register-direct "$center_address"
+  registration_result="$(python3 /usr/local/lib/vvv/sync_agent.py register-direct "$center_address")"
+  registered=1
+fi
+if (( registered == 1 )); then
+  printf '[32m订阅中心注册成功[0m
+'
 fi
 
 state_path=/etc/jp-relay/state.json

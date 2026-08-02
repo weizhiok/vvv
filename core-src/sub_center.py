@@ -209,6 +209,27 @@ def request_ip(handler):
     except ValueError: return None
 
 
+def finalize_registration(entry, body):
+    doc={
+        'host_id':entry['host_id'],
+        'role':entry.get('role','direct'),
+        'state':body.get('state') or {},
+        'meta':body.get('meta') or {},
+        'last_seen':now(),
+        'last_seen_ts':time.time(),
+    }
+    atomic_json(HOSTS/f"{entry['host_id']}.json",doc)
+    count=regenerate()
+    return {
+        'ok':True,
+        'registered':True,
+        'subscription_refreshed':True,
+        'node_count':count,
+        'host_id':entry['host_id'],
+        'host_token':entry['token'],
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version='StaticResource/2.0'
     def log_message(self,*_): pass
@@ -246,8 +267,9 @@ class Handler(BaseHTTPRequestHandler):
                 if source_ip.version==declared_ip.version and source_ip!=declared_ip: return self.send_bytes(403,b'Source IP mismatch\n')
                 backup('before-host-register'); entry=next((x for x in registry['hosts'] if x['host_id']==host_id),None)
                 if entry is None: entry={'host_id':host_id,'token':secrets.token_urlsafe(32),'created_at':now()}; registry['hosts'].append(entry)
-                entry.update(role='direct',hostname=str(body.get('hostname') or ''),auto_registered=True,source_ip=str(source_ip),updated_at=now()); atomic_json(REGISTRY,registry); backup('after-host-register')
-                return self.send_bytes(200,json.dumps({'host_id':host_id,'host_token':entry['token']},ensure_ascii=False).encode(),'application/json')
+                entry.update(role='direct',hostname=str(body.get('hostname') or ''),auto_registered=True,source_ip=str(source_ip),updated_at=now()); atomic_json(REGISTRY,registry)
+                result=finalize_registration(entry,body); backup('after-host-register')
+                return self.send_bytes(200,json.dumps(result,ensure_ascii=False).encode(),'application/json')
             if path=='/api/v1/register':
                 if not secrets.compare_digest(auth_token(self),cfg.get('master_token','')): return self.send_bytes(403,b'Forbidden\n')
                 host_id=str(body.get('host_id') or '').strip(); role=str(body.get('role') or 'direct')
@@ -255,8 +277,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not re.fullmatch(r'[A-Za-z0-9._-]{8,128}',host_id): return self.send_bytes(400,b'Bad host id\n')
                 backup('before-host-register'); entry=next((x for x in registry['hosts'] if x['host_id']==host_id),None)
                 if entry is None: entry={'host_id':host_id,'token':secrets.token_urlsafe(32),'created_at':now()}; registry['hosts'].append(entry)
-                entry.update(role=role,hostname=str(body.get('hostname') or ''),updated_at=now()); atomic_json(REGISTRY,registry); backup('after-host-register')
-                return self.send_bytes(200,json.dumps({'host_id':host_id,'host_token':entry['token']},ensure_ascii=False).encode(),'application/json')
+                entry.update(role=role,hostname=str(body.get('hostname') or ''),updated_at=now()); atomic_json(REGISTRY,registry)
+                result=finalize_registration(entry,body); backup('after-host-register')
+                return self.send_bytes(200,json.dumps(result,ensure_ascii=False).encode(),'application/json')
             if path=='/api/v1/sync':
                 token=auth_token(self); entry=next((x for x in registry.get('hosts',[]) if secrets.compare_digest(x.get('token',''),token)),None)
                 if not entry or entry.get('host_id')!=body.get('host_id'): return self.send_bytes(403,b'Forbidden\n')

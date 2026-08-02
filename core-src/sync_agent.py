@@ -99,17 +99,47 @@ def api_base(cfg):
     return (cfg.get('api_base_url') or cfg['base_url']).rstrip('/')
 
 
+def snapshot_payload(role):
+    state = read(state_path(role), {}) or {}
+    return {
+        'state': state,
+        'meta': {
+            'hostname': socket.gethostname(),
+            'role': role,
+            'timestamp': time.time(),
+            'xray_active': os.system('systemctl is-active --quiet xray') == 0,
+            'sing_box_active': os.system('systemctl is-active --quiet sing-box') == 0,
+        },
+    }
+
+
+def require_registration_success(response):
+    if not isinstance(response, dict):
+        raise SystemExit('订阅中心返回了无效的注册结果。')
+    required = ('ok', 'registered', 'subscription_refreshed')
+    if any(response.get(key) is not True for key in required):
+        raise SystemExit('订阅中心未返回完整的注册成功标识，未确认订阅刷新。')
+    if not response.get('host_token'):
+        raise SystemExit('订阅中心注册响应缺少主机令牌。')
+    return response
+
+
 def register(code, role):
     decoded = decode_code(code)
     public_base = decoded['base_url'].rstrip('/')
     internal_base = local_api_for(role, public_base)
     master = decoded['master_token']
     host_id = stable_id()
-    response = post(internal_base + '/api/v1/register', master, {
+    payload = {
         'host_id': host_id,
         'role': role,
         'hostname': socket.gethostname(),
-    })
+    }
+    payload.update(snapshot_payload(role))
+    response = require_registration_success(
+        post(internal_base + '/api/v1/register', master, payload)
+    )
+    now = time.time()
     cfg = {
         'schema': 2,
         'base_url': public_base,
@@ -117,10 +147,12 @@ def register(code, role):
         'host_id': host_id,
         'host_token': response['host_token'],
         'role': role,
-        'registered_at': time.time(),
+        'registered_at': now,
+        'last_sync': now,
+        'last_result': response,
     }
     atomic(CFG, cfg)
-    return cfg
+    return response
 
 
 def register_direct(center_address):
@@ -130,12 +162,17 @@ def register_direct(center_address):
     if not public_ip:
         raise SystemExit('本机代理状态缺少公网 IP，无法自动注册。')
     host_id = stable_id()
-    response = post(public_base + '/api/v1/register-direct', '', {
+    payload = {
         'host_id': host_id,
         'role': 'direct',
         'hostname': socket.gethostname(),
         'public_ip': public_ip,
-    })
+    }
+    payload.update(snapshot_payload('direct'))
+    response = require_registration_success(
+        post(public_base + '/api/v1/register-direct', '', payload)
+    )
+    now = time.time()
     cfg = {
         'schema': 2,
         'base_url': public_base,
@@ -143,30 +180,22 @@ def register_direct(center_address):
         'host_id': host_id,
         'host_token': response['host_token'],
         'role': 'direct',
-        'registered_at': time.time(),
+        'registered_at': now,
+        'last_sync': now,
+        'last_result': response,
         'registration_method': 'center-address',
     }
     atomic(CFG, cfg)
-    return cfg
+    return response
 
 
 def sync():
     cfg = read(CFG)
     if not cfg:
         raise SystemExit('尚未配置订阅同步。')
-    path = state_path(cfg.get('role', 'direct'))
-    state = read(path, {})
-    response = post(api_base(cfg) + '/api/v1/sync', cfg['host_token'], {
-        'host_id': cfg['host_id'],
-        'state': state,
-        'meta': {
-            'hostname': socket.gethostname(),
-            'role': cfg['role'],
-            'timestamp': time.time(),
-            'xray_active': os.system('systemctl is-active --quiet xray') == 0,
-            'sing_box_active': os.system('systemctl is-active --quiet sing-box') == 0,
-        },
-    })
+    payload = {'host_id': cfg['host_id']}
+    payload.update(snapshot_payload(cfg.get('role', 'direct')))
+    response = post(api_base(cfg) + '/api/v1/sync', cfg['host_token'], payload)
     cfg['last_sync'] = time.time()
     cfg['last_result'] = response
     atomic(CFG, cfg)
@@ -184,10 +213,8 @@ if __name__ == '__main__':
     commands.add_parser('sync')
     args = parser.parse_args()
     if args.cmd == 'register':
-        register(args.code, args.role)
-        sync()
+        print(json.dumps(register(args.code, args.role), ensure_ascii=False))
     elif args.cmd == 'register-direct':
-        register_direct(args.center_address)
-        sync()
+        print(json.dumps(register_direct(args.center_address), ensure_ascii=False))
     else:
         sync()
