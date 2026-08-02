@@ -72,6 +72,41 @@ except Exception:
 PY_LANDING_VALID
 }
 
+migrate_center_config_if_needed() {
+  [[ -s "$CENTER_CFG" ]] || return 0
+  [[ "$(json_value "$CENTER_CFG" schema 0)" == 2 ]] || return 0
+  local suffix
+  suffix="$(python3 - <<'PY_SUFFIX'
+import secrets,string
+alphabet=string.ascii_letters+string.digits
+print(''.join(secrets.choice(alphabet) for _ in range(8)))
+PY_SUFFIX
+)"
+  cp -a "$CENTER_CFG" /etc/vvv-sub/config.schema2-backup.json
+  python3 - "$CENTER_CFG" "$suffix" <<'PY_MIGRATE_CENTER'
+import json,os,sys,tempfile
+path,suffix=sys.argv[1:]
+with open(path,encoding='utf-8') as f:
+    obj=json.load(f)
+base=str(obj.get('base_url','')).rstrip('/')
+mode=obj.get('mode') if obj.get('mode') in ('domain','ip') else ('domain' if obj.get('domain') else 'ip')
+obj['schema']=3
+obj['address_mode']=mode
+obj['transport_mode']='direct-https'
+obj['subscription_suffix']=suffix
+obj['subscription_url']=base+'/'+suffix
+obj.pop('mode',None)
+obj.pop('subscription_token',None)
+fd,tmp=tempfile.mkstemp(prefix='.config-migrate.',dir=os.path.dirname(path))
+with os.fdopen(fd,'w',encoding='utf-8') as f:
+    json.dump(obj,f,ensure_ascii=False,indent=2); f.write('\n')
+os.chmod(tmp,0o600); os.replace(tmp,path)
+PY_MIGRATE_CENTER
+  touch /etc/vvv-sub/.schema3-migrated
+  echo "检测到旧版订阅中心配置，已原地升级为统一订阅地址；令牌、注册主机、节点、备份和证书均保留。"
+  echo "新的8位随机订阅后缀：$suffix"
+}
+
 center_config_valid() {
   [[ -s "$CENTER_CFG" ]] || return 1
   python3 - "$CENTER_CFG" <<'PY_CENTER_VALID'
@@ -100,13 +135,9 @@ center_complete() {
   [[ -s /etc/vvv-sub/registration.code ]] &&
   [[ -x /usr/local/sbin/vvv-center ]] &&
   [[ -x /usr/local/lib/vvv/sub_center.py ]] &&
-  [[ -x /usr/local/lib/vvv/client_adapters.py ]] &&
-  [[ -x /usr/local/lib/vvv/adapter_manager.py ]] &&
-  [[ -x /usr/local/lib/vvv/center_transport.sh ]] &&
   [[ -f /etc/systemd/system/vvv-sub.service ]] &&
   [[ -f /etc/systemd/system/caddy.service ]] &&
-  [[ -s /etc/caddy/Caddyfile ]] &&
-  { [[ "$(json_value "$CENTER_CFG" transport_mode "")" != tunnel ]] || [[ -f /etc/systemd/system/vvv-cloudflared.service ]]; }
+  [[ -s /etc/caddy/Caddyfile ]]
 }
 
 center_partial() {
@@ -437,6 +468,11 @@ refresh_center_runtime_code() {
     python3 /usr/local/lib/vvv/client_adapters.py >/dev/null
     timeout 75 systemctl restart vvv-sub.service
   fi
+  if [[ -f /etc/vvv-sub/.schema3-migrated ]]; then
+    echo "正在将旧四路径入口无损切换为新的统一订阅地址。"
+    bash /usr/local/lib/vvv/center_transport.sh reapply || fail "旧订阅中心配置已迁移，但统一入口切换失败；原数据和schema2备份均已保留。"
+    rm -f /etc/vvv-sub/.schema3-migrated
+  fi
 }
 
 ensure_center_runtime() {
@@ -617,6 +653,7 @@ key=""
 center_address=""
 VVV_CF_TUNNEL_TOKEN=""
 
+migrate_center_config_if_needed
 show_install_menu
 while true; do
   read -r -p "请输入编号：" choice

@@ -204,6 +204,7 @@ def test_transports_and_reentrant_installation():
     require('6-32位大小写字母或数字' in manager, '自定义后缀长度规则错误')
     require('随机生成 8 位' in bootstrap, '默认随机后缀不是8位')
     require('refresh_center_runtime_code' in bootstrap and 'center_manager.sh' in bootstrap, '重复安装不会刷新中心管理器')
+    require('migrate_center_config_if_needed' in bootstrap and 'config.schema2-backup.json' in bootstrap, '旧schema2订阅中心不会原地迁移')
 
 
 def test_apt_lock_policy():
