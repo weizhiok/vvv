@@ -4,6 +4,10 @@ on:
     branches: [agent/landing-direct-combined-role]
     paths:
       - '.github/workflows/publish-quick-ssh-fix.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-quick-ssh-fix.yml'
 permissions:
   contents: write
 concurrency:
@@ -11,10 +15,12 @@ concurrency:
   cancel-in-progress: true
 jobs:
   publish:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
       - run: bash tools/publish_landing_direct_role.sh
