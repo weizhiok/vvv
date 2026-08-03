@@ -1,18 +1,17 @@
-name: Publish SSH fixes
+name: Publish isolated client support upgrade
 on:
   push:
     paths:
       - '.github/workflows/publish-quick-ssh-fix.yml'
 concurrency:
-  group: publish-ssh-fixes-main
+  group: publish-client-support-isolation
   cancel-in-progress: true
 permissions:
   contents: write
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - run: echo 'isolated-source-publisher=1'
-      - run: bash tools/run_quick_ssh_fix.sh
+      - run: bash tools/publish_client_support_isolation.sh
