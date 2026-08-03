@@ -100,7 +100,7 @@ def test_hy2_server_hard_limit():
     landing = read('core-src/landing.sh')
     prepare = read('src/prepare.py')
     for source, label in ((host, '主机'), (landing, '副机'), (prepare, '最终生成器')):
-        require('ignore_client_bandwidth' in source, f'{label} HY2 未忽略客户端带宽声明')
+        require(('ignore_client_bandwidth":False' in source or 'ignore_client_bandwidth": false' in source), f'{label} HY2 未保持无带宽客户端兼容')
         require('up_mbps' in source and 'down_mbps' in source, f'{label} HY2 缺少服务端限速')
     require('hy2_limit_mbps' in host and 'hy2_limit_mbps' in landing, 'HY2 限速没有进入状态/JPR3')
     adapter = read('core-src/client_adapters.py')
