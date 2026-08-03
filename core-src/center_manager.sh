@@ -8,6 +8,8 @@ BACKUP=/usr/local/lib/vvv/backup_manager.py
 RCLONE=/usr/local/lib/vvv/rclone_manager.sh
 ADAPTERS=/usr/local/lib/vvv/adapter_manager.py
 SUB=/usr/local/lib/vvv/sub_center.py
+CLIENT_UPGRADE=/usr/local/lib/vvv/client_upgrade_engine.py
+CLIENT_UPGRADE_URL=https://raw.githubusercontent.com/weizhiok/vvv/client-support/client_upgrade.py
 
 [[ -s "$CFG" ]] || { echo "订阅中心配置不存在。" >&2; exit 1; }
 pause(){ read -r -p "按回车返回……" _; }
@@ -27,10 +29,42 @@ show_code(){
 }
 debug_headers(){
   local flag=/run/vvv-sub-header-debug.enabled log=/run/vvv-sub-header-debug.jsonl
+  local version
+  version="$(python3 "$CLIENT_UPGRADE" status 2>/dev/null | jq -r '.version // 0' 2>/dev/null || echo 0)"
   rm -f "$log"; : > "$log"; touch "$flag"
+  echo "客户端支持仓库：weizhiok/vvv"
+  echo "客户端支持分支：client-support"
+  echo "目标文件：client_upgrade.py"
+  echo "默认升级地址：$CLIENT_UPGRADE_URL"
+  echo
+  echo "把下面输出的完整 JSON 发给一个全新的 ChatGPT 对话即可。"
+  echo "新对话只需要根据 User-Agent 修改 client-support 分支中的 client_upgrade.py，"
+  echo "不得修改安装器、代理核心、节点、系统设置或其他 VVV 功能。"
+  echo "服务器升级方法：每台 VPS 输入 vps，选择退出上方最后一项“升级客户端支持”，直接回车。"
+  echo
   echo "请在客户端中立即刷新统一订阅地址。监听 5 分钟，Ctrl+C 可提前结束。"
   trap 'rm -f "$flag" "$log"' EXIT INT TERM
-  timeout --foreground 300 bash -c 'tail -n0 -F /run/vvv-sub-header-debug.jsonl 2>/dev/null | while IFS= read -r line; do echo; printf "%s\n" "$line" | jq .; done' || true
+  timeout --foreground 300 bash -c '
+    tail -n0 -F /run/vvv-sub-header-debug.jsonl 2>/dev/null |
+    while IFS= read -r line; do
+      echo
+      printf "%s\n" "$line" | jq \
+        --arg url "'"$CLIENT_UPGRADE_URL"'" \
+        --argjson version "'"$version"'" \
+        ". + {client_support_handoff:{
+          purpose:\"为 VVV 新增客户端订阅识别和每台 VPS 的本机客户端配置支持\",
+          repository:\"weizhiok/vvv\",
+          branch:\"client-support\",
+          target_file:\"client_upgrade.py\",
+          default_upgrade_url:\$url,
+          installed_version:\$version,
+          required_action:\"根据本条 User-Agent 只更新 client-support 分支中的 client_upgrade.py；增加识别规则或渲染器、提高 VERSION 并运行客户端支持测试。\",
+          safety_boundary:\"不得修改 main 安装器、Xray、sing-box、节点状态、服务端代理配置、系统设置或其他 VVV 功能。\",
+          server_upgrade_method:\"每台 VPS 输入 vps，选择退出上方最后一项“升级客户端支持”，直接回车使用默认地址。\",
+          new_chat_instruction:\"这是 VVV 客户端支持扩展请求。请只修改 weizhiok/vvv 的 client-support 分支中 client_upgrade.py，并保持客户端升级与代理核心、节点和系统完全隔离。\"
+        }}"
+    done
+  ' || true
   rm -f "$flag" "$log"; trap - EXIT INT TERM
 }
 node_menu(){
@@ -179,8 +213,8 @@ while true; do
   echo "3. 订阅节点管理"
   echo "4. 订阅入口管理"
   echo "5. 客户端请求头识别调试"
-  echo "6. 更新客户端适配器"
-  echo "7. 查看客户端适配器状态"
+  echo "6. 升级客户端支持（与 vps 菜单相同）"
+  echo "7. 查看客户端支持状态"
   echo "8. 云备份管理"
   echo "9. 已注册主机管理"
   echo "10. 查看服务状态"
@@ -188,7 +222,7 @@ while true; do
   read -r -p "请输入编号：" choice
   case "$choice" in
     1) show_url; pause;; 2) show_code; pause;; 3) node_menu;; 4) transport_menu;;
-    5) debug_headers;; 6) python3 "$ADAPTERS" update; pause;; 7) python3 "$ADAPTERS" status; pause;;
+    5) debug_headers;; 6) python3 "$CLIENT_UPGRADE" menu; pause;; 7) python3 "$CLIENT_UPGRADE" status; pause;;
     8) cloud_menu;; 9) host_menu;;
     10) systemctl --no-pager --full status vvv-sub.service caddy.service vvv-sync.timer vvv-sync.path vvv-temp-cleanup.timer 2>/dev/null || true; [[ "$(get '.transport_mode')" != tunnel ]] || systemctl --no-pager --full status vvv-cloudflared.service 2>/dev/null || true; pause;;
     0) exit;; *) echo "请输入有效编号。";;
