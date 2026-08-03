@@ -15,4 +15,3 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: bash tools/publish_production_ssh_fix.sh
-# trigger: landing-service-path-fix

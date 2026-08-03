@@ -53,6 +53,11 @@ def test_landing_isolation():
         require(token in landing, f'中转副机隔离缺少 {token}')
     require('/etc/systemd/system/xray.service <<' not in landing, '中转副机仍覆盖直连 Xray 服务')
     require('/etc/systemd/system/sing-box.service <<' not in landing, '中转副机仍覆盖直连 sing-box 服务')
+    require('cat > /etc/systemd/system/vvv-landing-xray.service <<' in landing,
+            '中转 Xray 服务单元路径不正确')
+    require('cat > /etc/systemd/system/vvv-landing-sing-box.service <<' in landing,
+            '中转 sing-box 服务单元路径不正确')
+    require('vvv-landing-vvv-landing-' not in landing, '中转服务单元出现重复前缀')
 
 
 def test_sync_and_names():

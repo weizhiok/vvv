@@ -621,7 +621,7 @@ create_services() {
     getent group xray >/dev/null 2>&1 || groupadd --system xray
     id xray >/dev/null 2>&1 || useradd --system --gid xray --no-create-home --shell /usr/sbin/nologin xray
     install -d -o root -g xray -m 750 /etc/vvv-landing/xray
-    cat > /etc/systemd/system/vvv-landing-vvv-landing-xray.service <<EOF_XRAY_SERVICE
+    cat > /etc/systemd/system/vvv-landing-xray.service <<EOF_XRAY_SERVICE
 [Unit]
 Description=Xray Landing VLESS Service
 After=network-online.target nss-lookup.target
@@ -649,7 +649,7 @@ EOF_XRAY_SERVICE
     getent group sing-box >/dev/null 2>&1 || groupadd --system sing-box
     id sing-box >/dev/null 2>&1 || useradd --system --gid sing-box --no-create-home --shell /usr/sbin/nologin sing-box
     install -d -o root -g sing-box -m 750 /etc/vvv-landing/sing-box "$TLS_DIR"
-    cat > /etc/systemd/system/vvv-landing-vvv-landing-sing-box.service <<EOF_SING_SERVICE
+    cat > /etc/systemd/system/vvv-landing-sing-box.service <<EOF_SING_SERVICE
 [Unit]
 Description=sing-box Landing Hysteria 2 Service
 After=network-online.target nss-lookup.target
