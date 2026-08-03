@@ -159,16 +159,14 @@ def test_restricted_payload_rejection():
 
 def test_menu_and_handoff_contract():
     manager = (CORE / 'vvv_manager.sh').read_text(encoding='utf-8')
-    landing = (CORE / 'landing.sh').read_text(encoding='utf-8')
     center = (CORE / 'center_manager.sh').read_text(encoding='utf-8')
-    sub = (CORE / 'sub_center.py').read_text(encoding='utf-8')
     installer = (ROOT / 'vvv-install.sh').read_text(encoding='utf-8')
     default_url = 'https://raw.githubusercontent.com/weizhiok/vvv/client-support/client_upgrade.py'
     require('升级客户端支持' in manager and manager.index('升级客户端支持') < manager.index('echo "0. 退出"'),
             '主机/直连副机菜单没有把客户端升级放在退出上方')
-    require('升级客户端支持' in landing and 'client_upgrade_engine.py' in landing,
-            '中转副机菜单缺少客户端升级')
-    require(default_url in center and 'client_support_handoff' in sub,
+    require('中转副机管理' in manager and 'CLIENT_UPGRADE' in manager,
+            '中转副机统一菜单缺少客户端升级')
+    require(default_url in center and 'client_support_handoff' in center and 'new_chat_instruction' in center,
             '请求头调试缺少跨对话交接信息')
     for name in ('client_upgrade_engine.py', 'client_local_renderer.py'):
         require(name in installer, f'安装器没有下载 {name}')
