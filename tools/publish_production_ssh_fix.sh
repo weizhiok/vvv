@@ -9,6 +9,14 @@ git config user.email 41898282+github-actions[bot]@users.noreply.github.com
 set +e
 (
   set -Eeuxo pipefail
+  python3 - <<'PY_FIX_ANCHORS'
+from pathlib import Path
+path=Path('tools/apply_landing_direct_role.py')
+text=path.read_text(encoding='utf-8')
+for name in ('show_install_menu','ask_optional_vvc1','jpr_registration_code','install_landing','rebuild_roles_from_system','show_parameter_summary'):
+    text=text.replace(rf"r'^{name}\\(\\) \\{{", rf"r'^{name}\\(\\)\\s*\\{{")
+path.write_text(text,encoding='utf-8')
+PY_FIX_ANCHORS
   python3 -m py_compile tools/apply_landing_direct_role.py
   python3 tools/apply_landing_direct_role.py
 
@@ -32,7 +40,10 @@ set +e
   python3 core-src/client_adapters.py >/dev/null
   python3 tests/landing_direct_role_validation.py
 
-  rm -f tools/apply_landing_direct_role.py tools/publish_landing_direct_role.sh
+  rm -f \
+    tools/apply_landing_direct_role.py \
+    tools/publish_landing_direct_role.sh \
+    validation/landing-direct-role-validation.log
   git checkout origin/main -- \
     tools/publish_production_ssh_fix.sh \
     .github/workflows/publish-production-ssh-fix.yml \
