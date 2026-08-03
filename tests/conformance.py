@@ -165,7 +165,8 @@ def test_node_names_and_clients():
             '主机本地配置缺少 NekoBox')
     require('NekoBoxForAndroid.yaml' in landing and '【NekoBoxForAndroid（Clash Meta）】' in landing,
             '中转副机本地配置缺少 NekoBox')
-    require('复用已保存的 JPR3 对接密钥' in bootstrap, '中转副机无损升级仍要求重新粘贴 JPR3')
+    require('组合角色只允许在全新系统安装' in bootstrap and '中转副机只允许在全新系统安装' in bootstrap,
+            '全新安装角色边界不完整')
 
 
 def test_landing_and_direct_ip_change():
