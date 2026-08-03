@@ -4,6 +4,8 @@ umask 077
 ROLE_FILE=/etc/vvv/roles.json
 SYNC=/usr/local/lib/vvv/sync_agent.py
 DIAG=/usr/local/lib/vvv/diagnostic_report.py
+CLIENT_UPGRADE=/usr/local/lib/vvv/client_upgrade_engine.py
+CLIENT_RENDERER=/usr/local/lib/vvv/client_local_renderer.py
 role_has(){ jq -e --arg k "$1" '.roles[$k]==true' "$ROLE_FILE" >/dev/null 2>&1; }
 pause(){ read -r -p "按回车返回……" _; }
 show_roles(){
@@ -34,9 +36,37 @@ update_center_ip(){
   read -r -p "请输入新的订阅中心公网 IPv4：" ip
   python3 "$SYNC" update-center-ip "$ip"
 }
+upgrade_client_support(){
+  [[ -x "$CLIENT_UPGRADE" ]] || { echo "客户端支持升级引擎不存在，请先使用最新版 VVV 完成首次安装。"; return 1; }
+  python3 "$CLIENT_UPGRADE" menu
+}
+show_local_clients(){
+  if [[ -x "$CLIENT_RENDERER" ]]; then
+    python3 "$CLIENT_RENDERER" regenerate >/dev/null
+  fi
+  /usr/local/sbin/jp-show-nodes || /usr/local/sbin/jp-relay-manager --manage
+}
 landing_menu(){
-  [[ -x /usr/local/sbin/vvv-landing-original ]] && exec /usr/local/sbin/vvv-landing-original
-  echo "中转副机管理命令不存在。"; exit 1
+  while true; do
+    echo
+    echo "========== 中转副机管理 =========="
+    echo "1. 进入节点与线路管理"
+    echo "2. 升级客户端支持"
+    echo "0. 退出"
+    read -r -p "请输入编号：" choice
+    case "$choice" in
+      1)
+        if [[ -x /usr/local/sbin/vvv-landing-original ]]; then
+          /usr/local/sbin/vvv-landing-original
+        else
+          echo "中转副机管理命令不存在。"
+        fi
+        ;;
+      2) upgrade_client_support; pause;;
+      0) exit 0;;
+      *) echo "请输入有效编号。";;
+    esac
+  done
 }
 [[ -f $ROLE_FILE ]] || { echo "VVV 角色配置不存在。"; exit 1; }
 role_has landing && ! role_has proxy && landing_menu
@@ -53,11 +83,12 @@ while true; do
   fi
   echo "$n. 注册或更换订阅中心"; act[$n]=register; ((n++))
   echo "$n. 生成故障诊断报告"; act[$n]=diagnostic; ((n++))
+  echo "$n. 升级客户端支持"; act[$n]=client_upgrade; ((n++))
   echo "0. 退出"
   read -r -p "请输入编号：" x
   [[ $x == 0 ]] && exit 0
   case "${act[$x]:-}" in
-    local) /usr/local/sbin/jp-show-nodes || /usr/local/sbin/jp-relay-manager --manage; pause;;
+    local) show_local_clients; pause;;
     relay) /usr/local/sbin/jp-relay-manager --manage;;
     center) /usr/local/sbin/vvv-center;;
     sync) systemctl start vvv-sync.service; show_sync; pause;;
@@ -65,6 +96,7 @@ while true; do
     update_ip) update_center_ip; pause;;
     register) register_center; pause;;
     diagnostic) python3 "$DIAG"; pause;;
+    client_upgrade) upgrade_client_support; pause;;
     *) echo "请输入有效编号。";;
   esac
 done
