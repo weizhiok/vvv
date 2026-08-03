@@ -46,6 +46,13 @@ def post(url, token, obj):
         return json.loads(response.read().decode())
 
 
+def encode_vvc1(payload):
+    raw = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode()
+    encoded = base64.urlsafe_b64encode(raw).decode().rstrip('=')
+    digest = hashlib.sha256(b'VVV-VVC1\0' + raw).hexdigest()[:20]
+    return f'VVC1.{encoded}.{digest}'
+
+
 def decode_vvc1(code):
     value = ''.join(str(code or '').split())
     parts = value.split('.')
@@ -104,7 +111,7 @@ def _validate_api(value):
     try:
         ipaddress.ip_address(parsed.hostname)
     except ValueError as exc:
-        raise ValueError('订阅中心 API 必须使用 IP 地址。') from exc
+        raise ValueError('订阅中心 API 必须使用 IP 地址，不能使用域名。') from exc
 
 
 def stable_id():
