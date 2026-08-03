@@ -1014,10 +1014,15 @@ EOF_CLASH_HY2
     } >> "$CLIENT_DIR/客户端节点.txt"
   fi
 
+  cp "$CLIENT_DIR/Clash-Verge-Rev.yaml" "$CLIENT_DIR/NekoBoxForAndroid.yaml"
+
   {
     echo
     echo "【Clash Verge Rev / Mihomo】"
     cat "$CLIENT_DIR/Clash-Verge-Rev.yaml"
+    echo
+    echo "【NekoBoxForAndroid（Clash Meta）】"
+    cat "$CLIENT_DIR/NekoBoxForAndroid.yaml"
   } >> "$CLIENT_DIR/客户端节点.txt"
 
   cp "$CLIENT_DIR/客户端节点.txt" "$CLIENT_NODES_FILE"
