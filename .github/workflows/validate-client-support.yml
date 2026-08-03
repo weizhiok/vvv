@@ -1,0 +1,43 @@
+name: Validate client-support payload
+on:
+  push:
+    branches: [client-support]
+    paths:
+      - 'client_upgrade.py'
+      - '.github/workflows/validate-client-support.yml'
+  pull_request:
+    paths:
+      - 'client_upgrade.py'
+      - '.github/workflows/validate-client-support.yml'
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate pure client module
+        run: |
+          python3 -m py_compile client_upgrade.py
+          python3 client_upgrade.py >/tmp/client-support.json
+          python3 - <<'PY'
+          import ast, json
+          from pathlib import Path
+          path=Path('client_upgrade.py')
+          tree=ast.parse(path.read_text(encoding='utf-8'))
+          allowed={'base64','json','re','urllib.parse'}
+          forbidden={'open','exec','eval','compile','__import__','input','breakpoint','getattr','setattr','delattr','globals','locals','vars'}
+          for node in ast.walk(tree):
+              if isinstance(node,ast.Import):
+                  assert all(alias.name in allowed for alias in node.names), node.names
+              if isinstance(node,ast.ImportFrom):
+                  assert (node.module or '') in allowed, node.module
+              if isinstance(node,ast.Call) and isinstance(node.func,ast.Name):
+                  assert node.func.id not in forbidden, node.func.id
+          obj=json.loads(Path('/tmp/client-support.json').read_text())
+          assert isinstance(obj['version'],int) and obj['version']>0
+          assert 'nekobox' in obj['formats'] and obj['local_outputs']
+          assert obj['default_upgrade_url'].endswith('/client-support/client_upgrade.py')
+          print('CLIENT SUPPORT PAYLOAD VALID')
+          PY
