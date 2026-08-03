@@ -19,62 +19,43 @@ primary(){ jq -r .primary_role "$ROLE_FILE"; }
 register_center(){
   local code
   while true; do
-    read -r -p "请输入订阅中心 VVC1 对接码（按回车取消）：" code
+    read -r -p "请输入订阅中心对接码（支持 VVC1 或含注册票据的 JPR3，按回车取消）：" code
     code="${code//[[:space:]]/}"
     [[ -n "$code" ]] || return
-    if [[ "$code" == JPR3.* ]]; then echo "对接码错误：这是中转副机安装密钥。"; continue; fi
     if python3 "$SYNC" validate-code "$code" >/dev/null 2>&1; then break; fi
-    echo "对接码错误，请重新输入完整 VVC1。"
+    echo "对接码无效，请重新输入完整 VVC1 或 JPR3。"
   done
   /usr/local/lib/vvv/register_sync.sh "$(primary)" "$code"
 }
 show_sync(){
-  [[ -f /etc/vvv/client.json ]] && jq '{api_base_url,center_ip,host_id,role,registered_at,last_sync,last_result}' /etc/vvv/client.json || echo "尚未注册订阅中心。"
+  [[ -f /etc/vvv/client.json ]] && jq '{api_base_url,center_ip,host_id,role,registration_method,registered_at,last_sync,last_result}' /etc/vvv/client.json || echo "尚未注册订阅中心。"
 }
-update_center_ip(){
-  local ip
-  read -r -p "请输入新的订阅中心公网 IPv4：" ip
-  python3 "$SYNC" update-center-ip "$ip"
-}
+update_center_ip(){ local ip; read -r -p "请输入新的订阅中心公网 IPv4：" ip; python3 "$SYNC" update-center-ip "$ip"; }
 upgrade_client_support(){
-  [[ -x "$CLIENT_UPGRADE" ]] || { echo "客户端支持升级引擎不存在，请先使用最新版 VVV 完成首次安装。"; return 1; }
+  [[ -x "$CLIENT_UPGRADE" ]] || { echo "客户端支持升级引擎不存在。"; return 1; }
   python3 "$CLIENT_UPGRADE" menu
 }
 show_local_clients(){
-  if [[ -x "$CLIENT_RENDERER" ]]; then
-    python3 "$CLIENT_RENDERER" regenerate >/dev/null
-  fi
-  /usr/local/sbin/jp-show-nodes || /usr/local/sbin/jp-relay-manager --manage
+  [[ -x "$CLIENT_RENDERER" ]] || { echo "本机客户端配置生成器不存在。"; return 1; }
+  python3 "$CLIENT_RENDERER" regenerate >/dev/null
+  python3 "$CLIENT_RENDERER" show
 }
-landing_menu(){
-  while true; do
-    echo
-    echo "========== 中转副机管理 =========="
-    echo "1. 进入节点与线路管理"
-    echo "2. 升级客户端支持"
-    echo "0. 退出"
-    read -r -p "请输入编号：" choice
-    case "$choice" in
-      1)
-        if [[ -x /usr/local/sbin/vvv-landing-original ]]; then
-          /usr/local/sbin/vvv-landing-original
-        else
-          echo "中转副机管理命令不存在。"
-        fi
-        ;;
-      2) upgrade_client_support; pause;;
-      0) exit 0;;
-      *) echo "请输入有效编号。";;
-    esac
-  done
+landing_manage(){
+  if [[ -x /usr/local/sbin/vvv-landing-original ]]; then
+    /usr/local/sbin/vvv-landing-original
+  elif [[ -x /usr/local/sbin/landing-vps ]]; then
+    /usr/local/sbin/landing-vps
+  else
+    echo "中转副机管理命令不存在。"
+  fi
 }
 [[ -f $ROLE_FILE ]] || { echo "VVV 角色配置不存在。"; exit 1; }
-role_has landing && ! role_has proxy && landing_menu
 while true; do
   echo; echo "========== VVV 管理 =========="; show_roles; echo
   n=1; declare -A act=()
-  if role_has proxy; then echo "$n. 查看本机客户端配置"; act[$n]=local; ((n++)); fi
+  if role_has proxy || role_has landing; then echo "$n. 查看本机客户端配置"; act[$n]=local; ((n++)); fi
   if role_has relay; then echo "$n. 中转线路管理"; act[$n]=relay; ((n++)); fi
+  if role_has landing; then echo "$n. 中转副机管理"; act[$n]=landing; ((n++)); fi
   if role_has center; then echo "$n. 订阅中心管理"; act[$n]=center; ((n++)); fi
   if [[ -f /etc/vvv/client.json ]]; then
     echo "$n. 立即同步订阅"; act[$n]=sync; ((n++))
@@ -90,6 +71,7 @@ while true; do
   case "${act[$x]:-}" in
     local) show_local_clients; pause;;
     relay) /usr/local/sbin/jp-relay-manager --manage;;
+    landing) landing_manage;;
     center) /usr/local/sbin/vvv-center;;
     sync) systemctl start vvv-sync.service; show_sync; pause;;
     status) show_sync; systemctl --no-pager status vvv-sync.timer vvv-sync.path 2>/dev/null || true; pause;;

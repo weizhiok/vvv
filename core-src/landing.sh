@@ -18,6 +18,7 @@ set -eu
 umask 077
 
 PAIRING_KEY="${PAIRING_KEY:-}"
+COMBINED_INSTALL="${VVV_COMBINED_INSTALL:-0}"
 CURRENT_STEP="启动"
 TMP_DIR=""
 TMP_CFG=""
@@ -32,12 +33,12 @@ VLESS_TEST_PORT=""
 HY2_TEST_PORT=""
 
 XRAY="/usr/local/bin/xray"
-XRAY_CFG="/usr/local/etc/xray/config.json"
+XRAY_CFG="/etc/vvv-landing/xray/config.json"
 XRAY_FALLBACK_VERSION="26.3.27"
 XRAY_VERSION="$XRAY_FALLBACK_VERSION"
 XRAY_VERSION_SOURCE="备用稳定版"
 SING_BOX="/usr/local/bin/sing-box"
-SING_CFG="/etc/sing-box/config.json"
+SING_CFG="/etc/vvv-landing/sing-box/config.json"
 SING_BOX_FALLBACK_VERSION="1.13.12"
 SING_BOX_VERSION="$SING_BOX_FALLBACK_VERSION"
 SING_BOX_VERSION_SOURCE="备用稳定版"
@@ -46,7 +47,7 @@ HY2_LIMIT_MBPS=50
 STATE_DIR="/etc/jp-relay"
 STATE_FILE="${STATE_DIR}/landing-state.json"
 PAIR_FILE="${STATE_DIR}/pairing-key.txt"
-TLS_DIR="/etc/sing-box/tls"
+TLS_DIR="/etc/vvv-landing/sing-box/tls"
 UPGRADE_MARKER="/var/lib/jp-relay/landing-system-upgrade.done"
 CLIENT_DIR="/root/中转客户端配置"
 CLIENT_NODES_FILE="/root/中转客户端节点.txt"
@@ -214,7 +215,7 @@ PY_JPR3_DECODE
 )" || fail "JPR3 解码或校验失败，密钥可能复制不完整。"
 
   printf '%s' "$PAIR_JSON" | jq -e '
-    .schema==3 and .type=="jp-relay-landing" and
+    .schema==4 and .type=="jp-relay-landing" and
     (.protocol_mode=="dual" or .protocol_mode=="vless" or .protocol_mode=="hy2") and
     (.relay_id|type=="string" and length>0) and
     (.node_name|type=="string" and length>0) and
@@ -551,7 +552,7 @@ install_xray_version() {
   [ -x "$work/xray" ] || { rm -rf "$work"; return 1; }
   detected="$("$work/xray" version 2>/dev/null | awk 'NR==1{print $2}')"
   [ "$detected" = "$version" ] || { echo "Xray 二进制版本校验失败。" >&2; rm -rf "$work"; return 1; }
-  service_stop xray
+  service_stop vvv-landing-xray
   mkdir -p /usr/local/bin
   cp "$work/xray" "$XRAY"; chmod 755 "$XRAY"
   rm -rf "$work"
@@ -594,7 +595,7 @@ install_sing_box_version() {
   [ -n "$binary" ] && [ -x "$binary" ] || { rm -rf "$work"; return 1; }
   detected="$("$binary" version 2>/dev/null | awk '/sing-box version/{print $3; exit}')"
   [ "$detected" = "$version" ] || { echo "sing-box 二进制版本校验失败。" >&2; rm -rf "$work"; return 1; }
-  service_stop sing-box
+  service_stop vvv-landing-sing-box
   mkdir -p /usr/local/bin
   cp "$binary" "$SING_BOX"; chmod 755 "$SING_BOX"
   rm -rf "$work"
@@ -619,8 +620,8 @@ create_services() {
   if mode_has_vless; then
     getent group xray >/dev/null 2>&1 || groupadd --system xray
     id xray >/dev/null 2>&1 || useradd --system --gid xray --no-create-home --shell /usr/sbin/nologin xray
-    install -d -o root -g xray -m 750 /usr/local/etc/xray
-    cat > /etc/systemd/system/xray.service <<EOF_XRAY_SERVICE
+    install -d -o root -g xray -m 750 /etc/vvv-landing/xray
+    cat > /etc/systemd/system/vvv-landing-vvv-landing-xray.service <<EOF_XRAY_SERVICE
 [Unit]
 Description=Xray Landing VLESS Service
 After=network-online.target nss-lookup.target
@@ -634,7 +635,7 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
 Environment=GOMEMLIMIT=${GOMEMLIMIT_VALUE}
 Environment=GOGC=50
-ExecStart=/usr/local/bin/xray run -format=json -config /usr/local/etc/xray/config.json
+ExecStart=/usr/local/bin/xray run -format=json -config /etc/vvv-landing/xray/config.json
 Restart=on-failure
 RestartSec=3s
 LimitNOFILE=1048576
@@ -642,13 +643,13 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF_XRAY_SERVICE
-    systemctl enable xray >/dev/null
+    systemctl enable vvv-landing-xray >/dev/null
   fi
   if mode_has_hy2; then
     getent group sing-box >/dev/null 2>&1 || groupadd --system sing-box
     id sing-box >/dev/null 2>&1 || useradd --system --gid sing-box --no-create-home --shell /usr/sbin/nologin sing-box
-    install -d -o root -g sing-box -m 750 /etc/sing-box "$TLS_DIR"
-    cat > /etc/systemd/system/sing-box.service <<EOF_SING_SERVICE
+    install -d -o root -g sing-box -m 750 /etc/vvv-landing/sing-box "$TLS_DIR"
+    cat > /etc/systemd/system/vvv-landing-vvv-landing-sing-box.service <<EOF_SING_SERVICE
 [Unit]
 Description=sing-box Landing Hysteria 2 Service
 After=network-online.target nss-lookup.target
@@ -662,7 +663,7 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
 Environment=GOMEMLIMIT=${GOMEMLIMIT_VALUE}
 Environment=GOGC=50
-ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
+ExecStart=/usr/local/bin/sing-box run -c /etc/vvv-landing/sing-box/config.json
 Restart=on-failure
 RestartSec=3s
 LimitNOFILE=1048576
@@ -670,7 +671,7 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF_SING_SERVICE
-    systemctl enable sing-box >/dev/null
+    systemctl enable vvv-landing-sing-box >/dev/null
   fi
   systemctl daemon-reload
 }
@@ -716,7 +717,7 @@ write_hy2_certificate() {
 }
 
 write_xray_config() {
-  mkdir -p /usr/local/etc/xray
+  mkdir -p /etc/vvv-landing/xray
   VLESS_TEST_PORT="$(allocate_local_test_port 18080 18999)"
   TMP_CFG="$(mktemp /tmp/landing-xray.XXXXXX)"
   cat > "$TMP_CFG" <<EOF_XRAY_CONFIG
@@ -786,7 +787,7 @@ EOF_XRAY_CONFIG
 }
 
 write_sing_config() {
-  mkdir -p /etc/sing-box
+  mkdir -p /etc/vvv-landing/sing-box
   write_hy2_certificate
   HY2_TEST_PORT="$(allocate_local_test_port 19080 19999)"
   TMP_CFG="$(mktemp /tmp/landing-sing.XXXXXX)"
@@ -860,12 +861,12 @@ EOF_SING_CONFIG
 
 verify_runtime() {
   if mode_has_vless; then
-    service_active xray || return 1
+    service_active vvv-landing-xray || return 1
     ss -H -lntp "sport = :${REMOTE_PUBLIC_PORT}" 2>/dev/null | grep -qi xray || return 1
     ss -H -lntp "sport = :${VLESS_TEST_PORT}" 2>/dev/null | grep -qi xray || return 1
   fi
   if mode_has_hy2; then
-    service_active sing-box || return 1
+    service_active vvv-landing-sing-box || return 1
     ss -H -lnup "sport = :${REMOTE_PUBLIC_PORT}" 2>/dev/null | grep -qi sing-box || return 1
     ss -H -lntp "sport = :${HY2_TEST_PORT}" 2>/dev/null | grep -qi sing-box || return 1
   fi
@@ -918,6 +919,16 @@ protocol_name() {
   fi
 }
 
+relay_client_base() {
+  raw="$1"
+  if printf '%s' "$raw" | grep -Eq '^[A-Za-z]{2}-'; then
+    country="$(printf '%s' "${raw%%-*}" | tr '[:lower:]' '[:upper:]')"
+    printf '%s-中转-%s:%s' "$country" "$JAPAN_PUBLIC_IP" "$JAPAN_PORT"
+  else
+    printf '中转-%s:%s' "$JAPAN_PUBLIC_IP" "$JAPAN_PORT"
+  fi
+}
+
 generate_client_files() {
   mkdir -p "$CLIENT_DIR"
   : > "$CLIENT_DIR/Quantumult-X.conf"
@@ -935,7 +946,7 @@ generate_client_files() {
   } > "$CLIENT_DIR/客户端节点.txt"
 
   if mode_has_vless; then
-    vless_name="$(protocol_name "$NODE_NAME" VLESS)"
+    vless_name="$(protocol_name "$(relay_client_base "$NODE_NAME")" VLESS)"
     encoded_vless_name="$(urlencode "$vless_name")"
     vless_params="encryption=none&flow=xtls-rprx-vision&security=reality&sni=$(urlencode "$SNI")&fp=chrome&pbk=$(urlencode "$JAPAN_REALITY_PUBLIC_KEY")&sid=$(urlencode "$JAPAN_REALITY_SHORT_ID")&type=tcp&headerType=none"
     vless_uri="vless://${JAPAN_CLIENT_UUID}@${JAPAN_PUBLIC_IP}:${JAPAN_PORT}?${vless_params}#${encoded_vless_name}"
@@ -977,7 +988,7 @@ EOF_CLASH_VLESS
   fi
 
   if mode_has_hy2; then
-    hy2_name="$(protocol_name "$NODE_NAME" HY2)"
+    hy2_name="$(protocol_name "$(relay_client_base "$NODE_NAME")" HY2)"
     encoded_hy2_name="$(urlencode "$hy2_name")"
     hy2_uri="hysteria2://$(urlencode "$JAPAN_HY2_PASSWORD")@${JAPAN_PUBLIC_IP}:${JAPAN_PORT}/?obfs=salamander&obfs-password=$(urlencode "$JAPAN_HY2_OBFS")&sni=$(urlencode "$JAPAN_HY2_SERVER_NAME")&insecure=1&pinSHA256=$(urlencode "$JAPAN_HY2_PIN_HEX")#${encoded_hy2_name}"
     loon="${hy2_name} = Hysteria2,${JAPAN_PUBLIC_IP},${JAPAN_PORT},\"${JAPAN_HY2_PASSWORD}\",skip-cert-verify=true,sni=${JAPAN_HY2_SERVER_NAME},udp=true,fast-open=true,salamander-password=\"${JAPAN_HY2_OBFS}\""
@@ -1061,8 +1072,8 @@ import tempfile
 from pathlib import Path
 
 STATE = Path('/etc/jp-relay/landing-state.json')
-XRAY_CFG = Path('/usr/local/etc/xray/config.json')
-SING_CFG = Path('/etc/sing-box/config.json')
+XRAY_CFG = Path('/etc/vvv-landing/xray/config.json')
+SING_CFG = Path('/etc/vvv-landing/sing-box/config.json')
 CLIENT_DIR = Path('/root/中转客户端配置')
 CLIENT_NODES = Path('/root/中转客户端节点.txt')
 SYNC_CFG = Path('/etc/vvv/client.json')
@@ -1204,15 +1215,15 @@ def main():
             update_text_files(old_ip, new_ip)
             update_sync_center(old_ip, new_ip)
             if mode in ('dual', 'vless'):
-                restart_active('xray.service')
+                restart_active('vvv-landing-xray.service')
             if mode in ('dual', 'hy2'):
-                restart_active('sing-box.service')
+                restart_active('vvv-landing-sing-box.service')
         except Exception:
             for path, backup in backups.items():
                 path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(backup, path)
-            subprocess.run(['systemctl', 'restart', 'xray.service'], check=False, timeout=75)
-            subprocess.run(['systemctl', 'restart', 'sing-box.service'], check=False, timeout=75)
+            subprocess.run(['systemctl', 'restart', 'vvv-landing-xray.service'], check=False, timeout=75)
+            subprocess.run(['systemctl', 'restart', 'vvv-landing-sing-box.service'], check=False, timeout=75)
             raise
     print(f'主机 IP 修改成功：{old_ip} → {new_ip}')
     print('代理配置、客户端节点文件及订阅同步地址已同步更新。')
@@ -1345,6 +1356,19 @@ run_probe_summary() {
   fi
 }
 
+reuse_installed_cores() {
+  mode_has_vless && [ -x "$XRAY" ] || { mode_has_vless && fail "组合安装未找到已安装的 Xray。"; }
+  mode_has_hy2 && [ -x "$SING_BOX" ] || { mode_has_hy2 && fail "组合安装未找到已安装的 sing-box。"; }
+  if mode_has_vless; then
+    XRAY_VERSION="$("$XRAY" version 2>/dev/null | awk 'NR==1{print $2}')"
+    XRAY_VERSION_SOURCE="与本机直连代理共享"
+  fi
+  if mode_has_hy2; then
+    SING_BOX_VERSION="$("$SING_BOX" version 2>/dev/null | awk '/sing-box version/{print $3; exit}')"
+    SING_BOX_VERSION_SOURCE="与本机直连代理共享"
+  fi
+}
+
 CURRENT_STEP="检查 root 权限"
 [ "$(id -u)" -eq 0 ] || fail "请使用 root 用户执行。"
 
@@ -1352,52 +1376,60 @@ CURRENT_STEP="检查操作系统"
 log "$CURRENT_STEP"
 detect_os
 
-CURRENT_STEP="刷新软件源并安装依赖"
-log "$CURRENT_STEP"
-upgrade_system_once
-
 CURRENT_STEP="解析并验证 JPR3 对接密钥"
 log "$CURRENT_STEP"
 normalize_pairing_key
 parse_pairing_key
 
-CURRENT_STEP="检测官方最新稳定版"
-log "$CURRENT_STEP"
-resolve_core_versions
-
-CURRENT_STEP="检查磁盘和内存"
-log "$CURRENT_STEP"
-check_disk_space
-choose_memory_limit
-
-CURRENT_STEP="配置 Swap"
-log "$CURRENT_STEP"
-configure_swap_if_suitable
-
-CURRENT_STEP="配置 BBR、fq 和 UDP 缓冲区"
-log "$CURRENT_STEP"
-configure_network_tuning
-
-CURRENT_STEP="设置上海时区和每天 06:00 自动重启"
-log "$CURRENT_STEP"
-configure_timezone_and_daily_reboot
+if [ "$COMBINED_INSTALL" = 1 ]; then
+  CURRENT_STEP="复用自身直连代理的系统环境和代理核心"
+  log "$CURRENT_STEP"
+  reuse_installed_cores
+  check_disk_space
+  choose_memory_limit
+  echo "组合安装不重复执行 APT、Swap、BBR、时区、定时重启或代理核心安装。"
+else
+  CURRENT_STEP="刷新软件源并安装依赖"
+  log "$CURRENT_STEP"
+  upgrade_system_once
+  CURRENT_STEP="检测官方最新稳定版"
+  log "$CURRENT_STEP"
+  resolve_core_versions
+  CURRENT_STEP="检查磁盘和内存"
+  log "$CURRENT_STEP"
+  check_disk_space
+  choose_memory_limit
+  CURRENT_STEP="配置 Swap"
+  log "$CURRENT_STEP"
+  configure_swap_if_suitable
+  CURRENT_STEP="配置 BBR、fq 和 UDP 缓冲区"
+  log "$CURRENT_STEP"
+  configure_network_tuning
+  CURRENT_STEP="设置上海时区和每天 06:00 自动重启"
+  log "$CURRENT_STEP"
+  configure_timezone_and_daily_reboot
+fi
 
 if mode_has_vless; then
   CURRENT_STEP="检查 VLESS TCP 端口"
   log "$CURRENT_STEP"
   check_port_available tcp "$REMOTE_PUBLIC_PORT" xray
-  CURRENT_STEP="安装 Xray 最新稳定版"
-  log "$CURRENT_STEP"
-  install_xray_binary
+  if [ "$COMBINED_INSTALL" != 1 ]; then
+    CURRENT_STEP="安装 Xray 最新稳定版"
+    log "$CURRENT_STEP"
+    install_xray_binary
+  fi
 fi
 
 if mode_has_hy2; then
   CURRENT_STEP="检查 Hysteria 2 UDP 端口"
   log "$CURRENT_STEP"
   check_port_available udp "$REMOTE_PUBLIC_PORT" sing-box
-  CURRENT_STEP="安装 sing-box 最新稳定版"
-  log "$CURRENT_STEP"
-  install_sing_box_binary
+  if [ "$COMBINED_INSTALL" != 1 ]; then
+    CURRENT_STEP="安装 sing-box 最新稳定版"
+    log "$CURRENT_STEP"
+    install_sing_box_binary
+  fi
 fi
 
 CURRENT_STEP="创建代理服务"
@@ -1408,7 +1440,7 @@ if mode_has_vless; then
   CURRENT_STEP="生成并验证落地 VLESS 配置"
   log "$CURRENT_STEP"
   if ! write_xray_config; then
-    if [ "$XRAY_VERSION" != "$XRAY_FALLBACK_VERSION" ]; then
+    if [ "$COMBINED_INSTALL" != 1 ] && [ "$XRAY_VERSION" != "$XRAY_FALLBACK_VERSION" ]; then
       echo "Xray 最新版配置测试失败，自动使用备用版 v${XRAY_FALLBACK_VERSION}。" >&2
       XRAY_VERSION="$XRAY_FALLBACK_VERSION"; XRAY_VERSION_SOURCE="备用稳定版（最新版配置测试失败）"
       install_xray_version "$XRAY_VERSION" || fail "Xray 备用版安装失败。"
@@ -1417,14 +1449,14 @@ if mode_has_vless; then
       fail "Xray 配置测试失败。"
     fi
   fi
-  service_restart xray
+  service_restart vvv-landing-xray
 fi
 
 if mode_has_hy2; then
   CURRENT_STEP="生成并验证落地 Hysteria 2 配置"
   log "$CURRENT_STEP"
   if ! write_sing_config; then
-    if [ "$SING_BOX_VERSION" != "$SING_BOX_FALLBACK_VERSION" ]; then
+    if [ "$COMBINED_INSTALL" != 1 ] && [ "$SING_BOX_VERSION" != "$SING_BOX_FALLBACK_VERSION" ]; then
       echo "sing-box 最新版配置测试失败，自动使用备用版 v${SING_BOX_FALLBACK_VERSION}。" >&2
       SING_BOX_VERSION="$SING_BOX_FALLBACK_VERSION"; SING_BOX_VERSION_SOURCE="备用稳定版（最新版配置测试失败）"
       install_sing_box_version "$SING_BOX_VERSION" || fail "sing-box 备用版安装失败。"
@@ -1433,14 +1465,14 @@ if mode_has_hy2; then
       fail "sing-box 配置测试失败。"
     fi
   fi
-  service_restart sing-box
+  service_restart vvv-landing-sing-box
 fi
 
 CURRENT_STEP="验证 TCP/UDP 监听状态"
 log "$CURRENT_STEP"
 sleep 3
 if ! verify_runtime; then
-  journalctl -u xray -u sing-box --no-pager -n 100 2>/dev/null || true
+  journalctl -u vvv-landing-xray -u vvv-landing-sing-box --no-pager -n 100 2>/dev/null || true
   fail "代理服务未完整启动或监听端口不完整。"
 fi
 
@@ -1453,8 +1485,10 @@ log "$CURRENT_STEP"
 save_state
 install_shortcuts
 
-apt-get clean
-rm -rf /var/lib/apt/lists/*
+if [ "$COMBINED_INSTALL" != 1 ]; then
+  apt-get clean
+  rm -rf /var/lib/apt/lists/*
+fi
 
 log "新加坡副机 VPS / 落地 VPS 安装成功"
 echo "线路：${NODE_NAME}"
@@ -1467,7 +1501,8 @@ echo "BBR：${BBR_STATUS} / 队列=${BBR_QDISC}"
 echo "时区：Asia/Shanghai"
 echo "每天北京时间 06:00 自动重启"
 echo "以后输入 vps，可重新显示客户端配置和实时在线状态。"
-echo "本次没有立即重启服务器，只重启了启用的代理服务。"
+echo "本次没有立即重启服务器；中转服务使用独立进程，不会重启自身直连代理。"
+echo "请在 VPS 服务商安全组放行 TCP/UDP ${REMOTE_PUBLIC_PORT}；推荐仅允许日本主机 ${JAPAN_PUBLIC_IP}/32 访问。"
 echo
 cat "$CLIENT_NODES_FILE"
 

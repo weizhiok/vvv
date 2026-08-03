@@ -1353,7 +1353,9 @@ if kind=="direct":
     enabled_hy2=mode in ("dual","hy2")
 elif kind=="relay":
     relay=next(x for x in state.get("relays",[]) if x["id"]==rid)
-    base=relay["name"]
+    raw_name=str(relay.get("name") or "")
+    country=raw_name[:2].upper() if len(raw_name)>=3 and raw_name[:2].isalpha() and raw_name[2]=="-" else ""
+    base=(country+"-" if country else "")+f"中转-{ip}:{port}"
     enabled_vless=relay.get("vless") is not None
     enabled_hy2=relay.get("hy2") is not None
 elif kind=="upstream":
@@ -1814,21 +1816,27 @@ prompt_new_upstream_relay() {
 }
 
 make_pairing_key() {
-  local state_path="$1" relay_id="$2" registration_code=""
-  [[ ! -r /etc/vvv-sub/registration.code ]] || registration_code="$(cat /etc/vvv-sub/registration.code)"
-  python3 - "$state_path" "$relay_id" "$registration_code" <<'PY_JPR3'
+  local state_path="$1" relay_id="$2" subscription_bootstrap="null"
+  if [[ -s /etc/vvv/client.json && -x /usr/local/lib/vvv/sync_agent.py ]]; then
+    subscription_bootstrap="$(python3 /usr/local/lib/vvv/sync_agent.py relay-ticket "$relay_id" 2>/dev/null || printf 'null')"
+  fi
+  python3 - "$state_path" "$relay_id" "$subscription_bootstrap" <<'PY_JPR3'
 import base64,hashlib,json,sys,zlib
 from datetime import datetime,timezone
 from pathlib import Path
 s=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 r=next(x for x in s["relays"] if x["id"]==sys.argv[2])
+try:
+    subscription_bootstrap=json.loads(sys.argv[3]) if sys.argv[3] else None
+except Exception:
+    subscription_bootstrap=None
 payload={
- "schema":3,"type":"jp-relay-landing","protocol_mode":s["protocol_mode"],
+ "schema":4,"type":"jp-relay-landing","protocol_mode":s["protocol_mode"],
  "relay_id":r["id"],"node_name":r["name"],
  "japan_public_ip":s["public_ip"],"japan_port":int(s["listen_port"]),
  "remote_public_ip":r["remote_ip"],"remote_public_port":int(r["remote_port"]),
  "sni":s["sni"],"hy2_limit_mbps":int(s.get("hy2_limit_mbps") or 50),"xray_version":s["xray_version"],"sing_box_version":s["sing_box_version"],
- "vless":None,"hy2":None,"subscription_registration_code":sys.argv[3] or None,
+ "vless":None,"hy2":None,"subscription_bootstrap":subscription_bootstrap,
  "issued_at":datetime.now(timezone.utc).isoformat()
 }
 if r.get("vless"):
@@ -2163,7 +2171,7 @@ prompt_new_relay() {
     remote_ip="$input"; break
   done
 
-  default_port="443"
+  default_port="553"
   while true; do
     read -r -p "请输入落地统一端口 [默认 ${default_port}]：" input
     input="${input//[[:space:]]/}"

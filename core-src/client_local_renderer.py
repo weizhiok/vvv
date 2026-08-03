@@ -123,7 +123,10 @@ def main_contexts(state, root='/'):
     for relay in state.get('relays', []):
         rv = relay.get('vless') or {}
         rh = relay.get('hy2') or {}
-        nodes = build(relay.get('name') or relay.get('id'), rv.get('client_uuid'), rh.get('client_password'))
+        raw_name = str(relay.get('name') or '')
+        country = raw_name[:2].upper() if len(raw_name) >= 3 and raw_name[:2].isalpha() and raw_name[2] == '-' else ''
+        relay_base = (country + '-' if country else '') + f'中转-{server}:{port}'
+        nodes = build(relay_base, rv.get('client_uuid'), rh.get('client_password'))
         contexts.append({
             'id': relay.get('id'), 'title': f"中转节点：{relay.get('name') or relay.get('id')}",
             'metadata': [f'日本入口：{server}:{port}',
@@ -163,9 +166,11 @@ def main_contexts(state, root='/'):
 
 def landing_contexts(state, root='/'):
     mode = state.get('protocol_mode')
-    name = state.get('node_name') or f"{state.get('remote_public_ip')}:{state.get('remote_public_port')}"
+    raw_name = str(state.get('node_name') or '')
     server = state.get('japan_public_ip')
     port = int(state.get('japan_port') or 0)
+    country = raw_name[:2].upper() if len(raw_name) >= 3 and raw_name[:2].isalpha() and raw_name[2] == '-' else ''
+    name = (country + '-' if country else '') + f'中转-{server}:{port}'
     limit = int(state.get('hy2_limit_mbps') or 50)
     nodes = []
     vless = state.get('vless') or {}
@@ -193,12 +198,20 @@ def landing_contexts(state, root='/'):
 def detect_contexts(root='/'):
     main_state = rooted(root, '/etc/jp-relay/state.json')
     landing_state = rooted(root, '/etc/jp-relay/landing-state.json')
-    if landing_state.is_file():
+    has_main = main_state.is_file()
+    has_landing = landing_state.is_file()
+    if has_main and has_landing:
+        direct = read_json(main_state)
+        landing = read_json(landing_state)
+        if not isinstance(direct, dict) or not isinstance(landing, dict):
+            raise RuntimeError('组合角色状态文件无效。')
+        return 'landing-direct', main_contexts(direct, root) + landing_contexts(landing, root)
+    if has_landing:
         state = read_json(landing_state)
         if not isinstance(state, dict):
             raise RuntimeError('中转副机状态文件无效。')
         return 'landing', landing_contexts(state, root)
-    if main_state.is_file():
+    if has_main:
         state = read_json(main_state)
         if not isinstance(state, dict):
             raise RuntimeError('主机状态文件无效。')

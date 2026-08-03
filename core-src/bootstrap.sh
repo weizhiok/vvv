@@ -197,9 +197,10 @@ show_install_menu() {
   echo "1. 安装订阅中心 + 中转主机 + 自身代理"
   echo "2. 安装订阅中心 + 自身代理"
   echo "3. 安装中转主机 + 自身代理"
-  echo "4. 安装中转副机"
-  echo "5. 安装直连代理"
-  echo "6. 从云备份恢复"
+  echo "4. 安装中转副机 + 自身代理"
+  echo "5. 安装中转副机"
+  echo "6. 安装直连代理"
+  echo "7. 从云备份恢复"
   echo "0. 退出"
 }
 
@@ -251,15 +252,16 @@ validate_vvc1(){
   python3 "$BASE_DIR/sync_agent.py" validate-code "$1" >/dev/null 2>&1
 }
 
-ask_optional_vvc1(){
+ask_optional_vvc1() {
   local __var="$1" value
   while true; do
-    read -r -p "请输入订阅中心对接码（按回车跳过）：" value
+    read -r -p "请输入订阅中心对接码（支持 VVC1 或含注册票据的 JPR3；按回车跳过）：" value
     value="${value//[[:space:]]/}"
     if [[ -z "$value" ]]; then printf -v "$__var" '%s' ''; return; fi
-    if [[ "$value" == JPR3.* ]]; then echo "对接码错误：这是中转副机安装密钥，不能用于注册订阅中心。"; continue; fi
-    if validate_vvc1 "$value"; then printf -v "$__var" '%s' "$value"; return; fi
-    echo "对接码错误：必须输入完整有效的 VVC1 订阅中心对接码，或直接回车跳过。"
+    if python3 "$BASE_DIR/sync_agent.py" validate-code "$value" >/dev/null 2>&1; then
+      printf -v "$__var" '%s' "$value"; return
+    fi
+    echo "对接码错误：请输入完整 VVC1、含订阅注册票据的 JPR3，或直接回车跳过。"
   done
 }
 
@@ -401,25 +403,23 @@ ask_center_parameters(){
   export VVV_SUB_DOMAIN VVV_SUB_PORT VVV_SUB_TRANSPORT VVV_SUB_SUFFIX VVV_CF_TUNNEL_TOKEN
 }
 
-jpr_registration_code(){
-  local value="$1"
-  python3 - "$value" <<'PY_JPR_REGISTRATION_CODE'
-import base64
-import json
-import sys
-import zlib
-
-parts = ''.join(sys.argv[1].split()).split('.')
-if len(parts) != 3 or parts[0] != 'JPR3':
-    raise SystemExit(1)
-try:
-    transferred = base64.urlsafe_b64decode(parts[1] + '=' * ((4 - len(parts[1]) % 4) % 4))
-    raw = transferred if transferred.startswith(b'{') else zlib.decompress(transferred)
-    value = json.loads(raw.decode('utf-8')).get('subscription_registration_code') or ''
-except Exception:
-    raise SystemExit(1)
-print(value)
-PY_JPR_REGISTRATION_CODE
+jpr_field() {
+  local value="$1" field="$2"
+  python3 - "$value" "$field" <<'PY_JPR_FIELD'
+import base64,hashlib,json,sys,zlib
+parts=''.join(sys.argv[1].split()).split('.')
+if len(parts)!=3 or parts[0]!='JPR3': raise SystemExit(1)
+data=base64.urlsafe_b64decode(parts[1]+'='*((4-len(parts[1])%4)%4))
+if hashlib.sha256(data).hexdigest()[:20] != parts[2]: raise SystemExit(1)
+raw=data if data.startswith(b'{') else zlib.decompress(data)
+obj=json.loads(raw.decode())
+if obj.get('schema') != 4: raise SystemExit(1)
+value=obj
+for part in sys.argv[2].split('.'):
+    value=value[part]
+if isinstance(value,(dict,list)): print(json.dumps(value,ensure_ascii=False,separators=(',',':')))
+else: print(value)
+PY_JPR_FIELD
 }
 
 host_ready() {
@@ -526,22 +526,20 @@ ensure_center(){
   center_complete || fail "订阅中心安装后完整性检查失败。"
 }
 
-install_landing(){
-  local key="$1" tmp
+install_landing() {
+  local key="$1" combined="${2:-0}" tmp
   tmp="$(mktemp /tmp/vvv-landing.XXXXXX.sh)"
-  awk -v key="$key" 'BEGIN{done=0} !done && /^PAIRING_KEY=/ {print "PAIRING_KEY=\047" key "\047"; done=1; next} {print}' "$BASE_DIR/landing.sh" > "$tmp"
+  awk -v key="$key" 'BEGIN{done=0} !done && /^PAIRING_KEY=/ {print "PAIRING_KEY='" key "'"; done=1; next} {print}' "$BASE_DIR/landing.sh" > "$tmp"
   chmod 700 "$tmp"
   local landing_rc
-  if sh "$tmp"; then
-    landing_rc=0
+  if [[ "$combined" == 1 ]]; then
+    VVV_COMBINED_INSTALL=1 sh "$tmp" && landing_rc=0 || landing_rc=$?
   else
-    landing_rc=$?
+    sh "$tmp" && landing_rc=0 || landing_rc=$?
   fi
   rm -f "$tmp"
-  if (( landing_rc != 0 )); then
-    fail "中转副机安装程序失败（退出码 ${landing_rc}）；已停止后续步骤，请以上方首次失败信息为准。"
-  fi
-  [[ -x /usr/local/sbin/landing-vps ]] || fail "中转副机安装程序返回成功，但管理命令不存在。"
+  (( landing_rc == 0 )) || fail "中转副机安装程序失败（退出码 ${landing_rc}）。"
+  [[ -x /usr/local/sbin/landing-vps ]] || fail "中转副机管理命令不存在。"
   cat > /usr/local/sbin/vvv-landing-original <<'EOF_LANDING_ORIGINAL'
 #!/usr/bin/env bash
 exec /usr/local/sbin/landing-vps "$@"
@@ -549,10 +547,12 @@ EOF_LANDING_ORIGINAL
   chmod 700 /usr/local/sbin/vvv-landing-original
 }
 
-rebuild_roles_from_system(){
+rebuild_roles_from_system() {
   detect_installed_modules
   local primary
-  if [[ "$INST_LANDING" == true ]]; then
+  if [[ "$INST_LANDING" == true && "$INST_PROXY" == true ]]; then
+    primary=landing-direct
+  elif [[ "$INST_LANDING" == true ]]; then
     primary=landing
   elif [[ "$INST_CENTER" == true && "$INST_RELAY" == true ]]; then
     primary=center-relay
@@ -569,26 +569,15 @@ rebuild_roles_from_system(){
   python3 - "$ROLE_FILE" "$primary" "$INST_CENTER" "$INST_RELAY" "$INST_LANDING" "$INST_PROXY" <<'PY_ROLES'
 import json,os,sys,tempfile
 path,primary,center,relay,landing,proxy=sys.argv[1:]
-obj={
-    'schema':1,
-    'primary_role':primary,
-    'roles':{
-        'center':center=='true',
-        'relay':relay=='true',
-        'landing':landing=='true',
-        'proxy':proxy=='true',
-    },
-}
+obj={'schema':2,'primary_role':primary,'roles':{
+ 'center':center=='true','relay':relay=='true','landing':landing=='true','proxy':proxy=='true'}}
 os.makedirs(os.path.dirname(path),exist_ok=True)
 fd,tmp=tempfile.mkstemp(prefix='.roles.',dir=os.path.dirname(path))
-with os.fdopen(fd,'w',encoding='utf-8') as f:
-    json.dump(obj,f,ensure_ascii=False,indent=2)
-    f.write('\n')
-os.chmod(tmp,0o600)
-os.replace(tmp,path)
+with os.fdopen(fd,'w',encoding='utf-8') as f: json.dump(obj,f,ensure_ascii=False,indent=2); f.write('
+')
+os.chmod(tmp,0o600); os.replace(tmp,path)
 PY_ROLES
 }
-
 primary_role(){
   json_value "$ROLE_FILE" primary_role direct
 }
@@ -627,53 +616,42 @@ register_current_main_role(){
   fi
 }
 
-show_parameter_summary(){
-  local role_name protocol_name endpoint scheme transport_label
+show_parameter_summary() {
+  local role_name protocol_name endpoint scheme transport_label landing_port
   case "$choice" in
     1) role_name="安装订阅中心 + 中转主机 + 自身代理";;
     2) role_name="安装订阅中心 + 自身代理";;
     3) role_name="安装中转主机 + 自身代理";;
-    4) role_name="安装中转副机";;
-    5) role_name="安装直连代理";;
-    6) role_name="从云备份恢复";;
+    4) role_name="安装中转副机 + 自身代理";;
+    5) role_name="安装中转副机";;
+    6) role_name="安装直连代理";;
+    7) role_name="从云备份恢复";;
   esac
-  echo
-  echo "========== 安装参数总览 =========="
-  echo "安装角色：$role_name"
-  if [[ "$choice" == 6 ]]; then
+  echo; echo "========== 安装参数总览 =========="; echo "安装角色：$role_name"
+  if [[ "$choice" == 7 ]]; then
     echo "云盘目录：vvv/（重新授权后选择恢复日期）"
-  elif [[ "$choice" == 4 ]]; then
+  elif [[ "$choice" == 5 ]]; then
     echo "JPR3 密钥：已填写（${#key} 个字符）"
+    echo "中转副机统一端口：$(jpr_field "$key" remote_public_port)"
   else
     case "$VVV_PROTOCOL_MODE" in dual) protocol_name="VLESS + Hysteria 2";; vless) protocol_name="仅 VLESS";; hy2) protocol_name="仅 Hysteria 2";; esac
-    echo "代理协议：$protocol_name$([[ "$REUSE_PROXY" == 1 ]] && echo '（复用现有）')"
-    echo "代理端口：$VVV_PROXY_PORT"
+    echo "自身直连协议：$protocol_name$([[ "$REUSE_PROXY" == 1 ]] && echo '（复用现有）')"
+    echo "自身直连端口：$VVV_PROXY_PORT"
     [[ "$VVV_PROTOCOL_MODE" == hy2 ]] || echo "REALITY 伪装域名：$VVV_REALITY_SNI"
-    [[ "$VVV_PROTOCOL_MODE" == vless ]] || echo "Hysteria 2 每连接服务器强制限速：${VVV_HY2_LIMIT_MBPS}M"
-    if [[ "$choice" == 1 || "$choice" == 2 ]]; then
-      case "$VVV_SUB_TRANSPORT" in
-        direct-http) transport_label="直接 HTTP"; scheme=http;;
-        direct-https) transport_label="直接 HTTPS"; scheme=https;;
-        tunnel) transport_label="固定 HTTPS 域名（Cloudflare Tunnel）"; scheme=https;;
-      esac
-      if [[ "$VVV_SUB_TRANSPORT" == tunnel ]]; then
-        endpoint="https://${VVV_SUB_DOMAIN}/${VVV_SUB_SUFFIX}"
-      elif [[ -n "$VVV_SUB_DOMAIN" ]]; then
-        endpoint="${scheme}://${VVV_SUB_DOMAIN}:${VVV_SUB_PORT}/${VVV_SUB_SUFFIX}"
-      else
-        endpoint="${scheme}://本机公网IP:${VVV_SUB_PORT}/${VVV_SUB_SUFFIX}"
-      fi
-      echo "订阅传输：${transport_label}$([[ "$REUSE_CENTER" == 1 ]] && echo '（复用现有）')"
-      echo "统一订阅地址：${endpoint}"
-      echo "订阅后缀：${VVV_SUB_SUFFIX}"
-    elif [[ "$choice" == 3 ]]; then
-      [[ -n "$code" ]] && echo "订阅中心 VVC1：已填写或将使用本机订阅中心" || echo "订阅中心 VVC1：未填写（独立使用）"
-    elif [[ "$choice" == 5 ]]; then
-      [[ -n "$code" ]] && echo "订阅中心 VVC1：已填写" || echo "订阅中心 VVC1：未填写（本次暂不注册）"
+    [[ "$VVV_PROTOCOL_MODE" == vless ]] || echo "Hysteria 2 限速：${VVV_HY2_LIMIT_MBPS}M"
+    if [[ "$choice" == 4 ]]; then
+      landing_port="$(jpr_field "$key" remote_public_port)"
+      echo "中转副机端口：${landing_port}（TCP/UDP）"
+      echo "订阅注册：使用 JPR3 内置受限票据，不再重复询问"
+    elif [[ "$choice" == 1 || "$choice" == 2 ]]; then
+      case "$VVV_SUB_TRANSPORT" in direct-http) transport_label="直接 HTTP"; scheme=http;; direct-https) transport_label="直接 HTTPS"; scheme=https;; tunnel) transport_label="Cloudflare Tunnel"; scheme=https;; esac
+      [[ "$VVV_SUB_TRANSPORT" == tunnel ]] && endpoint="https://${VVV_SUB_DOMAIN}/${VVV_SUB_SUFFIX}" || endpoint="${scheme}://${VVV_SUB_DOMAIN:-本机公网IP}:${VVV_SUB_PORT}/${VVV_SUB_SUFFIX}"
+      echo "订阅传输：${transport_label}"; echo "统一订阅地址：${endpoint}"
+    elif [[ "$choice" == 3 || "$choice" == 6 ]]; then
+      [[ -n "$code" ]] && echo "订阅中心：已填写对接码" || echo "订阅中心：本次暂不注册"
     fi
   fi
-  echo "=================================="
-  echo "参数已收集完毕，直接开始全自动安装。"
+  echo "=================================="; echo "参数已收集完毕，开始全自动安装。"
 }
 
 REUSE_PROXY=0
@@ -681,108 +659,69 @@ REUSE_CENTER=0
 code=""
 key=""
 VVV_CF_TUNNEL_TOKEN=""
+LANDING_REMOTE_PORT=""
 
 migrate_center_config_if_needed
 if [[ -f /etc/vvv-sub/.schema4-migrated ]]; then
   refresh_center_runtime_code
-  ensure_center_runtime || fail "旧订阅中心配置已迁移，但新统一入口服务无法启动；原数据和 schema2 备份均已保留。"
+  ensure_center_runtime || fail "旧订阅中心迁移后服务无法启动。"
 fi
 show_install_menu
 while true; do
   read -r -p "请输入编号：" choice
-  case "$choice" in 0|1|2|3|4|5|6) break ;; *) echo "请输入 0-6。" ;; esac
+  case "$choice" in 0|1|2|3|4|5|6|7) break;; *) echo "请输入 0-7。";; esac
 done
 [[ "$choice" == 0 ]] && exit 0
 
-# 菜单永远先显示；选择后再判断该角色能否与当前机器共存。
 case "$choice" in
-  1|2|3|5)
-    landing_state_valid && fail "当前 VPS 已安装为中转副机，不能再叠加本机代理、订阅中心或中转主机。菜单仍可重新进入。"
-    if main_state_valid; then
-      load_existing_proxy_parameters
-      echo "检测到现有本机代理，本次将复用协议、端口和永久凭证。"
-    else
-      ask_proxy_parameters
-    fi
+  1|2|3|6)
+    landing_state_valid && fail "当前 VPS 已安装中转副机；本版本只面向全新安装，请重装系统后按目标角色重新安装。"
+    if main_state_valid; then load_existing_proxy_parameters; else ask_proxy_parameters; fi
     ;;
   4)
-    if main_state_valid || center_partial; then
-      fail "中转副机不能与本机代理、订阅中心或中转主机安装在同一台 VPS。菜单仍可重新进入。"
-    fi
+    (main_state_valid || landing_state_valid || center_partial) && fail "组合角色只允许在全新系统安装。"
+    ask_required_jpr3
+    LANDING_REMOTE_PORT="$(jpr_field "$key" remote_public_port)" || fail "无法读取 JPR3 中转端口。"
+    ask_proxy_parameters
+    [[ "$LANDING_REMOTE_PORT" != "$VVV_PROXY_PORT" ]] || fail "JPR3 中转端口 ${LANDING_REMOTE_PORT} 与自身直连端口冲突；请在中转主机使用默认 553 重新生成 JPR3。"
     ;;
-  6)
-    if main_state_valid || center_complete || landing_state_valid; then
-      fail "检测到当前 VPS 已有完整 VVV 模块。为避免误覆盖，云恢复只允许在干净系统或不完整残留环境执行。"
-    fi
+  5)
+    (main_state_valid || landing_state_valid || center_partial) && fail "中转副机只允许在全新系统安装。"
+    ask_required_jpr3
+    ;;
+  7)
+    (main_state_valid || center_complete || landing_state_valid) && fail "云恢复只允许在干净系统执行。"
     ;;
 esac
 
 case "$choice" in
   1|2)
-    if center_complete; then
-      load_existing_center_parameters
-      echo "检测到现有订阅中心，本次将保留订阅密钥、已注册主机和备份数据。"
-    else
-      backup_and_reset_partial_center
-      ask_center_parameters
-    fi
+    if center_complete; then load_existing_center_parameters; else backup_and_reset_partial_center; ask_center_parameters; fi
     ;;
-  3)
-    if center_complete; then code="$(cat /etc/vvv-sub/registration.code)"; else ask_optional_vvc1 code; fi
-    ;;
-  4)
-    if landing_state_valid && [[ -s /etc/jp-relay/pairing-key.txt ]]; then
-      key="$(tr -d '[:space:]' < /etc/jp-relay/pairing-key.txt)"
-      if [[ "$key" =~ ^JPR3\.[A-Za-z0-9_-]+\.[0-9a-f]{20}$ ]]; then
-        echo "检测到现有中转副机，本次无损升级将复用已保存的 JPR3 对接密钥。"
-      else
-        echo "已保存的 JPR3 对接密钥格式异常，需要重新输入。"
-        ask_required_jpr3
-      fi
-    else
-      ask_required_jpr3
-    fi
-    ;;
-  5)
-    if center_complete; then code="$(cat /etc/vvv-sub/registration.code)"; else ask_optional_vvc1 code; fi
-    ;;
-  6) ;;
+  3) center_complete && code="$(cat /etc/vvv-sub/registration.code)" || ask_optional_vvc1 code;;
+  6) center_complete && code="$(cat /etc/vvv-sub/registration.code)" || ask_optional_vvc1 code;;
+  4|5|7) ;;
 esac
 
 show_parameter_summary
 
 case "$choice" in
-  1)
-    ensure_host
-    enable_relay
-    ensure_center
-    rebuild_roles_from_system
-    register_current_main_role
-    ;;
-  2)
-    ensure_host
-    ensure_center
-    rebuild_roles_from_system
-    register_current_main_role
-    ;;
-  3)
-    ensure_host
-    enable_relay
-    rebuild_roles_from_system
-    register_current_main_role "$code"
-    ;;
+  1) ensure_host; enable_relay; ensure_center; rebuild_roles_from_system; register_current_main_role;;
+  2) ensure_host; ensure_center; rebuild_roles_from_system; register_current_main_role;;
+  3) ensure_host; enable_relay; rebuild_roles_from_system; register_current_main_role "$code";;
   4)
-    install_landing "$key"
+    ensure_host
+    install_landing "$key" 1
     rebuild_roles_from_system
-    code="$(jpr_registration_code "$key" || true)"
-    bash "$BASE_DIR/register_sync.sh" landing "$code"
+    bash "$BASE_DIR/register_sync.sh" landing-direct "$key"
     ;;
   5)
-    ensure_host
+    install_landing "$key" 0
     rebuild_roles_from_system
-    register_current_main_role "$code"
+    bash "$BASE_DIR/register_sync.sh" landing "$key"
     ;;
-  6)
+  6) ensure_host; rebuild_roles_from_system; register_current_main_role "$code";;
+  7)
     python3 "$BASE_DIR/restore_manager.py"
     if main_state_valid; then
       VVV_PROTOCOL_MODE="$(json_value "$MAIN_STATE" protocol_mode dual)"
@@ -792,19 +731,22 @@ case "$choice" in
       export VVV_PROTOCOL_MODE VVV_PROXY_PORT VVV_REALITY_SNI VVV_HY2_LIMIT_MBPS
       bash "$BASE_DIR/host.sh"
     fi
-    if [[ -s "$CENTER_CFG" ]]; then VVV_RESTORE_MODE=1 bash "$BASE_DIR/center_install.sh"; fi
+    if landing_state_valid; then
+      [[ -s /etc/jp-relay/pairing-key.txt ]] || fail "恢复包缺少中转副机 JPR3。"
+      key="$(tr -d '[:space:]' </etc/jp-relay/pairing-key.txt)"
+      if main_state_valid; then install_landing "$key" 1; else install_landing "$key" 0; fi
+    fi
+    [[ ! -s "$CENTER_CFG" ]] || VVV_RESTORE_MODE=1 bash "$BASE_DIR/center_install.sh"
     rebuild_roles_from_system
     if center_complete; then register_current_main_role; elif [[ -s /etc/vvv/client.json ]]; then systemctl start vvv-sync.service || true; fi
-    echo
-    echo "========== 恢复后逐节点检测 =========="
-    restore_log="$(jq -r '.log // empty' /run/vvv-restore-result.json 2>/dev/null || true)"
-    if [[ -n "$restore_log" ]]; then python3 "$BASE_DIR/node_probe.py" | tee -a "$restore_log" || true; else python3 "$BASE_DIR/node_probe.py" || true; fi
-    python3 "$BASE_DIR/backup_manager.py" create restore-completed --force >/dev/null || true
-    echo "云备份恢复和当前最新版程序重建完成。"
-    [[ ! -s /run/vvv-restore-result.json ]] || jq . /run/vvv-restore-result.json
+    echo; echo "========== 恢复后逐节点检测 =========="
+    python3 "$BASE_DIR/node_probe.py" || true
+    [[ ! -x "$BASE_DIR/backup_manager.py" ]] || python3 "$BASE_DIR/backup_manager.py" create restore-completed --force >/dev/null || true
     ;;
 esac
 
 install_unified_manager
-printf '\nVVV 安装、续装或角色追加完成。以后统一输入：vps\n'
+printf '
+VVV 安装完成。以后统一输入：vps
+'
 /usr/local/sbin/vps

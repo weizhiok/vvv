@@ -26,10 +26,14 @@ python3 -m py_compile \
   "$ROOT/core-src/restore_manager.py" \
   "$ROOT/core-src/diagnostic_report.py" \
   "$ROOT/core-src/node_probe.py" \
+  "$ROOT/core-src/client_local_renderer.py" \
+  "$ROOT/core-src/client_upgrade_engine.py" \
+  "$ROOT/tests/landing_direct_role_validation.py" \
   "$ROOT/tests/conformance.py" \
   "$ROOT/tests/extract_manager_library.py" \
   "$ROOT/tests/build_slot_fixture.py"
 python3 "$ROOT/tests/conformance.py"
+python3 "$ROOT/tests/landing_direct_role_validation.py"
 bash -n "$ROOT/core-src/bootstrap.sh"
 bash -n "$ROOT/core-src/host.sh"
 bash -n "$ROOT/core-src/center_install.sh"

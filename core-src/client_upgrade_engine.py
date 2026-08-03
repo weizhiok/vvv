@@ -41,6 +41,12 @@ PROTECTED_FILES = [
     '/etc/vvv/client.json',
     '/etc/systemd/system/xray.service',
     '/etc/systemd/system/sing-box.service',
+    '/etc/vvv-landing/xray/config.json',
+    '/etc/vvv-landing/sing-box/config.json',
+    '/etc/vvv-landing/sing-box/tls/landing-hy2.crt',
+    '/etc/vvv-landing/sing-box/tls/landing-hy2.key',
+    '/etc/systemd/system/vvv-landing-xray.service',
+    '/etc/systemd/system/vvv-landing-sing-box.service',
 ]
 ALLOWED_IMPORTS = {'base64', 'json', 're', 'urllib.parse'}
 FORBIDDEN_CALLS = {
@@ -178,6 +184,8 @@ def protected_snapshot(root='/'):
         snapshot['processes'] = {
             'xray.service': process_identity('xray.service'),
             'sing-box.service': process_identity('sing-box.service'),
+            'vvv-landing-xray.service': process_identity('vvv-landing-xray.service'),
+            'vvv-landing-sing-box.service': process_identity('vvv-landing-sing-box.service'),
         }
     return snapshot
 

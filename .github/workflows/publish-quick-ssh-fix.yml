@@ -1,26 +1,42 @@
-name: Publish combined landing-direct role
+name: Validate isolated client support
 on:
-  push:
-    branches: [agent/landing-direct-combined-role]
+  pull_request:
     paths:
       - '.github/workflows/publish-quick-ssh-fix.yml'
-  pull_request:
+      - 'vvv-install.sh'
+      - 'core-src/client_*.py'
+      - 'core-src/adapter_manager.py'
+      - 'core-src/vvv_manager.sh'
+      - 'core-src/center_manager.sh'
+      - 'tests/client_upgrade_isolation_validation.py'
+  push:
     branches: [main]
     paths:
       - '.github/workflows/publish-quick-ssh-fix.yml'
+      - 'vvv-install.sh'
+      - 'core-src/client_*.py'
+      - 'core-src/adapter_manager.py'
+      - 'core-src/vvv_manager.sh'
+      - 'core-src/center_manager.sh'
+      - 'tests/client_upgrade_isolation_validation.py'
 permissions:
-  contents: write
-concurrency:
-  group: publish-landing-direct-role
-  cancel-in-progress: true
+  contents: read
 jobs:
-  publish:
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+  validate-client-support:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
-      - run: bash tools/publish_landing_direct_role.sh
+      - name: Validate syntax and isolation contract
+        run: |
+          python3 -m py_compile \
+            core-src/client_adapters.py \
+            core-src/client_upgrade_engine.py \
+            core-src/client_local_renderer.py \
+            core-src/adapter_manager.py \
+            tests/client_upgrade_isolation_validation.py
+          bash -n vvv-install.sh
+          bash -n core-src/vvv_manager.sh
+          bash -n core-src/center_manager.sh
+          python3 core-src/client_adapters.py >/dev/null
+          python3 tests/client_upgrade_isolation_validation.py
