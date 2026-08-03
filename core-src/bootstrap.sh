@@ -681,6 +681,7 @@ case "$choice" in
   4)
     (main_state_valid || landing_state_valid || center_partial) && fail "组合角色只允许在全新系统安装。"
     ask_required_jpr3
+    jpr_field "$key" subscription_bootstrap.api_base_url >/dev/null || fail "该 JPR3 不含订阅中心注册票据。请在已注册订阅中心的中转主机重新生成。"
     LANDING_REMOTE_PORT="$(jpr_field "$key" remote_public_port)" || fail "无法读取 JPR3 中转端口。"
     ask_proxy_parameters
     [[ "$LANDING_REMOTE_PORT" != "$VVV_PROXY_PORT" ]] || fail "JPR3 中转端口 ${LANDING_REMOTE_PORT} 与自身直连端口冲突；请在中转主机使用默认 553 重新生成 JPR3。"
@@ -688,6 +689,7 @@ case "$choice" in
   5)
     (main_state_valid || landing_state_valid || center_partial) && fail "中转副机只允许在全新系统安装。"
     ask_required_jpr3
+    jpr_field "$key" subscription_bootstrap.api_base_url >/dev/null || fail "该 JPR3 不含订阅中心注册票据。请在已注册订阅中心的中转主机重新生成。"
     ;;
   7)
     (main_state_valid || center_complete || landing_state_valid) && fail "云恢复只允许在干净系统执行。"

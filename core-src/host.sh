@@ -1554,7 +1554,12 @@ prepare_add_or_overwrite() {
   valid_port "$remote_port" || fail "落地端口无效。"
   [[ -n "$node_name" && "$node_name" != *$'\n'* && "$node_name" != *$'\r'* ]] || fail "线路名称无效。"
 
-  local count old relay_id now candidate test_vless test_hy2 remote_hy2
+  require_relay_subscription_registration || return 1
+
+  local count old relay_id now candidate test_vless test_hy2 remote_hy2 old_state
+  old_state="$(mktemp --suffix=.json /tmp/jp-relay-before-ticket.XXXXXX)"
+  TMP_FILES+=("$old_state")
+  cp -a "$STATE_FILE" "$old_state"
   count="$(jq --arg n "$node_name" '[.relays[]|select(.name==$n)]|length' "$STATE_FILE")"
   (( count <= 1 )) || fail "状态中存在多个同名线路。"
   now="$(date --iso-8601=seconds)"
@@ -1629,8 +1634,6 @@ PY_OVERWRITE
   staging="$(mktemp -d "${PACKAGE_ROOT}/.${relay_id}.staging.XXXXXX")"
   TMP_FILES+=("$staging")
   generate_client_files "$candidate" "$relay_id" "$staging" relay >/dev/null
-  key="$(make_pairing_key "$candidate" "$relay_id")"
-  printf '%s\n' "$key" > "$staging/落地VPS对接密钥.txt"
   cat > "$staging/使用说明.txt" <<EOF_RELAY_HELP
 线路：${node_name}
 协议模式：$(jq -r '.protocol_mode' "$candidate")
@@ -1643,6 +1646,16 @@ EOF_RELAY_HELP
   chmod 600 "$staging"/*
 
   apply_candidate_with_rollback "$candidate"
+
+  if ! key="$(make_pairing_key "$STATE_FILE" "$relay_id")"; then
+    echo "副机注册票据生成失败，正在恢复新建线路前的状态……" >&2
+    if apply_candidate_with_rollback "$old_state"; then
+      fail "副机注册票据生成失败；线路、槽位和运行配置已回滚。请确认中转主机能连接订阅中心后重试。"
+    fi
+    fail "副机注册票据生成失败，且自动回滚未完成；请立即生成诊断报告。"
+  fi
+  printf '%s\n' "$key" > "$staging/落地VPS对接密钥.txt"
+  chmod 600 "$staging/落地VPS对接密钥.txt"
 
   package_dir="${PACKAGE_ROOT}/${relay_id}"
   rm -rf -- "${package_dir}.old" 2>/dev/null || true
@@ -1815,11 +1828,29 @@ prompt_new_upstream_relay() {
   prepare_add_or_overwrite_upstream "$proxy_protocol" "$host" "$port" "$username" "$password" "$node_name"
 }
 
+require_relay_subscription_registration() {
+  [[ -s /etc/vvv/client.json ]] || fail "中转主机尚未注册订阅中心。请先在 vps 菜单完成订阅中心注册，再新建 VPS 副机中转线路。"
+  [[ -x /usr/local/lib/vvv/sync_agent.py ]] || fail "订阅同步程序不存在，无法为 JPR3 生成受限注册票据。"
+  local role
+  role="$(jq -r '.role // empty' /etc/vvv/client.json 2>/dev/null || true)"
+  [[ "$role" == "relay" || "$role" == "center-relay" ]] || fail "当前订阅中心登记角色不是中转主机，无法签发副机注册票据。"
+}
+
+request_subscription_bootstrap() {
+  local relay_id="$1" bootstrap
+  require_relay_subscription_registration || return 1
+  bootstrap="$(python3 /usr/local/lib/vvv/sync_agent.py relay-ticket "$relay_id")" || fail "订阅中心拒绝签发该线路的副机注册票据。线路状态已保留在升级前状态。"
+  jq -e --arg id "$relay_id" '
+    (.api_base_url|type=="string" and length>0) and
+    (.relay_id==$id) and
+    (.registration_token|type=="string" and length>=20)
+  ' <<<"$bootstrap" >/dev/null || fail "订阅中心返回的副机注册票据不完整。"
+  printf '%s' "$bootstrap"
+}
+
 make_pairing_key() {
-  local state_path="$1" relay_id="$2" subscription_bootstrap="null"
-  if [[ -s /etc/vvv/client.json && -x /usr/local/lib/vvv/sync_agent.py ]]; then
-    subscription_bootstrap="$(python3 /usr/local/lib/vvv/sync_agent.py relay-ticket "$relay_id" 2>/dev/null || printf 'null')"
-  fi
+  local state_path="$1" relay_id="$2" subscription_bootstrap="${3:-}"
+  [[ -n "$subscription_bootstrap" ]] || subscription_bootstrap="$(request_subscription_bootstrap "$relay_id")" || return 1
   python3 - "$state_path" "$relay_id" "$subscription_bootstrap" <<'PY_JPR3'
 import base64,hashlib,json,sys,zlib
 from datetime import datetime,timezone
@@ -1827,9 +1858,11 @@ from pathlib import Path
 s=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 r=next(x for x in s["relays"] if x["id"]==sys.argv[2])
 try:
-    subscription_bootstrap=json.loads(sys.argv[3]) if sys.argv[3] else None
-except Exception:
-    subscription_bootstrap=None
+    subscription_bootstrap=json.loads(sys.argv[3])
+except Exception as exc:
+    raise SystemExit(f"订阅中心注册票据无法解析：{exc}")
+if not isinstance(subscription_bootstrap,dict) or not subscription_bootstrap.get("api_base_url") or not subscription_bootstrap.get("registration_token") or subscription_bootstrap.get("relay_id") != r["id"]:
+    raise SystemExit("订阅中心注册票据缺失或与线路不匹配。")
 payload={
  "schema":4,"type":"jp-relay-landing","protocol_mode":s["protocol_mode"],
  "relay_id":r["id"],"node_name":r["name"],

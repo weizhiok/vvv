@@ -38,6 +38,15 @@ def test_menu_and_ports():
             '新建副机线路默认端口不是 553')
     require('"schema":4,"type":"jp-relay-landing"' in host, 'JPR3 没有升级到 schema 4')
     require('subscription_bootstrap' in host and 'relay-ticket' in host, 'JPR3 没有受限订阅注册票据')
+    require('make_pairing_key "$candidate"' not in host, 'JPR3 仍在线路提交前申请注册票据')
+    prepare = host.index('prepare_add_or_overwrite()')
+    apply_pos = host.index('apply_candidate_with_rollback "$candidate"', prepare)
+    key_pos = host.index('make_pairing_key "$STATE_FILE" "$relay_id"', apply_pos)
+    require(apply_pos < key_pos, '注册票据没有在线路正式生效及同步后申请')
+    require('apply_candidate_with_rollback "$old_state"' in host, '票据失败没有回滚线路状态')
+    require("subscription_bootstrap.api_base_url" in (CORE / 'bootstrap.sh').read_text(encoding='utf-8'),
+            '副机安装前没有拒绝缺少注册票据的 JPR3')
+    require("|| printf 'null'" not in host, 'JPR3 票据失败仍被静默降级为空值')
 
 
 def test_landing_isolation():
