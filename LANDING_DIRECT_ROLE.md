@@ -3,6 +3,7 @@
 - 自身直连代理：TCP/UDP 443，使用 `xray.service` 与 `sing-box.service`。
 - 中转副机：TCP/UDP 553，使用 `vvv-landing-xray.service` 与 `vvv-landing-sing-box.service`。
 - 组合安装只输入一次 JPR3；其中包含与线路绑定的订阅中心受限注册票据。
+- JPR3 只在线路正式生效并完成订阅同步后生成；票据失败会自动回滚线路、槽位和运行配置。
 - 组合角色以一台物理主机注册一次，同时同步 `direct` 与 `landing` 两套模块状态。
 - 订阅中的中转节点统一命名为 `国家-协议-中转-日本入口IP:端口`。
 - 副机自身直连节点继续使用 `国家-协议-副机IP:443`。
