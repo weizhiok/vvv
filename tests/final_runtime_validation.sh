@@ -105,11 +105,14 @@ generate_client_files "$WORK/state-active.json" "" "$WORK/client-files" direct >
 [[ -s "$WORK/client-files/Loon.conf" ]]
 [[ -s "$WORK/client-files/Shadowrocket.txt" ]]
 [[ -s "$WORK/client-files/Clash-Verge-Rev.yaml" ]]
+[[ -s "$WORK/client-files/NekoBoxForAndroid.yaml" ]]
+cmp "$WORK/client-files/Clash-Verge-Rev.yaml" "$WORK/client-files/NekoBoxForAndroid.yaml"
 ! find "$WORK/client-files" -maxdepth 1 -type f -iname '*v2*' | grep -q .
 grep -q '^vless=' "$WORK/client-files/Quantumult-X.conf"
 grep -q 'Hysteria2' "$WORK/client-files/Loon.conf"
 grep -q '^hysteria2://' "$WORK/client-files/Shadowrocket.txt"
 grep -q 'type: hysteria2' "$WORK/client-files/Clash-Verge-Rev.yaml"
+grep -q 'type: hysteria2' "$WORK/client-files/NekoBoxForAndroid.yaml"
 ! find "$WORK/client-files" -type f -name '*二维码*' | grep -q .
 [[ "$(find "$WORK/vless-empty" -type f | wc -l)" -eq 0 ]]
 [[ "$(find "$WORK/hy2-empty" -type f | wc -l)" -eq 0 ]]

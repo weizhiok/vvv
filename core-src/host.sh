@@ -1438,6 +1438,7 @@ if share_links:
     lines += ["","【Loon / Shadowrocket】","Loon 原生配置：",loon_text,"","分享链接："]
     for name,uri in share_links: lines += [f"[{name}]",uri]
 if clash_entries: lines += ["","【Clash Verge Rev / Mihomo】",clash_text]
+if clash_entries: lines += ["","【NekoBoxForAndroid（Clash Meta）】",clash_text]
 summary="\n".join(lines).rstrip()+"\n"
 
 (out/"客户端节点.txt").write_text(summary,encoding="utf-8")
@@ -1447,6 +1448,7 @@ summary="\n".join(lines).rstrip()+"\n"
 # 同时保留旧文件名，便于已有运维习惯和第三方工具读取。
 (out/"Shadowrocket.txt").write_text((share_text+"\n") if share_text else "",encoding="utf-8")
 (out/"Clash-Verge-Rev.yaml").write_text(clash_text,encoding="utf-8")
+(out/"NekoBoxForAndroid.yaml").write_text(clash_text,encoding="utf-8")
 print(summary,end="")
 PY_CLIENTS
   chmod 700 "$out_dir"

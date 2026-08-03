@@ -731,7 +731,17 @@ case "$choice" in
     if center_complete; then code="$(cat /etc/vvv-sub/registration.code)"; else ask_optional_vvc1 code; fi
     ;;
   4)
-    ask_required_jpr3
+    if landing_state_valid && [[ -s /etc/jp-relay/pairing-key.txt ]]; then
+      key="$(tr -d '[:space:]' < /etc/jp-relay/pairing-key.txt)"
+      if [[ "$key" =~ ^JPR3\.[A-Za-z0-9_-]+\.[0-9a-f]{20}$ ]]; then
+        echo "检测到现有中转副机，本次无损升级将复用已保存的 JPR3 对接密钥。"
+      else
+        echo "已保存的 JPR3 对接密钥格式异常，需要重新输入。"
+        ask_required_jpr3
+      fi
+    else
+      ask_required_jpr3
+    fi
     ;;
   5)
     if center_complete; then code="$(cat /etc/vvv-sub/registration.code)"; else ask_optional_vvc1 code; fi

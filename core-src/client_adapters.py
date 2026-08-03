@@ -4,7 +4,7 @@ import json
 import re
 from urllib.parse import quote, urlencode
 
-VERSION = 1
+VERSION = 2
 
 
 def b64std(text):
@@ -151,6 +151,10 @@ RENDERERS = {
         'render': render_clash,
         'content_type': 'text/yaml; charset=utf-8',
     },
+    'nekobox': {
+        'render': render_clash,
+        'content_type': 'text/yaml; charset=utf-8',
+    },
     'quantumultx': {
         'render': render_quantumultx,
         'content_type': 'text/plain; charset=utf-8',
@@ -168,6 +172,11 @@ RENDERERS = {
 # Rules are ordered from most specific to broadest. Adding support for a client
 # that already consumes one of the built-in formats only requires another rule.
 CLIENT_RULES = [
+    {
+        'name': 'NekoBoxForAndroid',
+        'format': 'nekobox',
+        'user_agent': [r'nekobox/android(?:/[0-9.]+)?'],
+    },
     {
         'name': 'Clash Verge Rev',
         'format': 'clash',
@@ -256,6 +265,11 @@ def smoke_test():
         output = render(format_name, sample)
         if not isinstance(output, str) or not output.strip():
             raise RuntimeError(f'{format_name} renderer returned empty output')
+    detected = detect_client({'User-Agent': 'NekoBox/Android/1.4.2 (Prefer ClashMeta Format)'})
+    if not detected or detected.get('name') != 'NekoBoxForAndroid' or detected.get('format') != 'nekobox':
+        raise RuntimeError('NekoBoxForAndroid 1.4.2 user agent was not recognized')
+    if render('nekobox', sample) != render('clash', sample):
+        raise RuntimeError('NekoBox renderer must remain Clash Meta compatible')
     for rule in CLIENT_RULES:
         if rule['format'] not in RENDERERS:
             raise RuntimeError(f"unknown renderer in rule: {rule['format']}")

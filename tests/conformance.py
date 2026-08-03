@@ -150,10 +150,22 @@ def test_node_names_and_clients():
         require(center.all_nodes()[0]['name'] == '我的主节点', '节点改名未持久化')
         center.reset_name(node['id'])
         require(center.all_nodes()[0]['name'] != '我的主节点', '恢复默认名称失败')
+        recognition = adapters.detect_client({'User-Agent': 'NekoBox/Android/1.4.2 (Prefer ClashMeta Format)'})
+        require(recognition and recognition['name'] == 'NekoBoxForAndroid' and recognition['format'] == 'nekobox',
+                'NekoBoxForAndroid 1.4.2 请求头未被识别')
         rendered = adapters.render('clash', center.all_nodes())
+        require(adapters.render('nekobox', center.all_nodes()) == rendered, 'NekoBox 没有使用 Clash Meta 格式')
         require('65 Mbps' in rendered, 'HY2 客户端模板未使用节点限速')
         shadow = base64.b64decode(adapters.render('shadowrocket', center.all_nodes())).decode()
         require('vless://' in shadow and 'hysteria2://' in shadow, '客户端订阅渲染不完整')
+    host = read('core-src/host.sh')
+    landing = read('core-src/landing.sh')
+    bootstrap = read('core-src/bootstrap.sh')
+    require('NekoBoxForAndroid.yaml' in host and '【NekoBoxForAndroid（Clash Meta）】' in host,
+            '主机本地配置缺少 NekoBox')
+    require('NekoBoxForAndroid.yaml' in landing and '【NekoBoxForAndroid（Clash Meta）】' in landing,
+            '中转副机本地配置缺少 NekoBox')
+    require('复用已保存的 JPR3 对接密钥' in bootstrap, '中转副机无损升级仍要求重新粘贴 JPR3')
 
 
 def test_landing_and_direct_ip_change():

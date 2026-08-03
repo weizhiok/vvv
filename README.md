@@ -62,11 +62,19 @@ Hysteria 2 使用 sing-box 服务端的 `up_mbps`、`down_mbps`，并保持 `ign
 所有客户端共用一个订阅地址。服务端根据请求头自动返回：
 
 - Clash Verge Rev / Mihomo；
+- NekoBoxForAndroid（自动识别 `NekoBox/Android/... (Prefer ClashMeta Format)`，返回 Clash Meta YAML）；
 - Quantumult X（仅 VLESS）；
 - Loon；
 - Shadowrocket。
 
 订阅中心支持修改客户端显示名称。改名只改变订阅中的名称，不修改服务器、端口、UUID、密码或副机配置；客户端刷新订阅后生效。
+
+主机、直连副机和中转副机的“查看本机客户端配置”都会额外生成 `NekoBoxForAndroid.yaml`，内容与已验证的 Clash Meta 节点配置一致。
+
+### 无损升级客户端支持
+
+- 只更新订阅中心识别规则：运行 `python3 /usr/local/lib/vvv/adapter_manager.py update`，节点、域名、后缀和凭据均不改变，只短暂重启订阅服务。
+- 同步更新本机配置显示：重新运行固定安装命令并选择当前已安装角色；主机和直连副机会复用现有状态，中转副机会自动复用 `/etc/jp-relay/pairing-key.txt` 中的 JPR3，不重新生成节点凭据。
 
 ## 订阅入口管理
 
