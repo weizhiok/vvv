@@ -1,0 +1,5 @@
++ python3 -m py_compile tools/apply_landing_direct_role.py
++ python3 tools/apply_landing_direct_role.py
+registration prompt: expected exactly one regex match, found 0
+
+status=failure
