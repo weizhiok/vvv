@@ -50,7 +50,8 @@ PY_FIX_ANCHORS
     tools/apply_landing_direct_role.py \
     tools/publish_landing_direct_role.sh \
     validation/landing-direct-role-validation.log
-  git checkout origin/main -- \
+  git fetch --no-tags --depth=1 origin main
+  git checkout FETCH_HEAD -- \
     tools/publish_production_ssh_fix.sh \
     .github/workflows/publish-production-ssh-fix.yml \
     .github/workflows/publish-quick-ssh-fix.yml
