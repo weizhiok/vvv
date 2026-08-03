@@ -527,17 +527,12 @@ ensure_center(){
 }
 
 install_landing() {
-  local key="$1" combined="${2:-0}" tmp
-  tmp="$(mktemp /tmp/vvv-landing.XXXXXX.sh)"
-  awk -v key="$key" 'BEGIN{done=0} !done && /^PAIRING_KEY=/ {print "PAIRING_KEY='" key "'"; done=1; next} {print}' "$BASE_DIR/landing.sh" > "$tmp"
-  chmod 700 "$tmp"
-  local landing_rc
+  local key="$1" combined="${2:-0}" landing_rc
   if [[ "$combined" == 1 ]]; then
-    VVV_COMBINED_INSTALL=1 sh "$tmp" && landing_rc=0 || landing_rc=$?
+    VVV_PAIRING_KEY="$key" VVV_COMBINED_INSTALL=1 sh "$BASE_DIR/landing.sh" && landing_rc=0 || landing_rc=$?
   else
-    sh "$tmp" && landing_rc=0 || landing_rc=$?
+    VVV_PAIRING_KEY="$key" sh "$BASE_DIR/landing.sh" && landing_rc=0 || landing_rc=$?
   fi
-  rm -f "$tmp"
   (( landing_rc == 0 )) || fail "中转副机安装程序失败（退出码 ${landing_rc}）。"
   [[ -x /usr/local/sbin/landing-vps ]] || fail "中转副机管理命令不存在。"
   cat > /usr/local/sbin/vvv-landing-original <<'EOF_LANDING_ORIGINAL'
