@@ -17,6 +17,10 @@ for name in ('show_install_menu','ask_optional_vvc1','jpr_registration_code','in
     old = "r'^" + name + r"\(\) \{"
     new = "r'^" + name + r"\(\)\s*\{"
     text=text.replace(old,new)
+text=text.replace(
+    r"r'^rebuild_roles_from_system\(\)\s*\{.*?^\}\n'",
+    r"r'^rebuild_roles_from_system\(\)\s*\{.*?(?=^primary_role\(\))'",
+)
 path.write_text(text,encoding='utf-8')
 PY_FIX_ANCHORS
   python3 -m py_compile tools/apply_landing_direct_role.py
