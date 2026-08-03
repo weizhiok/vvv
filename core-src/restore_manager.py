@@ -25,10 +25,11 @@ ALLOWED_EXACT = {
     'manifest.json',
     'etc/vvv-sub/config.json', 'etc/vvv-sub/cloud.json', 'etc/vvv-sub/cloudflared.token',
     'var/lib/vvv-sub/registry.json', 'var/lib/vvv-sub/node-overrides.json',
-    'etc/jp-relay/state.json', 'etc/jp-relay/landing-state.json',
+    'etc/jp-relay/state.json', 'etc/jp-relay/landing-state.json', 'etc/jp-relay/pairing-key.txt',
+    'var/lib/vvv-sub/relay-tickets.json',
     'etc/vvv/client.json', 'etc/vvv/roles.json',
 }
-ALLOWED_PREFIX = ('var/lib/vvv-sub/hosts/', 'etc/sing-box/tls/')
+ALLOWED_PREFIX = ('var/lib/vvv-sub/hosts/', 'etc/sing-box/tls/', 'etc/vvv-landing/')
 
 
 def log(message):
@@ -209,7 +210,7 @@ def detect_public_ipv4():
 def copy_tree(extract):
     residual = Path('/root') / f"VVV-恢复前残留-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     residual.mkdir(mode=0o700)
-    for root in ('/etc/vvv-sub', '/var/lib/vvv-sub', '/etc/jp-relay', '/etc/vvv'):
+    for root in ('/etc/vvv-sub', '/var/lib/vvv-sub', '/etc/jp-relay', '/etc/vvv', '/etc/vvv-landing'):
         source = Path(root)
         if source.exists():
             shutil.copytree(source, residual / source.name, dirs_exist_ok=True)

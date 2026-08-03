@@ -12,8 +12,6 @@ if [[ -n "$code" ]]; then
   printf '\033[32m订阅中心注册成功\033[0m\n'
 fi
 
-state_path=/etc/jp-relay/state.json
-[[ "$role" != landing ]] || state_path=/etc/jp-relay/landing-state.json
 cat > /etc/systemd/system/vvv-sync.service <<'UNIT'
 [Unit]
 Description=VVV Node Snapshot Sync
@@ -23,6 +21,7 @@ Wants=network-online.target
 Type=oneshot
 ExecStart=/usr/bin/python3 /usr/local/lib/vvv/sync_agent.py sync
 UNIT
+
 cat > /etc/systemd/system/vvv-sync.timer <<'UNIT'
 [Unit]
 Description=VVV node heartbeat
@@ -34,20 +33,29 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 UNIT
-cat > /etc/systemd/system/vvv-sync.path <<UNIT
-[Unit]
-Description=Watch VVV node state changes
-[Path]
-PathChanged=$state_path
-Unit=vvv-sync.service
-[Install]
-WantedBy=multi-user.target
-UNIT
+
+{
+  echo '[Unit]'
+  echo 'Description=Watch VVV node state changes'
+  echo '[Path]'
+  case "$role" in
+    landing-direct)
+      echo 'PathChanged=/etc/jp-relay/state.json'
+      echo 'PathChanged=/etc/jp-relay/landing-state.json'
+      ;;
+    landing) echo 'PathChanged=/etc/jp-relay/landing-state.json' ;;
+    *) echo 'PathChanged=/etc/jp-relay/state.json' ;;
+  esac
+  echo 'Unit=vvv-sync.service'
+  echo '[Install]'
+  echo 'WantedBy=multi-user.target'
+} > /etc/systemd/system/vvv-sync.path
+
 systemctl daemon-reload
 if [[ -f /etc/vvv/client.json ]]; then
   systemctl enable --now vvv-sync.timer vvv-sync.path
   systemctl start vvv-sync.service || true
 else
   systemctl disable --now vvv-sync.timer vvv-sync.path >/dev/null 2>&1 || true
-  echo "本次未注册订阅中心；以后输入 vps，可粘贴 VVC1 对接码完成注册。"
+  echo "本次未注册订阅中心；以后输入 vps，可粘贴 VVC1 或含注册票据的 JPR3 完成注册。"
 fi

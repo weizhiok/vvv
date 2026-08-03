@@ -24,6 +24,7 @@ HOSTS = DATA / 'hosts'
 OUT = DATA / 'output'
 REGISTRY = DATA / 'registry.json'
 OVERRIDES = DATA / 'node-overrides.json'
+TICKETS = DATA / 'relay-tickets.json'
 BACKUP = Path('/usr/local/lib/vvv/backup_manager.py')
 DEBUG_FLAG = Path('/run/vvv-sub-header-debug.enabled')
 DEBUG_LOG = Path('/run/vvv-sub-header-debug.jsonl')
@@ -82,8 +83,11 @@ def node_id(host_id, kind, key):
 
 
 def nodes_from_host(doc):
-    state = doc.get('state') or {}
     role = doc.get('role') or ''
+    if role == 'landing':
+        return []
+    states = doc.get('states') or {}
+    state = (states.get('direct') or doc.get('state') or {}) if role == 'landing-direct' else (doc.get('state') or {})
     mode = state.get('protocol_mode')
     ip = state.get('public_ip') or state.get('japan_public_ip')
     port = state.get('listen_port') or state.get('japan_port')
@@ -132,10 +136,13 @@ def nodes_from_host(doc):
     if role in ('center-relay', 'relay'):
         for relay in state.get('relays') or []:
             rv, rh = relay.get('vless'), relay.get('hy2')
+            raw_name = str(relay.get('name') or '')
+            country = raw_name[:2].upper() if len(raw_name) >= 3 and raw_name[:2].isalpha() and raw_name[2] == '-' else ''
+            relay_base = (country + '-' if country else '') + f'中转-{ip}:{port}'
             if rv:
-                add_vless(relay.get('name') or relay.get('id'), rv.get('client_uuid'), True, 'VPS中转', relay.get('id'), expected_exit_ip=relay.get('remote_ip'))
+                add_vless(relay_base, rv.get('client_uuid'), True, 'VPS中转', relay.get('id'), expected_exit_ip=relay.get('remote_ip'))
             if rh:
-                add_hy2(relay.get('name') or relay.get('id'), rh.get('client_password'), 'VPS中转', relay.get('id'), expected_exit_ip=relay.get('remote_ip'))
+                add_hy2(relay_base, rh.get('client_password'), 'VPS中转', relay.get('id'), expected_exit_ip=relay.get('remote_ip'))
         for upstream in state.get('upstream_relays') or []:
             add_vless(upstream.get('name') or upstream.get('id'), upstream.get('client_uuid'), False, '动态代理', upstream.get('id'), expected_exit_ip=upstream.get('last_exit_ip'))
         current = time.time()
@@ -165,7 +172,7 @@ def active_hosts():
     for path in HOSTS.glob('*.json'):
         doc = read_json(path, {}) or {}
         last = float(doc.get('last_seen_ts') or 0)
-        if last and current - last > 72 * 3600 and doc.get('role') in ('direct', 'landing'):
+        if last and current - last > 72 * 3600 and doc.get('role') in ('direct', 'landing', 'landing-direct'):
             continue
         docs.append(doc)
     return docs
@@ -209,7 +216,7 @@ def public_metadata():
 def finalize_registration(entry, body):
     doc = {
         'host_id': entry['host_id'], 'role': entry.get('role', 'direct'),
-        'state': body.get('state') or {}, 'meta': body.get('meta') or {},
+        'state': body.get('state') or {}, 'states': body.get('states') or {}, 'meta': body.get('meta') or {},
         'last_seen': now(), 'last_seen_ts': time.time(),
     }
     atomic_json(HOSTS / f"{entry['host_id']}.json", doc)
@@ -245,6 +252,25 @@ def capture_debug(handler, recognition, suffix):
              'response_format': (recognition or {}).get('format', '无')}
     with DEBUG_LOG.open('a', encoding='utf-8') as handle:
         handle.write(json.dumps(event, ensure_ascii=False) + '\n')
+
+
+def source_relay_active(source_host_id, relay_id):
+    doc = read_json(HOSTS / f'{source_host_id}.json', {}) or {}
+    state = doc.get('state') or {}
+    return any(str(item.get('id')) == str(relay_id) for item in state.get('relays') or [])
+
+
+def relay_ticket_record(source_host_id, relay_id):
+    store = read_json(TICKETS, {'tickets': []}) or {'tickets': []}
+    rows = store.setdefault('tickets', [])
+    current = next((row for row in rows if row.get('source_host_id') == source_host_id and row.get('relay_id') == relay_id), None)
+    if current is None:
+        current = {'source_host_id': source_host_id, 'relay_id': relay_id,
+                   'registration_token': secrets.token_urlsafe(32), 'created_at': now()}
+        rows.append(current)
+    current['updated_at'] = now()
+    atomic_json(TICKETS, store)
+    return current
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -306,12 +332,47 @@ class Handler(BaseHTTPRequestHandler):
         with LOCK:
             registry = read_json(REGISTRY, {'hosts': []}) or {'hosts': []}
             registry.setdefault('hosts', [])
+            if path == '/api/v1/relay-ticket':
+                host_id = str(body.get('host_id') or '').strip()
+                relay_id = str(body.get('relay_id') or '').strip()
+                entry = next((item for item in registry['hosts'] if item.get('host_id') == host_id), None)
+                if entry is None or not secrets.compare_digest(auth_token(self), str(entry.get('token') or '')):
+                    return self.send_bytes(403, b'Forbidden\n')
+                if entry.get('role') not in ('center-relay', 'relay') or not re.fullmatch(r'[A-Za-z0-9._-]{1,128}', relay_id):
+                    return self.send_bytes(400, b'Bad relay ticket request\n')
+                if not source_relay_active(host_id, relay_id):
+                    return self.send_bytes(409, b'Relay is not synchronized\n')
+                ticket = relay_ticket_record(host_id, relay_id)
+                bootstrap = {'api_base_url': str(cfg.get('api_base_url') or ''), 'relay_id': relay_id,
+                             'registration_token': ticket['registration_token']}
+                return self.send_bytes(200, json.dumps({'ok': True, 'subscription_bootstrap': bootstrap}, ensure_ascii=False).encode(), 'application/json')
+            if path == '/api/v1/register-ticket':
+                relay_id = str(body.get('relay_id') or '').strip()
+                supplied = str(body.get('registration_token') or '')
+                role = str(body.get('role') or '').strip()
+                host_id = str(body.get('host_id') or '').strip()
+                store = read_json(TICKETS, {'tickets': []}) or {'tickets': []}
+                ticket = next((row for row in store.get('tickets', []) if row.get('relay_id') == relay_id and
+                               secrets.compare_digest(str(row.get('registration_token') or ''), supplied)), None)
+                if ticket is None or not source_relay_active(ticket.get('source_host_id'), relay_id):
+                    return self.send_bytes(403, b'Invalid or revoked relay ticket\n')
+                if role not in ('landing', 'landing-direct', 'direct') or not re.fullmatch(r'[A-Za-z0-9._-]{8,128}', host_id):
+                    return self.send_bytes(400, b'Bad ticket registration\n')
+                entry = next((item for item in registry['hosts'] if item.get('host_id') == host_id), None)
+                if entry is None:
+                    entry = {'host_id': host_id, 'token': secrets.token_urlsafe(32), 'created_at': now()}
+                    registry['hosts'].append(entry)
+                entry.update(role=role, hostname=str(body.get('hostname') or ''), relay_id=relay_id, updated_at=now())
+                atomic_json(REGISTRY, registry)
+                result = finalize_registration(entry, body)
+                result['registration_method'] = 'JPR3-ticket'
+                return self.send_bytes(200, json.dumps(result, ensure_ascii=False).encode(), 'application/json')
             if path == '/api/v1/register':
                 if not secrets.compare_digest(auth_token(self), str(cfg.get('master_token') or '')):
                     return self.send_bytes(403, b'Forbidden\n')
                 host_id = str(body.get('host_id') or '').strip()
                 role = str(body.get('role') or '').strip()
-                if not re.fullmatch(r'[A-Za-z0-9._-]{8,128}', host_id) or role not in ('center-relay', 'center', 'relay', 'direct', 'landing'):
+                if not re.fullmatch(r'[A-Za-z0-9._-]{8,128}', host_id) or role not in ('center-relay', 'center', 'relay', 'direct', 'landing', 'landing-direct'):
                     return self.send_bytes(400, b'Bad registration\n')
                 backup('before-host-register')
                 entry = next((item for item in registry['hosts'] if item.get('host_id') == host_id), None)
@@ -330,7 +391,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_bytes(403, b'Forbidden\n')
                 backup('before-node-sync')
                 doc = {'host_id': host_id, 'role': entry.get('role', 'direct'), 'state': body.get('state') or {},
-                       'meta': body.get('meta') or {}, 'last_seen': now(), 'last_seen_ts': time.time()}
+                       'states': body.get('states') or {}, 'meta': body.get('meta') or {}, 'last_seen': now(), 'last_seen_ts': time.time()}
                 atomic_json(HOSTS / f'{host_id}.json', doc)
                 entry['updated_at'] = now()
                 atomic_json(REGISTRY, registry)

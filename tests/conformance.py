@@ -45,14 +45,14 @@ def test_install_menu_and_upfront_parameters():
     text = read('core-src/bootstrap.sh')
     labels = [
         '1. 安装订阅中心 + 中转主机 + 自身代理', '2. 安装订阅中心 + 自身代理',
-        '3. 安装中转主机 + 自身代理', '4. 安装中转副机', '5. 安装直连代理',
-        '6. 从云备份恢复', '0. 退出',
+        '3. 安装中转主机 + 自身代理', '4. 安装中转副机 + 自身代理',
+        '5. 安装中转副机', '6. 安装直连代理', '7. 从云备份恢复', '0. 退出',
     ]
     positions = [text.index(label) for label in labels]
     require(positions == sorted(positions), '初始菜单顺序错误')
     for token in ('安装参数（全部前置设置）', 'Hysteria 2 每连接服务器强制限速',
-                  '10#$input>=30', '10#$input<=100', '输入订阅中心对接码（按回车跳过）',
-                  '参数已收集完毕，直接开始全自动安装'):
+                  '10#$input>=30', '10#$input<=100', '请输入订阅中心对接码（支持 VVC1 或含注册票据的 JPR3；按回车跳过）',
+                  '参数已收集完毕，开始全自动安装'):
         require(token in text, f'缺少前置参数功能：{token}')
     summary = text.index('show_parameter_summary')
     execute = text.index('case "$choice" in', summary)
@@ -165,7 +165,8 @@ def test_node_names_and_clients():
             '主机本地配置缺少 NekoBox')
     require('NekoBoxForAndroid.yaml' in landing and '【NekoBoxForAndroid（Clash Meta）】' in landing,
             '中转副机本地配置缺少 NekoBox')
-    require('复用已保存的 JPR3 对接密钥' in bootstrap, '中转副机无损升级仍要求重新粘贴 JPR3')
+    require('组合角色只允许在全新系统安装' in bootstrap and '中转副机只允许在全新系统安装' in bootstrap,
+            '全新安装角色边界不完整')
 
 
 def test_landing_and_direct_ip_change():
