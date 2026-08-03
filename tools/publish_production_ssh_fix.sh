@@ -14,7 +14,9 @@ from pathlib import Path
 path=Path('tools/apply_landing_direct_role.py')
 text=path.read_text(encoding='utf-8')
 for name in ('show_install_menu','ask_optional_vvc1','jpr_registration_code','install_landing','rebuild_roles_from_system','show_parameter_summary'):
-    text=text.replace(rf"r'^{name}\\(\\) \\{{", rf"r'^{name}\\(\\)\\s*\\{{")
+    old = "r'^" + name + r"\(\) \{"
+    new = "r'^" + name + r"\(\)\s*\{"
+    text=text.replace(old,new)
 path.write_text(text,encoding='utf-8')
 PY_FIX_ANCHORS
   python3 -m py_compile tools/apply_landing_direct_role.py
