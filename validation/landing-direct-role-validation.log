@@ -1,6 +1,10 @@
 + python3 -
 + python3 -m py_compile tools/apply_landing_direct_role.py
 + python3 tools/apply_landing_direct_role.py
-registration prompt: expected exactly one regex match, found 0
+landing-direct role transformation complete
++ python3 -m py_compile src/prepare.py core-src/sub_center.py core-src/sync_agent.py core-src/backup_manager.py core-src/client_adapters.py core-src/client_upgrade_engine.py core-src/client_local_renderer.py core-src/restore_manager.py core-src/node_probe.py tests/landing_direct_role_validation.py
++ bash -n core-src/bootstrap.sh
+core-src/bootstrap.sh: line 581: syntax error near unexpected token `os.path.dirname'
+core-src/bootstrap.sh: line 581: `os.makedirs(os.path.dirname(path),exist_ok=True)'
 
 status=failure
