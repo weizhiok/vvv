@@ -37,14 +37,15 @@ vps
 - 订阅传输、域名/IP、端口和统一后缀；
 - VVC1 订阅中心对接码或 JPR3 中转副机密钥。
 
-## Hysteria 2 限速
+## Hysteria 2 带宽与兼容性
 
-Hysteria 2 使用 sing-box 服务端的 `up_mbps`、`down_mbps` 和 `ignore_client_bandwidth`：
+Hysteria 2 使用 sing-box 服务端的 `up_mbps`、`down_mbps`，并保持 `ignore_client_bandwidth=false`：
 
-- 限制的是每个客户端连接，不是整台服务器总带宽；
-- 客户端把速度填写得更高也不能突破服务器上限；
-- 不同客户端连接分别执行同一上限；
-- 限速值写入状态、JPR3 和客户端模板。
+- 声明带宽并使用 Brutal 的客户端，实际速率取客户端与服务器设置中的较小值；
+- 服务器上限按连接协商，不是整台服务器的总带宽；
+- 未声明带宽的 Loon、Shadowrocket 等客户端使用 BBR/Reno，仍可正常认证和上网；
+- Hysteria 2 当前不会对 BBR/Reno 执行上述 Brutal 带宽上限；
+- 限速值仍写入状态、JPR3 和支持带宽字段的客户端模板。
 
 ## 对接码与副机通讯
 

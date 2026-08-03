@@ -802,7 +802,7 @@ write_sing_config() {
       "users": [{"name": "landing-user", "password": "${REMOTE_HY2_PASSWORD}"}],
       "up_mbps": ${HY2_LIMIT_MBPS},
       "down_mbps": ${HY2_LIMIT_MBPS},
-      "ignore_client_bandwidth": true,
+      "ignore_client_bandwidth": false,
       "obfs": {"type": "salamander", "password": "${REMOTE_HY2_OBFS}"},
       "tls": {
         "enabled": true,

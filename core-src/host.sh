@@ -976,7 +976,7 @@ users=[{"name":h["direct_user"]["name"],"password":h["direct_user"]["password"]}
 users.extend({"name":slot["name"],"password":slot["password"]} for slot in reserve)
 inbounds=[{
  "type":"hysteria2","tag":"hy2-in","listen":"0.0.0.0","listen_port":port,
- "up_mbps":limit_mbps,"down_mbps":limit_mbps,"ignore_client_bandwidth":True,"users":users,
+ "up_mbps":limit_mbps,"down_mbps":limit_mbps,"ignore_client_bandwidth":False,"users":users,
  "obfs":{"type":"salamander","password":h["obfs_password"]},
  "tls":{"enabled":True,"server_name":h["server_name"],"alpn":["h3"],"min_version":"1.3",
         "certificate_path":h["certificate_path"],"key_path":h["key_path"]}

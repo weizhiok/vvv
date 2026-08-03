@@ -39,6 +39,7 @@ bash -n "$ROOT/core-src/rclone_manager.sh"
 bash -n "$ROOT/core-src/center_transport.sh"
 bash -n "$ROOT/core-src/center_manager.sh"
 sh -n "$ROOT/core-src/landing.sh"
+bash -n "$ROOT/tests/hy2_bandwidth_compat_validation.sh"
 python3 "$ROOT/core-src/client_adapters.py" >/dev/null
 
 log 'Render final installers'
@@ -120,13 +121,14 @@ grep -q 'type: hysteria2' "$WORK/client-files/Clash-Verge-Rev.yaml"
 grep -q 'proxy.example.com' "$WORK/vless-temp/v04.json"
 grep -q '203.0.113.20' "$WORK/vless-temp/v03.json"
 grep -q '203.0.113.20' "$WORK/hy2-temp/h02.json"
-grep -q '"ignore_client_bandwidth": true' "$WORK/sing-active.json"
+grep -q '"ignore_client_bandwidth": false' "$WORK/sing-active.json"
 
 log 'Run actual core configuration checks'
 "$XRAY" run -test -format=json -config "$WORK/xray-active.json"
 for cfg in "$WORK"/vless-active/*.json; do "$XRAY" run -test -format=json -config "$cfg"; done
 "$SING_BOX" check -c "$WORK/sing-active.json"
 for cfg in "$WORK"/hy2-active/*.json; do "$SING_BOX" check -c "$cfg"; done
+bash "$ROOT/tests/hy2_bandwidth_compat_validation.sh" "$SING_BOX"
 sha256sum "$WORK/xray-empty.json" "$WORK/xray-active.json"
 sha256sum "$WORK/sing-empty.json" "$WORK/sing-active.json"
 
