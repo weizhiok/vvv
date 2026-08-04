@@ -51,6 +51,8 @@ TLS_DIR="/etc/vvv-landing/sing-box/tls"
 UPGRADE_MARKER="/var/lib/jp-relay/landing-system-upgrade.done"
 CLIENT_DIR="/root/中转客户端配置"
 CLIENT_NODES_FILE="/root/中转客户端节点.txt"
+CLIENT_PACKAGE_RENDERER=/usr/local/lib/vvv/client_package_renderer.py
+CLIENT_ADAPTER=/usr/local/lib/vvv/client_adapters.py
 
 log() {
   printf '\n\033[1;36m========== %s ==========\033[0m\n' "$1"
@@ -224,6 +226,11 @@ PY_JPR3_DECODE
     (.remote_public_ip|type=="string" and length>0) and
     (.remote_public_port|type=="number") and
     (.sni|type=="string" and length>0) and
+    (if (.protocol_mode=="dual" or .protocol_mode=="hy2") then
+       (.japan_port_hopping|type=="object") and
+       (.japan_port_hopping.ports|type=="string" and length>0) and
+       (.japan_port_hopping.hop_interval_seconds|type=="number")
+     else true end) and
     (.xray_version|type=="string" and length>0) and
     (.sing_box_version|type=="string" and length>0) and
     (if (.protocol_mode=="dual" or .protocol_mode=="vless") then
@@ -266,6 +273,8 @@ PY_JPR3_DECODE
   PAIR_XRAY_VERSION="$(printf '%s' "$PAIR_JSON" | jq -er '.xray_version')"
   PAIR_SING_BOX_VERSION="$(printf '%s' "$PAIR_JSON" | jq -er '.sing_box_version')"
   HY2_LIMIT_MBPS="$(printf '%s' "$PAIR_JSON" | jq -er '.hy2_limit_mbps // 50')"
+  JAPAN_HY2_PORTS="$(printf '%s' "$PAIR_JSON" | jq -er '.japan_port_hopping.ports // (.japan_port|tostring)')"
+  JAPAN_HY2_HOP_INTERVAL="$(printf '%s' "$PAIR_JSON" | jq -er '.japan_port_hopping.hop_interval_seconds // 30')"
 
   valid_ipv4 "$JAPAN_PUBLIC_IP" || fail "JPR3 中的日本公网 IPv4 无效。"
   valid_ipv4 "$REMOTE_PUBLIC_IP" || fail "JPR3 中的落地公网 IPv4 无效。"
@@ -930,112 +939,9 @@ relay_client_base() {
 }
 
 generate_client_files() {
-  mkdir -p "$CLIENT_DIR"
-  : > "$CLIENT_DIR/Quantumult-X.conf"
-  : > "$CLIENT_DIR/Loon.conf"
-  : > "$CLIENT_DIR/Loon-Shadowrocket.txt"
-  : > "$CLIENT_DIR/Shadowrocket.txt"
-  echo 'proxies:' > "$CLIENT_DIR/Clash-Verge-Rev.yaml"
-  {
-    echo "中转客户端节点"
-    echo "===================================="
-    echo "线路：${NODE_NAME}"
-    echo "日本入口：${JAPAN_PUBLIC_IP}:${JAPAN_PORT}"
-    echo "最终落地：${REMOTE_PUBLIC_IP}:${REMOTE_PUBLIC_PORT}"
-    echo "协议模式：${PROTOCOL_MODE}"
-  } > "$CLIENT_DIR/客户端节点.txt"
-
-  if mode_has_vless; then
-    vless_name="$(protocol_name "$(relay_client_base "$NODE_NAME")" VLESS)"
-    encoded_vless_name="$(urlencode "$vless_name")"
-    vless_params="encryption=none&flow=xtls-rprx-vision&security=reality&sni=$(urlencode "$SNI")&fp=chrome&pbk=$(urlencode "$JAPAN_REALITY_PUBLIC_KEY")&sid=$(urlencode "$JAPAN_REALITY_SHORT_ID")&type=tcp&headerType=none"
-    vless_uri="vless://${JAPAN_CLIENT_UUID}@${JAPAN_PUBLIC_IP}:${JAPAN_PORT}?${vless_params}#${encoded_vless_name}"
-    qx="vless=${JAPAN_PUBLIC_IP}:${JAPAN_PORT}, method=none, password=${JAPAN_CLIENT_UUID}, obfs=over-tls, obfs-host=${SNI}, reality-base64-pubkey=${JAPAN_REALITY_PUBLIC_KEY}, reality-hex-shortid=${JAPAN_REALITY_SHORT_ID}, vless-flow=xtls-rprx-vision, fast-open=false, udp-relay=true, tag=${vless_name}"
-    loon="${vless_name} = VLESS,${JAPAN_PUBLIC_IP},${JAPAN_PORT},\"${JAPAN_CLIENT_UUID}\",transport=tcp,flow=xtls-rprx-vision,public-key=\"${JAPAN_REALITY_PUBLIC_KEY}\",short-id=${JAPAN_REALITY_SHORT_ID},udp=true,over-tls=true,sni=${SNI},skip-cert-verify=true"
-    printf '%s\n' "$qx" >> "$CLIENT_DIR/Quantumult-X.conf"
-    printf '%s\n' "$loon" >> "$CLIENT_DIR/Loon.conf"
-    printf '%s\n' "$vless_uri" >> "$CLIENT_DIR/Loon-Shadowrocket.txt"
-    printf '%s\n' "$vless_uri" >> "$CLIENT_DIR/Shadowrocket.txt"
-    cat >> "$CLIENT_DIR/Clash-Verge-Rev.yaml" <<EOF_CLASH_VLESS
-  - name: "${vless_name}"
-    type: vless
-    server: ${JAPAN_PUBLIC_IP}
-    port: ${JAPAN_PORT}
-    uuid: ${JAPAN_CLIENT_UUID}
-    network: tcp
-    udp: true
-    tls: true
-    flow: xtls-rprx-vision
-    encryption: ""
-    servername: ${SNI}
-    client-fingerprint: chrome
-    skip-cert-verify: true
-    reality-opts:
-      public-key: ${JAPAN_REALITY_PUBLIC_KEY}
-      short-id: "${JAPAN_REALITY_SHORT_ID}"
-EOF_CLASH_VLESS
-    {
-      echo
-      echo "【Quantumult X】"
-      echo "$qx"
-      echo
-      echo "【Loon / Shadowrocket：${vless_name}】"
-      echo "Loon 原生配置："
-      echo "$loon"
-      echo "分享链接："
-      echo "$vless_uri"
-    } >> "$CLIENT_DIR/客户端节点.txt"
-  fi
-
-  if mode_has_hy2; then
-    hy2_name="$(protocol_name "$(relay_client_base "$NODE_NAME")" HY2)"
-    encoded_hy2_name="$(urlencode "$hy2_name")"
-    hy2_uri="hysteria2://$(urlencode "$JAPAN_HY2_PASSWORD")@${JAPAN_PUBLIC_IP}:${JAPAN_PORT}/?obfs=salamander&obfs-password=$(urlencode "$JAPAN_HY2_OBFS")&sni=$(urlencode "$JAPAN_HY2_SERVER_NAME")&insecure=1&pinSHA256=$(urlencode "$JAPAN_HY2_PIN_HEX")#${encoded_hy2_name}"
-    loon="${hy2_name} = Hysteria2,${JAPAN_PUBLIC_IP},${JAPAN_PORT},\"${JAPAN_HY2_PASSWORD}\",skip-cert-verify=true,sni=${JAPAN_HY2_SERVER_NAME},udp=true,fast-open=true,salamander-password=\"${JAPAN_HY2_OBFS}\""
-    printf '%s\n' "$loon" >> "$CLIENT_DIR/Loon.conf"
-    printf '%s\n' "$hy2_uri" >> "$CLIENT_DIR/Loon-Shadowrocket.txt"
-    printf '%s\n' "$hy2_uri" >> "$CLIENT_DIR/Shadowrocket.txt"
-    cat >> "$CLIENT_DIR/Clash-Verge-Rev.yaml" <<EOF_CLASH_HY2
-  - name: "${hy2_name}"
-    type: hysteria2
-    server: ${JAPAN_PUBLIC_IP}
-    port: ${JAPAN_PORT}
-    password: "${JAPAN_HY2_PASSWORD}"
-    up: "${HY2_LIMIT_MBPS} Mbps"
-    down: "${HY2_LIMIT_MBPS} Mbps"
-    obfs: salamander
-    obfs-password: "${JAPAN_HY2_OBFS}"
-    sni: ${JAPAN_HY2_SERVER_NAME}
-    skip-cert-verify: true
-    fingerprint: "${JAPAN_HY2_FINGERPRINT}"
-    alpn:
-      - h3
-    udp: true
-EOF_CLASH_HY2
-    {
-      echo
-      echo "【Hysteria 2 服务端硬上限】"
-      echo "上行 ${HY2_LIMIT_MBPS} Mbps / 下行 ${HY2_LIMIT_MBPS} Mbps"
-      echo
-      echo "【Loon / Shadowrocket：${hy2_name}】"
-      echo "Loon 原生配置："
-      echo "$loon"
-      echo "分享链接："
-      echo "$hy2_uri"
-    } >> "$CLIENT_DIR/客户端节点.txt"
-  fi
-
-  cp "$CLIENT_DIR/Clash-Verge-Rev.yaml" "$CLIENT_DIR/NekoBoxForAndroid.yaml"
-
-  {
-    echo
-    echo "【Clash Verge Rev / Mihomo】"
-    cat "$CLIENT_DIR/Clash-Verge-Rev.yaml"
-    echo
-    echo "【NekoBoxForAndroid（Clash Meta）】"
-    cat "$CLIENT_DIR/NekoBoxForAndroid.yaml"
-  } >> "$CLIENT_DIR/客户端节点.txt"
-
+  [ -x "$CLIENT_PACKAGE_RENDERER" ] && [ -x "$CLIENT_ADAPTER" ] || fail "统一客户端渲染模块不存在。"
+  python3 "$CLIENT_PACKAGE_RENDERER" \
+    --state "$STATE_FILE" --kind landing --out "$CLIENT_DIR" --adapter "$CLIENT_ADAPTER" >/dev/null
   cp "$CLIENT_DIR/客户端节点.txt" "$CLIENT_NODES_FILE"
   chmod 700 "$CLIENT_DIR"
   chmod 600 "$CLIENT_DIR"/* "$CLIENT_NODES_FILE"
@@ -1476,13 +1382,13 @@ if ! verify_runtime; then
   fail "代理服务未完整启动或监听端口不完整。"
 fi
 
-CURRENT_STEP="生成客户端配置"
-log "$CURRENT_STEP"
-generate_client_files
-
-CURRENT_STEP="保存状态并安装 vps 查看命令"
+CURRENT_STEP="保存状态"
 log "$CURRENT_STEP"
 save_state
+
+CURRENT_STEP="生成客户端配置并安装 vps 查看命令"
+log "$CURRENT_STEP"
+generate_client_files
 install_shortcuts
 
 if [ "$COMBINED_INSTALL" != 1 ]; then
@@ -1494,6 +1400,7 @@ log "新加坡副机 VPS / 落地 VPS 安装成功"
 echo "线路：${NODE_NAME}"
 echo "协议模式：${PROTOCOL_MODE}"
 echo "日本入口：${JAPAN_PUBLIC_IP}:${JAPAN_PORT}"
+mode_has_hy2 && echo "日本 Hysteria 2 端口跳跃：${JAPAN_HY2_PORTS}（每 ${JAPAN_HY2_HOP_INTERVAL} 秒切换）"
 echo "落地监听：${REMOTE_PUBLIC_IP}:${REMOTE_PUBLIC_PORT}"
 mode_has_vless && echo "Xray-core：v${XRAY_VERSION}（${XRAY_VERSION_SOURCE}）"
 mode_has_hy2 && echo "sing-box：v${SING_BOX_VERSION}（${SING_BOX_VERSION_SOURCE}）"

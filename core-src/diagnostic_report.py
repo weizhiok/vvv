@@ -11,7 +11,7 @@ from pathlib import Path
 OUT = Path('/root') / f"VVV-诊断报告-{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
 SENSITIVE_KEYS = re.compile(r'(password|token|secret|private|uuid|master|recovery|credential|authorization|cookie)', re.I)
 NODE_PROBE = Path('/usr/local/lib/vvv/node_probe.py')
-SERVICES = ['xray','sing-box','caddy','vvv-sub','vvv-cloudflared','vvv-sync.timer','vvv-sync.path','vvv-temp-cleanup.timer','daily-reboot.timer']
+SERVICES = ['xray','sing-box','vvv-hy2-port-hop','caddy','vvv-sub','vvv-cloudflared','vvv-sync.timer','vvv-sync.path','vvv-temp-cleanup.timer','daily-reboot.timer']
 
 
 def run(command, timeout=20):
@@ -54,10 +54,11 @@ def main():
     add(lines, '资源', run(['bash','-lc','lscpu | sed -n "1,25p"; free -h; swapon --show; df -hT / /var /etc 2>/dev/null']))
     add(lines, '网络与端口', run(['bash','-lc','ip -brief address; ip route; ss -lntup']))
     add(lines, 'BBR 与时区', run(['bash','-lc','sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc 2>/dev/null; timedatectl']))
+    add(lines, 'Hysteria 2 端口跳跃', run(['bash','-lc','python3 /usr/local/lib/vvv/hy2_port_hop.py status 2>&1; nft -a list table inet vvv_hy2_hop 2>&1 || true']))
     add(lines, '程序版本', run(['bash','-lc','/usr/local/bin/xray version 2>/dev/null | head -1; /usr/local/bin/sing-box version 2>/dev/null | head -2; /usr/local/bin/caddy version 2>/dev/null; /usr/local/bin/cloudflared --version 2>/dev/null; rclone version 2>/dev/null | head -1']))
     for service in SERVICES:
         add(lines, f'服务 {service}', run(['systemctl','--no-pager','--full','status',service], timeout=10))
-    for path in ('/etc/vvv/roles.json','/etc/jp-relay/state.json','/etc/jp-relay/landing-state.json','/etc/vvv-sub/config.json','/etc/vvv/client.json'):
+    for path in ('/etc/vvv/roles.json','/etc/jp-relay/state.json','/etc/jp-relay/landing-state.json','/etc/vvv-sub/config.json','/etc/vvv/client.json','/var/lib/vvv-sub/node-order.json'):
         p = Path(path)
         if p.exists():
             try:

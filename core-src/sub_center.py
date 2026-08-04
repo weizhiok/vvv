@@ -24,6 +24,7 @@ HOSTS = DATA / 'hosts'
 OUT = DATA / 'output'
 REGISTRY = DATA / 'registry.json'
 OVERRIDES = DATA / 'node-overrides.json'
+ORDER = DATA / 'node-order.json'
 TICKETS = DATA / 'relay-tickets.json'
 BACKUP = Path('/usr/local/lib/vvv/backup_manager.py')
 DEBUG_FLAG = Path('/run/vvv-sub-header-debug.enabled')
@@ -124,6 +125,8 @@ def nodes_from_host(doc):
             'pin': hy2.get('certificate_pin_hex'), 'udp': True, 'category': category,
             'temporary': temporary, 'expires_at': expires_at, 'expected_exit_ip': expected_exit_ip,
             'limit_mbps': int(state.get('hy2_limit_mbps') or 50),
+            'ports': str(((state.get('port_hopping') or {}).get('ports')) or port),
+            'hop_interval_seconds': int(((state.get('port_hopping') or {}).get('hop_interval_seconds')) or 30),
             'pin_b64': hy2.get('certificate_public_key_sha256'),
         })
 
@@ -191,6 +194,14 @@ def all_nodes():
                 node['default_name'] = node['name']
                 node['name'] = custom
             nodes.append(node)
+    active_ids = [node['id'] for node in nodes]
+    stored = read_json(ORDER, {'schema': 1, 'ids': []}) or {'schema': 1, 'ids': []}
+    existing = [str(value) for value in stored.get('ids', []) if str(value) in seen]
+    ordered_ids = existing + [value for value in active_ids if value not in existing]
+    if stored.get('schema') != 1 or stored.get('ids') != ordered_ids:
+        atomic_json(ORDER, {'schema': 1, 'ids': ordered_ids, 'updated_at': now()})
+    positions = {value: index for index, value in enumerate(ordered_ids)}
+    nodes.sort(key=lambda node: positions.get(node['id'], len(positions)))
     return nodes
 
 
@@ -405,8 +416,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def rename_node(node_id_value, name):
     name = str(name).strip()
-    if not (1 <= len(name) <= 64) or any(ord(c) < 32 or ord(c) == 127 for c in name):
-        raise SystemExit('名称必须是 1-64 个字符，且不能包含换行或控制字符。')
+    if not (1 <= len(name) <= 64) or '|' in name or any(ord(c) < 32 or ord(c) == 127 for c in name):
+        raise SystemExit('名称必须是 1-64 个字符，且不能包含 |、换行或控制字符。')
     nodes = all_nodes()
     target = next((node for node in nodes if node['id'] == node_id_value), None)
     if not target:
@@ -419,6 +430,79 @@ def rename_node(node_id_value, name):
     atomic_json(OVERRIDES, overrides)
     regenerate()
     backup('after-node-rename', True)
+
+
+
+def parse_pipe_values(value):
+    text = str(value or '').strip()
+    text = text.strip('|').strip()
+    if not text:
+        return []
+    return [part.strip() for part in re.split(r'\|+', text) if part.strip()]
+
+
+def validate_display_names(names, expected):
+    if len(names) != expected:
+        raise SystemExit(f'数量不一致：当前共有 {expected} 个节点，但输入了 {len(names)} 个名称。')
+    for name in names:
+        if not (1 <= len(name) <= 64) or '|' in name or any(ord(c) < 32 or ord(c) == 127 for c in name):
+            raise SystemExit('每个名称必须是 1-64 个字符，且不能包含 |、换行或控制字符。')
+    if len(names) != len(set(names)):
+        raise SystemExit('名称不能重复。')
+
+
+def bulk_rename(value):
+    nodes = all_nodes()
+    names = parse_pipe_values(value)
+    validate_display_names(names, len(nodes))
+    previous = read_json(OVERRIDES, {}) or {}
+    updated = dict(previous)
+    timestamp = now()
+    for node, name in zip(nodes, names):
+        updated[node['id']] = {'display_name': name, 'updated_at': timestamp}
+    backup('before-node-bulk-rename', True)
+    try:
+        atomic_json(OVERRIDES, updated)
+        count = regenerate()
+    except Exception:
+        atomic_json(OVERRIDES, previous)
+        regenerate()
+        raise
+    backup('after-node-bulk-rename', True)
+    return count
+
+
+def reorder_nodes(value):
+    nodes = all_nodes()
+    names = parse_pipe_values(value)
+    if len(names) != len(nodes):
+        raise SystemExit(f'数量不一致：当前共有 {len(nodes)} 个节点，但输入了 {len(names)} 个名称。')
+    if len(names) != len(set(names)):
+        raise SystemExit('排序列表中不能出现重复名称。')
+    by_name = {node['name']: node['id'] for node in nodes}
+    if len(by_name) != len(nodes):
+        raise SystemExit('当前订阅存在重名节点，请先批量重命名后再排序。')
+    missing = [name for name in names if name not in by_name]
+    extra = [node['name'] for node in nodes if node['name'] not in set(names)]
+    if missing or extra:
+        details = []
+        if missing:
+            details.append('不存在：' + '、'.join(missing))
+        if extra:
+            details.append('缺少：' + '、'.join(extra))
+        raise SystemExit('排序列表必须完整使用当前节点名称；' + '；'.join(details))
+    previous = read_json(ORDER, {'schema': 1, 'ids': []}) or {'schema': 1, 'ids': []}
+    updated = {'schema': 1, 'ids': [by_name[name] for name in names], 'updated_at': now()}
+    backup('before-node-reorder', True)
+    try:
+        atomic_json(ORDER, updated)
+        count = regenerate()
+    except Exception:
+        atomic_json(ORDER, previous)
+        regenerate()
+        raise
+    backup('after-node-reorder', True)
+    return count
 
 
 def reset_name(node_id_value):
@@ -453,6 +537,8 @@ def serve():
         atomic_json(REGISTRY, {'hosts': []})
     if not OVERRIDES.exists():
         atomic_json(OVERRIDES, {})
+    if not ORDER.exists():
+        atomic_json(ORDER, {'schema': 1, 'ids': []})
     regenerate()
     ThreadingHTTPServer((str(cfg.get('listen_host') or '0.0.0.0'), int(cfg.get('listen_port') or 18081)), Handler).serve_forever()
 
@@ -487,6 +573,8 @@ if __name__ == '__main__':
     hosts = commands.add_parser('list-hosts'); hosts.add_argument('--tsv', action='store_true')
     showh = commands.add_parser('show-host'); showh.add_argument('host_id')
     rename = commands.add_parser('rename-node'); rename.add_argument('node_id'); rename.add_argument('name')
+    bulk = commands.add_parser('bulk-rename'); bulk.add_argument('names')
+    reorder = commands.add_parser('reorder-nodes'); reorder.add_argument('names')
     reset = commands.add_parser('reset-name'); reset.add_argument('node_id')
     delete = commands.add_parser('delete-host'); delete.add_argument('host_id')
     args = parser.parse_args()
@@ -514,6 +602,10 @@ if __name__ == '__main__':
         print(json.dumps(show_host(args.host_id), ensure_ascii=False, indent=2))
     elif args.command == 'rename-node':
         rename_node(args.node_id, args.name)
+    elif args.command == 'bulk-rename':
+        print(bulk_rename(args.names))
+    elif args.command == 'reorder-nodes':
+        print(reorder_nodes(args.names))
     elif args.command == 'reset-name':
         reset_name(args.node_id)
     elif args.command == 'delete-host':

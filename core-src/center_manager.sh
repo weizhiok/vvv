@@ -68,19 +68,42 @@ debug_headers(){
   rm -f "$flag" "$log"; trap - EXIT INT TERM
 }
 node_menu(){
-  local rows count choice node_id name action new_name
+  local rows count choice node_id name action new_name bulk_index order_index input
   while true; do
     mapfile -t rows < <(python3 "$SUB" list-nodes --tsv)
     count=${#rows[@]}
     echo; echo "========== 订阅节点管理 =========="
     if (( count==0 )); then echo "当前没有订阅节点。"; pause; return; fi
     local i
-    for ((i=0;i<count;i++)); do IFS=$'\t' read -r node_id name _ <<<"${rows[$i]}"; echo "$((i+1)). $name"; done
+    for ((i=0;i<count;i++)); do IFS=$'	' read -r node_id name _ <<<"${rows[$i]}"; echo "$((i+1)). $name"; done
+    bulk_index=$((count+1)); order_index=$((count+2))
+    echo "${bulk_index}. 批量重命名"
+    echo "${order_index}. 重新排序"
     echo "0. 返回"
-    read -r -p "请选择节点：" choice
+    read -r -p "请选择节点或操作：" choice
     [[ "$choice" == 0 ]] && return
-    [[ "$choice" =~ ^[0-9]+$ ]] && ((10#$choice>=1 && 10#$choice<=count)) || { echo "请输入有效编号。"; continue; }
-    IFS=$'\t' read -r node_id name _ <<<"${rows[$((10#$choice-1))]}"
+    [[ "$choice" =~ ^[0-9]+$ ]] || { echo "请输入有效编号。"; continue; }
+    choice=$((10#$choice))
+    if (( choice==bulk_index )); then
+      echo "请按当前顺序输入全部新名称，使用一个或多个 | 分隔；开头和结尾的 | 可省略。"
+      read -r -p "批量名称：" input
+      if python3 "$SUB" bulk-rename "$input" >/dev/null; then
+        echo "批量重命名成功，共修改 ${count} 个节点。"
+        echo "所有客户端订阅已重新生成，请在客户端中手动刷新统一订阅地址。"
+      fi
+      pause; continue
+    fi
+    if (( choice==order_index )); then
+      echo "请按目标顺序输入当前节点名称，使用一个或多个 | 分隔；名称必须完整且不能重复。"
+      read -r -p "目标顺序：" input
+      if python3 "$SUB" reorder-nodes "$input" >/dev/null; then
+        echo "节点重新排序成功，共 ${count} 个节点。"
+        echo "所有客户端订阅已按新顺序重新生成，请在客户端中手动刷新统一订阅地址。"
+      fi
+      pause; continue
+    fi
+    (( choice>=1 && choice<=count )) || { echo "请输入有效编号。"; continue; }
+    IFS=$'	' read -r node_id name _ <<<"${rows[$((choice-1))]}"
     while true; do
       echo; echo "节点：$name"
       echo "1. 查看节点信息"
@@ -91,11 +114,14 @@ node_menu(){
       case "$action" in
         1) python3 "$SUB" show-node "$node_id" | jq .; pause;;
         2)
-          read -r -p "请输入新的客户端显示名称（1-64个字符）：" new_name
-          python3 "$SUB" rename-node "$node_id" "$new_name" && name="$new_name"
+          read -r -p "请输入新的客户端显示名称（1-64个字符，不能包含 |）：" new_name
+          if python3 "$SUB" rename-node "$node_id" "$new_name"; then
+            name="$new_name"
+            echo "订阅已重新生成，请在客户端中手动刷新。"
+          fi
           pause
           ;;
-        3) python3 "$SUB" reset-name "$node_id"; pause; break;;
+        3) python3 "$SUB" reset-name "$node_id" && echo "订阅已重新生成，请在客户端中手动刷新。"; pause; break;;
         0) break;;
         *) echo "请输入 0-3。";;
       esac

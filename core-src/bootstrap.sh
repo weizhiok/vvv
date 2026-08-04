@@ -7,6 +7,7 @@ ROLE_FILE=/etc/vvv/roles.json
 MAIN_STATE=/etc/jp-relay/state.json
 LANDING_STATE=/etc/jp-relay/landing-state.json
 CENTER_CFG=/etc/vvv-sub/config.json
+HY2_HOP_ENGINE="$BASE_DIR/hy2_port_hop.py"
 
 [[ "$(id -u)" -eq 0 ]] || { echo "错误：请使用 root 用户运行。" >&2; exit 1; }
 [[ -r /etc/os-release ]] || { echo "错误：无法读取 /etc/os-release。" >&2; exit 1; }
@@ -209,7 +210,9 @@ load_existing_proxy_parameters() {
   VVV_PROXY_PORT="$(json_value "$MAIN_STATE" listen_port 443)"
   VVV_REALITY_SNI="$(json_value "$MAIN_STATE" sni www.softbank.jp)"
   VVV_HY2_LIMIT_MBPS="$(json_value "$MAIN_STATE" hy2_limit_mbps 50)"
-  export VVV_PROTOCOL_MODE VVV_PROXY_PORT VVV_REALITY_SNI VVV_HY2_LIMIT_MBPS
+  VVV_HY2_PORTS="$(json_value "$MAIN_STATE" port_hopping.ports "${VVV_PROXY_PORT},20000-50000")"
+  VVV_HY2_HOP_INTERVAL="$(json_value "$MAIN_STATE" port_hopping.hop_interval_seconds 30)"
+  export VVV_PROTOCOL_MODE VVV_PROXY_PORT VVV_REALITY_SNI VVV_HY2_LIMIT_MBPS VVV_HY2_PORTS VVV_HY2_HOP_INTERVAL
   REUSE_PROXY=1
 }
 
@@ -316,6 +319,8 @@ ask_proxy_parameters(){
     done
   fi
   VVV_HY2_LIMIT_MBPS=50
+  VVV_HY2_PORTS=""
+  VVV_HY2_HOP_INTERVAL=30
   if [[ "$VVV_PROTOCOL_MODE" != vless ]]; then
     while true; do
       read -r -p "请输入 Hysteria 2 每连接服务器强制限速 [默认 50M]：" input
@@ -324,8 +329,21 @@ ask_proxy_parameters(){
       if [[ "$input" =~ ^[0-9]+$ ]] && ((10#$input>=30 && 10#$input<=100)); then VVV_HY2_LIMIT_MBPS="$((10#$input))"; break; fi
       echo "限速只允许 30-100 的整数，可写 50、50M 或 50m。"
     done
+    local default_hop result
+    default_hop="${VVV_PROXY_PORT},20000-50000"
+    while true; do
+      read -r -p "请输入 Hysteria 2 端口跳跃范围 [默认 ${default_hop}]：" input
+      input="$(printf '%s' "$input" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      [[ -n "$input" ]] || input="$default_hop"
+      if result="$(python3 "$HY2_HOP_ENGINE" validate --spec "$input" --listen-port "$VVV_PROXY_PORT" --hop-interval 30 --check-udp 2>&1)"; then
+        VVV_HY2_PORTS="$(jq -r '.ports' <<<"$result")"
+        break
+      fi
+      echo "$result"
+      echo "请重新输入 Hysteria 2 端口跳跃范围。"
+    done
   fi
-  export VVV_PROTOCOL_MODE VVV_PROXY_PORT VVV_REALITY_SNI VVV_HY2_LIMIT_MBPS
+  export VVV_PROTOCOL_MODE VVV_PROXY_PORT VVV_REALITY_SNI VVV_HY2_LIMIT_MBPS VVV_HY2_PORTS VVV_HY2_HOP_INTERVAL
 }
 
 random_subscription_suffix() {
@@ -475,7 +493,7 @@ enable_relay(){
 refresh_center_runtime_code() {
   local changed=0 file target mode
   install -d -m700 /usr/local/lib/vvv
-  for file in sub_center.py backup_manager.py rclone_manager.sh client_adapters.py adapter_manager.py center_transport.sh restore_manager.py diagnostic_report.py node_probe.py; do
+  for file in sub_center.py backup_manager.py rclone_manager.sh client_adapters.py client_package_renderer.py client_local_renderer.py hy2_port_hop.py hy2_port_hop.sh adapter_manager.py center_transport.sh restore_manager.py diagnostic_report.py node_probe.py; do
     target="/usr/local/lib/vvv/$file"
     if [[ ! -f "$target" ]] || ! cmp -s "$BASE_DIR/$file" "$target"; then
       install -m755 "$BASE_DIR/$file" "$target"
@@ -528,6 +546,9 @@ ensure_center(){
 
 install_landing() {
   local key="$1" combined="${2:-0}" landing_rc
+  install -d -m700 /usr/local/lib/vvv
+  install -m755 "$BASE_DIR/client_adapters.py" /usr/local/lib/vvv/client_adapters.py
+  install -m755 "$BASE_DIR/client_package_renderer.py" /usr/local/lib/vvv/client_package_renderer.py
   if [[ "$combined" == 1 ]]; then
     VVV_PAIRING_KEY="$key" VVV_COMBINED_INSTALL=1 sh "$BASE_DIR/landing.sh" && landing_rc=0 || landing_rc=$?
   else
@@ -584,11 +605,18 @@ install_unified_manager(){
   install -m755 "$BASE_DIR/restore_manager.py" /usr/local/lib/vvv/restore_manager.py
   install -m755 "$BASE_DIR/diagnostic_report.py" /usr/local/lib/vvv/diagnostic_report.py
   install -m755 "$BASE_DIR/node_probe.py" /usr/local/lib/vvv/node_probe.py
+  install -m755 "$BASE_DIR/client_adapters.py" /usr/local/lib/vvv/client_adapters.py
+  install -m755 "$BASE_DIR/client_package_renderer.py" /usr/local/lib/vvv/client_package_renderer.py
+  install -m755 "$BASE_DIR/client_local_renderer.py" /usr/local/lib/vvv/client_local_renderer.py
+  install -m755 "$BASE_DIR/hy2_port_hop.py" /usr/local/lib/vvv/hy2_port_hop.py
+  install -m755 "$BASE_DIR/hy2_port_hop.sh" /usr/local/lib/vvv/hy2_port_hop.sh
   cat > /usr/local/sbin/vps <<'EOF_VPS'
 #!/usr/bin/env bash
 exec /usr/local/lib/vvv/vvv_manager.sh "$@"
 EOF_VPS
   chmod 700 /usr/local/sbin/vps
+  python3 /usr/local/lib/vvv/client_adapters.py >/dev/null
+  python3 /usr/local/lib/vvv/client_local_renderer.py regenerate --obsolete Loon-Shadowrocket.txt --obsolete NekoBoxForAndroid.yaml >/dev/null || true
 }
 
 register_current_main_role(){
@@ -632,7 +660,10 @@ show_parameter_summary() {
     echo "自身直连协议：$protocol_name$([[ "$REUSE_PROXY" == 1 ]] && echo '（复用现有）')"
     echo "自身直连端口：$VVV_PROXY_PORT"
     [[ "$VVV_PROTOCOL_MODE" == hy2 ]] || echo "REALITY 伪装域名：$VVV_REALITY_SNI"
-    [[ "$VVV_PROTOCOL_MODE" == vless ]] || echo "Hysteria 2 限速：${VVV_HY2_LIMIT_MBPS}M"
+    if [[ "$VVV_PROTOCOL_MODE" != vless ]]; then
+      echo "Hysteria 2 限速：${VVV_HY2_LIMIT_MBPS}M"
+      echo "Hysteria 2 端口跳跃：${VVV_HY2_PORTS}（每 ${VVV_HY2_HOP_INTERVAL} 秒切换）"
+    fi
     if [[ "$choice" == 4 ]]; then
       landing_port="$(jpr_field "$key" remote_public_port)"
       echo "中转副机端口：${landing_port}（TCP/UDP）"
@@ -724,7 +755,9 @@ case "$choice" in
       VVV_PROXY_PORT="$(json_value "$MAIN_STATE" listen_port 443)"
       VVV_REALITY_SNI="$(json_value "$MAIN_STATE" sni www.softbank.jp)"
       VVV_HY2_LIMIT_MBPS="$(json_value "$MAIN_STATE" hy2_limit_mbps 50)"
-      export VVV_PROTOCOL_MODE VVV_PROXY_PORT VVV_REALITY_SNI VVV_HY2_LIMIT_MBPS
+      VVV_HY2_PORTS="$(json_value "$MAIN_STATE" port_hopping.ports "${VVV_PROXY_PORT},20000-50000")"
+      VVV_HY2_HOP_INTERVAL="$(json_value "$MAIN_STATE" port_hopping.hop_interval_seconds 30)"
+      export VVV_PROTOCOL_MODE VVV_PROXY_PORT VVV_REALITY_SNI VVV_HY2_LIMIT_MBPS VVV_HY2_PORTS VVV_HY2_HOP_INTERVAL
       bash "$BASE_DIR/host.sh"
     fi
     if landing_state_valid; then
