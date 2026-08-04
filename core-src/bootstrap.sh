@@ -568,8 +568,7 @@ obj={'schema':2,'primary_role':primary,'roles':{
  'center':center=='true','relay':relay=='true','landing':landing=='true','proxy':proxy=='true'}}
 os.makedirs(os.path.dirname(path),exist_ok=True)
 fd,tmp=tempfile.mkstemp(prefix='.roles.',dir=os.path.dirname(path))
-with os.fdopen(fd,'w',encoding='utf-8') as f: json.dump(obj,f,ensure_ascii=False,indent=2); f.write('
-')
+with os.fdopen(fd,'w',encoding='utf-8') as f: json.dump(obj,f,ensure_ascii=False,indent=2); print(file=f)
 os.chmod(tmp,0o600); os.replace(tmp,path)
 PY_ROLES
 }

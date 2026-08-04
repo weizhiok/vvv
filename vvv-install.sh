@@ -56,6 +56,7 @@ mkdir -p "$TMP/app"
 echo "正在下载 VVV 普通源码……"
 curl -fsSL --retry 5 --retry-all-errors "$RAW/core-src/bootstrap.sh?v=$nonce" -o "$TMP/app/bootstrap.sh" || fail "下载 bootstrap.sh 失败。"
 curl -fsSL --retry 5 --retry-all-errors "$RAW/src/prepare.py?v=$nonce" -o "$TMP/prepare.py" || fail "下载 prepare.py 失败。"
+curl -fsSL --retry 5 --retry-all-errors "$RAW/src/validate_embedded_python.py?v=$nonce" -o "$TMP/validate_embedded_python.py" || fail "下载内嵌 Python 检查器失败。"
 files=(host.sh landing.sh center_install.sh register_sync.sh vvv_manager.sh sub_center.py sync_agent.py backup_manager.py rclone_manager.sh client_adapters.py adapter_manager.py client_upgrade_engine.py client_local_renderer.py center_transport.sh center_manager.sh restore_manager.py diagnostic_report.py node_probe.py)
 for file in "${files[@]}"; do
   printf '  下载 %s\n' "$file"
@@ -63,8 +64,9 @@ for file in "${files[@]}"; do
   [[ -s "$TMP/app/$file" ]] || fail "$file 是空文件。"
 done
 
-python3 -m py_compile "$TMP/prepare.py"
+python3 -m py_compile "$TMP/prepare.py" "$TMP/validate_embedded_python.py"
 python3 "$TMP/prepare.py" "$TMP/app/host.sh" "$TMP/app/landing.sh" "$TMP/app/center_install.sh" || fail "源码参数化处理失败。"
+python3 "$TMP/validate_embedded_python.py"   "$TMP/app/bootstrap.sh" "$TMP/app/host.sh" "$TMP/app/landing.sh"   "$TMP/app/center_install.sh" "$TMP/app/register_sync.sh" "$TMP/app/vvv_manager.sh"   "$TMP/app/rclone_manager.sh" "$TMP/app/center_transport.sh" "$TMP/app/center_manager.sh"   || fail "Shell 内嵌 Python 语法检查失败。"
 for file in bootstrap.sh center_install.sh register_sync.sh vvv_manager.sh rclone_manager.sh center_transport.sh center_manager.sh host.sh; do
   bash -n "$TMP/app/$file" || fail "$file 语法检查失败。"
 done
