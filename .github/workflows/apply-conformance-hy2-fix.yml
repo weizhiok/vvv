@@ -1,0 +1,43 @@
+name: Apply HY2 conformance fix
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: apply-hy2-conformance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+jobs:
+  apply-test-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/hy2-port-hopping-node-management
+          fetch-depth: 0
+      - name: Apply conformance fix
+        run: python3 tools/fix_conformance_hy2.py
+      - name: Run conformance and focused tests
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python3 tests/conformance.py
+          python3 tests/test_hy2_port_hopping.py
+          python3 tests/test_client_port_hopping.py
+          python3 tests/test_subscription_node_order.py
+          python3 tests/client_upgrade_isolation_validation.py
+      - name: Prepare source-only commit
+        run: |
+          rm -f tools/fix_conformance_hy2.py
+          find core-src tests -type d -name __pycache__ -prune -exec rm -rf {} +
+          git checkout HEAD -- .github/workflows/apply-conformance-hy2-fix.yml
+      - name: Commit and push
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Update conformance for HY2 hopping outputs'
+          git push origin HEAD:agent/hy2-port-hopping-node-management
