@@ -1,4 +1,5 @@
 name: Apply HY2 feature integration
+# This one-shot workflow removes itself after a successful integration commit.
 on:
   pull_request:
     branches: [main]
