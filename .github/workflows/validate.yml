@@ -34,6 +34,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ca-certificates curl unzip jq openssl iproute2 python3-venv
+      - name: Validate deleted relay slot reclaim
+        run: |
+          chmod +x tests/test_deleted_slot_reclaim.sh
+          tests/test_deleted_slot_reclaim.sh
       - name: Download declared proxy cores
         run: |
           set -Eeuo pipefail
