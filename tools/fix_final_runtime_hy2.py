@@ -46,8 +46,10 @@ HY2_LIMIT_MBPS=50
 XRAY="$TEST_XRAY"
 SING_BOX="$TEST_SING_BOX"
 HY2_LIMIT_MBPS=50
-CLIENT_PACKAGE_RENDERER="$ROOT/core-src/client_package_renderer.py"
-CLIENT_ADAPTER="$ROOT/core-src/client_adapters.py"
+install -m755 "$ROOT/core-src/client_package_renderer.py" "$WORK/client_package_renderer.py"
+install -m755 "$ROOT/core-src/client_adapters.py" "$WORK/client_adapters.py"
+CLIENT_PACKAGE_RENDERER="$WORK/client_package_renderer.py"
+CLIENT_ADAPTER="$WORK/client_adapters.py"
 ''',
 )
 
