@@ -11,6 +11,13 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
+HOST_SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+install -d -m700 /usr/local/lib/vvv
+for module in client_adapters.py client_package_renderer.py hy2_port_hop.py hy2_port_hop.sh; do
+  [[ -f "$HOST_SOURCE_DIR/$module" ]] || { echo "错误：缺少运行模块 $module。" >&2; exit 1; }
+  install -m755 "$HOST_SOURCE_DIR/$module" "/usr/local/lib/vvv/$module"
+done
+
 mkdir -p /usr/local/sbin
 cat > /usr/local/sbin/jp-relay-manager <<'JP_RELAY_JPR3_MANAGER_EOF'
 #!/usr/bin/env bash
@@ -40,6 +47,12 @@ SING_BOX_VERSION_SOURCE="备用稳定版"
 
 # Hysteria 2 每条连接及中转链路的上下行硬上限（Mbps）
 HY2_LIMIT_MBPS="${VVV_HY2_LIMIT_MBPS:-50}"
+HY2_PORTS="${VVV_HY2_PORTS:-${VVV_PROXY_PORT:-443},20000-50000}"
+HY2_HOP_INTERVAL="${VVV_HY2_HOP_INTERVAL:-30}"
+HY2_HOP_ENGINE=/usr/local/lib/vvv/hy2_port_hop.py
+HY2_HOP_WRAPPER=/usr/local/lib/vvv/hy2_port_hop.sh
+CLIENT_PACKAGE_RENDERER=/usr/local/lib/vvv/client_package_renderer.py
+CLIENT_ADAPTER=/usr/local/lib/vvv/client_adapters.py
 
 DEFAULT_SNI="${VVV_REALITY_SNI:-www.softbank.jp}"
 UPGRADE_MARKER="/var/lib/jp-relay/japan-system-upgrade.done"
@@ -326,7 +339,7 @@ upgrade_system_once() {
     -o DPkg::Lock::Timeout=10 \
     -o Acquire::Retries=2 \
     install -y --no-install-recommends \
-    ca-certificates curl unzip tar gzip openssl jq python3 python3-venv iproute2 procps \
+    ca-certificates curl unzip tar gzip openssl jq python3 python3-venv iproute2 procps nftables \
     tzdata kmod util-linux || fail "代理依赖安装失败。若提示锁被占用，已等待最多 10 秒，请稍后重新运行。"
   update-ca-certificates >/dev/null 2>&1 || true
   echo "系统核心组件保持 VPS 镜像原版本，仅安装代理所需依赖。"
@@ -486,6 +499,14 @@ prompt_initial_mode_and_port() {
   echo "已选择模式：$INSTALL_MODE"
   echo "统一监听端口：TCP/UDP ${INSTALL_PORT}（仅启用所选协议）"
   [[ "$INSTALL_MODE" == hy2 ]] || echo "REALITY 伪装域名：$DEFAULT_SNI"
+  if [[ "$INSTALL_MODE" == dual || "$INSTALL_MODE" == hy2 ]]; then
+    local validated
+    validated="$(python3 "$HY2_HOP_ENGINE" validate --spec "$HY2_PORTS" --listen-port "$INSTALL_PORT" --hop-interval "$HY2_HOP_INTERVAL")" || return 1
+    read -r HY2_PORTS HY2_HOP_INTERVAL < <(
+      python3 -c 'import json,sys; value=json.load(sys.stdin); print(value["ports"], value["hop_interval_seconds"])' <<<"$validated"
+    )
+    echo "Hysteria 2 端口跳跃：${HY2_PORTS}（每 ${HY2_HOP_INTERVAL} 秒切换）"
+  fi
 }
 
 mode_has_vless() {
@@ -726,6 +747,7 @@ LimitNOFILE=262144
 [Install]
 WantedBy=multi-user.target
 EOF_HY2_SLOT_SERVICE
+  "$HY2_HOP_WRAPPER" install-service
   systemctl daemon-reload
   systemctl enable sing-box >/dev/null
 }
@@ -811,13 +833,20 @@ initialize_state() {
   mkdir -p "$STATE_DIR" "$PACKAGE_ROOT" "$TLS_DIR"
   chmod 700 "$STATE_DIR" "$PACKAGE_ROOT"
   if [[ -f "$STATE_FILE" ]]; then
-    jq -e '.schema==3 and .role=="japan-hub" and (.relays|type=="array") and ((.upstream_relays // [])|type=="array")' "$STATE_FILE" >/dev/null || fail "状态文件不是本脚本的 JPR3 格式。"
+    jq -e '(.schema==3 or .schema==4) and .role=="japan-hub" and (.relays|type=="array") and ((.upstream_relays // [])|type=="array")' "$STATE_FILE" >/dev/null || fail "状态文件不是本脚本的 JPR3 格式。"
     local migrated
     migrated="$(mktemp --suffix=.json /tmp/vvv-state-migrate.XXXXXX)"; TMP_FILES+=("$migrated")
-    jq --argjson limit "${VVV_HY2_LIMIT_MBPS:-50}" '.hy2_limit_mbps=(.hy2_limit_mbps // $limit) | .temporary_nodes=(.temporary_nodes // [])' "$STATE_FILE" > "$migrated"
+    jq --argjson limit "${VVV_HY2_LIMIT_MBPS:-50}" --arg ports "$HY2_PORTS" --argjson interval "$HY2_HOP_INTERVAL" '
+      .schema=4 |
+      .hy2_limit_mbps=(.hy2_limit_mbps // $limit) |
+      .port_hopping=(.port_hopping // {enabled:(.protocol_mode=="dual" or .protocol_mode=="hy2"),ports:$ports,hop_interval_seconds:$interval}) |
+      .temporary_nodes=(.temporary_nodes // [])
+    ' "$STATE_FILE" > "$migrated"
     install -m600 "$migrated" "$STATE_FILE"
     HY2_LIMIT_MBPS="$(jq -r '.hy2_limit_mbps // 50' "$STATE_FILE")"
-    echo "检测到本脚本状态，复用已保存的协议、端口、限速和全部密钥。"
+    HY2_PORTS="$(jq -r '.port_hopping.ports // (.listen_port|tostring)' "$STATE_FILE")"
+    HY2_HOP_INTERVAL="$(jq -r '.port_hopping.hop_interval_seconds // 30' "$STATE_FILE")"
+    echo "检测到本脚本状态，复用已保存的协议、端口、端口跳跃、限速和全部密钥。"
     return
   fi
 
@@ -889,10 +918,14 @@ initialize_state() {
     --argjson hy2 "$hy2_json" \
     --arg now "$now" \
     --argjson limit "$HY2_LIMIT_MBPS" \
+    --arg hop_ports "$HY2_PORTS" \
+    --argjson hop_interval "$HY2_HOP_INTERVAL" \
     '{
-      schema:3,role:"japan-hub",protocol_mode:$mode,public_ip:$ip,listen_port:$port,
+      schema:4,role:"japan-hub",protocol_mode:$mode,public_ip:$ip,listen_port:$port,
       sni:$sni,direct_base_name:$direct_base,xray_version:$xray_version,
-      sing_box_version:$sing_version,hy2_limit_mbps:$limit,vless:$vless,hy2:$hy2,relays:[],upstream_relays:[],temporary_nodes:[],
+      sing_box_version:$sing_version,hy2_limit_mbps:$limit,
+      port_hopping:{enabled:($mode=="dual" or $mode=="hy2"),ports:$hop_ports,hop_interval_seconds:$hop_interval},
+      vless:$vless,hy2:$hy2,relays:[],upstream_relays:[],temporary_nodes:[],
       relay_manager_enabled:false,created_at:$now,updated_at:$now
     }' > "$STATE_FILE"
   chmod 600 "$STATE_FILE"
@@ -1032,6 +1065,11 @@ verify_sing_runtime() {
   mode_has_hy2 || return 0
   local port tmp_dir file slot
   port="$(jq -r '.listen_port' "$STATE_FILE")"
+  systemctl is-active --quiet vvv-hy2-port-hop.service || { echo "错误：Hysteria 2 端口跳跃服务未运行。" >&2; return 1; }
+  python3 "$HY2_HOP_ENGINE" status | jq -e '.active==true' >/dev/null 2>&1 || {
+    echo "错误：Hysteria 2 nftables 端口跳跃规则未生效。" >&2
+    return 1
+  }
   systemctl is-active --quiet sing-box || { echo "错误：主 sing-box 服务未运行。" >&2; return 1; }
   ss -H -lnup "sport = :${port}" 2>/dev/null | grep -qi sing-box || {
     echo "错误：主 Hysteria 2 端口 ${port} 未监听。" >&2
@@ -1083,6 +1121,7 @@ activate_initial_state() {
     chmod 640 "$cert" "$key"
     runuser -u sing-box -- "$SING_BOX" check -c "$SING_CFG" || return 1
     systemctl daemon-reload
+    systemctl restart vvv-hy2-port-hop.service || return 1
     systemctl restart sing-box || return 1
     sync_hy2_slot_services "$STATE_FILE" "$STATE_FILE" || return 1
     sleep 2
@@ -1394,139 +1433,9 @@ apply_candidate_with_rollback() {
 
 generate_client_files() {
   local state_path="$1" relay_id="$2" out_dir="$3" kind="${4:-relay}"
-  mkdir -p "$out_dir"
-  python3 - "$state_path" "$relay_id" "$out_dir" "$kind" "$HY2_LIMIT_MBPS" <<'PY_CLIENTS'
-import json, re, sys
-from pathlib import Path
-from urllib.parse import quote, urlencode
-
-def protocol_name(base, proto):
-    m=re.match(r"^([A-Z]{2})-(.+)$", base)
-    if m:
-        return f"{m.group(1)}-{proto}-{m.group(2)}"
-    if re.match(r"^\d+\.\d+\.\d+\.\d+:\d+$", base):
-        return f"{proto}-{base}"
-    return f"{base}-{proto}"
-
-def loon_q(value):
-    return '"'+str(value).replace('\\','\\\\').replace('"','\\"')+'"'
-
-def loon_name(value):
-    return str(value).replace('=','-').replace('\n',' ').replace('\r',' ')
-
-state=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-rid=sys.argv[2]; out=Path(sys.argv[3]); kind=sys.argv[4]; limit_mbps=int(sys.argv[5])
-out.mkdir(parents=True,exist_ok=True)
-mode=state["protocol_mode"]; ip=state["public_ip"]; port=int(state["listen_port"]); sni=state["sni"]
-relay=None; upstream=None
-if kind=="direct":
-    base=state["direct_base_name"]
-    enabled_vless=mode in ("dual","vless")
-    enabled_hy2=mode in ("dual","hy2")
-elif kind=="relay":
-    relay=next(x for x in state.get("relays",[]) if x["id"]==rid)
-    raw_name=str(relay.get("name") or "")
-    country=raw_name[:2].upper() if len(raw_name)>=3 and raw_name[:2].isalpha() and raw_name[2]=="-" else ""
-    base=(country+"-" if country else "")+f"中转-{ip}:{port}"
-    enabled_vless=relay.get("vless") is not None
-    enabled_hy2=relay.get("hy2") is not None
-elif kind=="upstream":
-    upstream=next(x for x in state.get("upstream_relays",[]) if x["id"]==rid)
-    base=upstream["name"]
-    enabled_vless=True
-    enabled_hy2=False
-else:
-    raise SystemExit(f"unknown client kind: {kind}")
-
-qx_lines=[]; share_links=[]; loon_lines=[]; clash_entries=[]
-
-if enabled_vless:
-    v=state["vless"]
-    if kind=="direct": uuid=v["direct_user"]["uuid"]
-    elif kind=="relay": uuid=relay["vless"]["client_uuid"]
-    else: uuid=upstream["client_uuid"]
-    name=protocol_name(base,"VLESS")
-    udp_enabled=(kind != "upstream")
-    qx=f"vless={ip}:{port}, method=none, password={uuid}, obfs=over-tls, obfs-host={sni}, reality-base64-pubkey={v['reality']['public_key']}, reality-hex-shortid={v['reality']['short_id']}, vless-flow=xtls-rprx-vision, fast-open=false, udp-relay={'true' if udp_enabled else 'false'}, tag={name}"
-    params=[("encryption","none"),("flow","xtls-rprx-vision"),("security","reality"),("sni",sni),("fp","chrome"),("pbk",v["reality"]["public_key"]),("sid",v["reality"]["short_id"]),("type","tcp"),("headerType","none")]
-    uri=f"vless://{uuid}@{ip}:{port}?{urlencode(params)}#{quote(name,safe='')}"
-    loon=f"{loon_name(name)} = VLESS,{ip},{port},{loon_q(uuid)},transport=tcp,flow=xtls-rprx-vision,public-key={loon_q(v['reality']['public_key'])},short-id={v['reality']['short_id']},udp={'true' if udp_enabled else 'false'},over-tls=true,sni={sni},skip-cert-verify=true"
-    clash=f'''  - name: "{name}"
-    type: vless
-    server: {ip}
-    port: {port}
-    uuid: {uuid}
-    network: tcp
-    udp: {'true' if udp_enabled else 'false'}
-    tls: true
-    flow: xtls-rprx-vision
-    encryption: ""
-    servername: {sni}
-    client-fingerprint: chrome
-    skip-cert-verify: true
-    reality-opts:
-      public-key: {v["reality"]["public_key"]}
-      short-id: "{v["reality"]["short_id"]}"
-'''
-    qx_lines.append(qx); share_links.append((name,uri)); loon_lines.append(loon); clash_entries.append(clash)
-
-if enabled_hy2:
-    h=state["hy2"]
-    password=h["direct_user"]["password"] if kind=="direct" else relay["hy2"]["client_password"]
-    name=protocol_name(base,"HY2")
-    share_params=[("obfs","salamander"),("obfs-password",h["obfs_password"]),("sni",h["server_name"]),("insecure","1"),("pinSHA256",h["certificate_pin_hex"])]
-    uri=f"hysteria2://{quote(password,safe='')}@{ip}:{port}/?{urlencode(share_params)}#{quote(name,safe='')}"
-    loon=f"{loon_name(name)} = Hysteria2,{ip},{port},{loon_q(password)},skip-cert-verify=true,sni={h['server_name']},udp=true,fast-open=true,salamander-password={h['obfs_password']}"
-    clash=f'''  - name: "{name}"
-    type: hysteria2
-    server: {ip}
-    port: {port}
-    password: "{password}"
-    up: "{limit_mbps} Mbps"
-    down: "{limit_mbps} Mbps"
-    obfs: salamander
-    obfs-password: "{h["obfs_password"]}"
-    sni: {h["server_name"]}
-    skip-cert-verify: true
-    fingerprint: "{h["certificate_fingerprint"]}"
-    alpn:
-      - h3
-    udp: true
-'''
-    share_links.append((name,uri)); loon_lines.append(loon); clash_entries.append(clash)
-
-qx_text="\n".join(qx_lines)
-share_text="\n".join(uri for _,uri in share_links)
-loon_text="\n".join(loon_lines)
-clash_text="proxies:\n"+"".join(clash_entries)
-
-title="日本 VPS 直连节点" if kind=="direct" else (f"中转节点：{base}" if kind=="relay" else f"动态代理中转节点：{base}")
-lines=[title,"="*36,f"日本入口：{ip}:{port}",f"客户端加密协议：VLESS + XTLS Vision + REALITY" if kind=="upstream" else f"安装模式：{mode}"]
-if enabled_hy2:
-    lines += [f"Hysteria 2 服务端硬上限：上行 {limit_mbps} Mbps / 下行 {limit_mbps} Mbps"]
-if kind=="relay": lines += [f"最终落地：{relay['remote_ip']}:{relay['remote_port']}"]
-if kind=="upstream":
-    lines += [f"上游代理：{upstream['protocol_label']} {upstream['host']}:{upstream['port']}","UDP：服务器端拒绝，防止绕过上游出口"]
-if qx_lines: lines += ["","【Quantumult X】",qx_text]
-if share_links:
-    lines += ["","【Loon / Shadowrocket】","Loon 原生配置：",loon_text,"","分享链接："]
-    for name,uri in share_links: lines += [f"[{name}]",uri]
-if clash_entries: lines += ["","【Clash Verge Rev / Mihomo】",clash_text]
-if clash_entries: lines += ["","【NekoBoxForAndroid（Clash Meta）】",clash_text]
-summary="\n".join(lines).rstrip()+"\n"
-
-(out/"客户端节点.txt").write_text(summary,encoding="utf-8")
-(out/"Quantumult-X.conf").write_text((qx_text+"\n") if qx_text else "",encoding="utf-8")
-(out/"Loon.conf").write_text((loon_text+"\n") if loon_text else "",encoding="utf-8")
-(out/"Loon-Shadowrocket.txt").write_text((share_text+"\n") if share_text else "",encoding="utf-8")
-# 同时保留旧文件名，便于已有运维习惯和第三方工具读取。
-(out/"Shadowrocket.txt").write_text((share_text+"\n") if share_text else "",encoding="utf-8")
-(out/"Clash-Verge-Rev.yaml").write_text(clash_text,encoding="utf-8")
-(out/"NekoBoxForAndroid.yaml").write_text(clash_text,encoding="utf-8")
-print(summary,end="")
-PY_CLIENTS
-  chmod 700 "$out_dir"
-  chmod 600 "$out_dir"/*
+  [[ -x "$CLIENT_PACKAGE_RENDERER" && -x "$CLIENT_ADAPTER" ]] || fail "统一客户端渲染模块不存在。"
+  python3 "$CLIENT_PACKAGE_RENDERER" \
+    --state "$state_path" --kind "$kind" --id "$relay_id" --out "$out_dir" --adapter "$CLIENT_ADAPTER"
 }
 
 generate_direct_client_files() {
@@ -1995,6 +1904,65 @@ prompt_new_upstream_relay() {
   prepare_add_or_overwrite_upstream "$proxy_protocol" "$host" "$port" "$username" "$password" "$node_name"
 }
 
+
+quick_add_usage() {
+  local command_name="$1"
+  cat <<EOF_QUICK_USAGE
+用法错误：必须提供一个完整参数。
+
+正确格式：
+${command_name} '线路名称|主机:端口:用户名:密码'
+
+示例：
+${command_name} '英国动态IP代理|gw.dataimpulse.com:10000:用户名:密码'
+
+注意：
+必须使用英文单引号包住完整参数。
+线路名称和代理地址之间必须包含一个英文竖线 | 。
+EOF_QUICK_USAGE
+}
+
+quick_add_upstream() {
+  local command_name="${1:-}" proxy_protocol="${2:-}"
+  shift 2 || true
+  if (( $# != 1 )); then
+    quick_add_usage "${command_name:-addhttp}"
+    return 2
+  fi
+  local raw="$1" pipe_count name spec parsed host port username password parse_error
+  pipe_count="$(python3 - "$raw" <<'PY_PIPE_COUNT'
+import sys
+print(sys.argv[1].count('|'))
+PY_PIPE_COUNT
+)"
+  if [[ "$pipe_count" != 1 ]]; then
+    echo "格式错误：没有收到完整的“线路名称|代理地址”参数。" >&2
+    echo "这通常是因为没有使用英文单引号，导致 | 被 Bash 当成管道符，或参数中的 | 数量不正确。" >&2
+    echo >&2
+    quick_add_usage "$command_name" >&2
+    return 2
+  fi
+  name="${raw%%|*}"; spec="${raw#*|}"
+  name="$(printf '%s' "$name" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  spec="$(printf '%s' "$spec" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  if [[ -z "$name" || -z "$spec" || ${#name} -gt 64 || "$name" == *$'\n'* || "$name" == *$'\r'* || "$name" == *$'\t'* ]]; then
+    echo "格式错误：线路名称和代理地址都不能为空，名称必须是 1-64 个字符且不能包含控制字符。" >&2
+    quick_add_usage "$command_name" >&2
+    return 2
+  fi
+  parsed="$(mktemp --suffix=.json /tmp/vvv-quick-upstream.XXXXXX)"
+  TMP_FILES+=("$parsed")
+  if ! parse_error="$(parse_upstream_spec "$spec" "$parsed" 2>&1)"; then
+    echo "格式错误：$parse_error" >&2
+    quick_add_usage "$command_name" >&2
+    return 2
+  fi
+  host="$(jq -r '.host' "$parsed")"; port="$(jq -r '.port' "$parsed")"
+  username="$(jq -r '.username' "$parsed")"; password="$(jq -r '.password' "$parsed")"
+  CURRENT_STEP="使用 ${command_name} 新建或覆盖动态代理线路"
+  prepare_add_or_overwrite_upstream "$proxy_protocol" "$host" "$port" "$username" "$password" "$name"
+}
+
 require_relay_subscription_registration() {
   [[ -s /etc/vvv/client.json ]] || fail "中转主机尚未注册订阅中心。请先在 vps 菜单完成订阅中心注册，再新建 VPS 副机中转线路。"
   [[ -x /usr/local/lib/vvv/sync_agent.py ]] || fail "订阅同步程序不存在，无法为 JPR3 生成受限注册票据。"
@@ -2035,7 +2003,9 @@ payload={
  "relay_id":r["id"],"node_name":r["name"],
  "japan_public_ip":s["public_ip"],"japan_port":int(s["listen_port"]),
  "remote_public_ip":r["remote_ip"],"remote_public_port":int(r["remote_port"]),
- "sni":s["sni"],"hy2_limit_mbps":int(s.get("hy2_limit_mbps") or 50),"xray_version":s["xray_version"],"sing_box_version":s["sing_box_version"],
+ "sni":s["sni"],"hy2_limit_mbps":int(s.get("hy2_limit_mbps") or 50),
+ "japan_port_hopping":s.get("port_hopping") or {"enabled":False,"ports":str(s["listen_port"]),"hop_interval_seconds":30},
+ "xray_version":s["xray_version"],"sing_box_version":s["sing_box_version"],
  "vless":None,"hy2":None,"subscription_bootstrap":subscription_bootstrap,
  "issued_at":datetime.now(timezone.utc).isoformat()
 }
@@ -2749,12 +2719,29 @@ install_shortcuts() {
 cat /root/日本VPS-客户端节点.txt
 EOF_SHOW
   chmod 700 /usr/local/sbin/jp-show-nodes
+  cat > /usr/local/sbin/addhttp <<'EOF_ADDHTTP'
+#!/usr/bin/env bash
+exec /usr/local/sbin/jp-relay-manager --add-upstream addhttp http "$@"
+EOF_ADDHTTP
+  cat > /usr/local/sbin/addhttps <<'EOF_ADDHTTPS'
+#!/usr/bin/env bash
+exec /usr/local/sbin/jp-relay-manager --add-upstream addhttps http "$@"
+EOF_ADDHTTPS
+  cat > /usr/local/sbin/addsocks <<'EOF_ADDSOCKS'
+#!/usr/bin/env bash
+exec /usr/local/sbin/jp-relay-manager --add-upstream addsocks socks "$@"
+EOF_ADDSOCKS
+  cat > /usr/local/sbin/addsocks5 <<'EOF_ADDSOCKS5'
+#!/usr/bin/env bash
+exec /usr/local/sbin/jp-relay-manager --add-upstream addsocks5 socks "$@"
+EOF_ADDSOCKS5
+  chmod 700 /usr/local/sbin/addhttp /usr/local/sbin/addhttps /usr/local/sbin/addsocks /usr/local/sbin/addsocks5
   install_temp_cleanup_timer
 }
 
 check_runtime_environment() {
   [[ -f "$STATE_FILE" ]] || fail "尚未完成日本 VPS 初始化。"
-  jq -e '.schema==3 and .role=="japan-hub" and (.relays|type=="array") and ((.upstream_relays // [])|type=="array")' "$STATE_FILE" >/dev/null || fail "JPR3 状态文件损坏。"
+  jq -e '(.schema==3 or .schema==4) and .role=="japan-hub" and (.relays|type=="array") and ((.upstream_relays // [])|type=="array")' "$STATE_FILE" >/dev/null || fail "JPR3 状态文件损坏。"
   command -v jq >/dev/null || fail "缺少 jq。"
   if mode_has_vless; then
     [[ -x "$XRAY" && -f "$XRAY_CFG" ]] || fail "VLESS 已启用，但 Xray 文件不完整。"
@@ -2784,7 +2771,9 @@ bootstrap() {
     INSTALL_MODE="$(jq -r '.protocol_mode' "$STATE_FILE")"
     INSTALL_PORT="$(jq -r '.listen_port' "$STATE_FILE")"
     HY2_LIMIT_MBPS="$(jq -r '.hy2_limit_mbps // 50' "$STATE_FILE")"
-    echo "检测到现有 JPR3 状态：模式=${INSTALL_MODE}，端口=${INSTALL_PORT}，HY2 每连接强制上限=${HY2_LIMIT_MBPS}M。"
+    HY2_PORTS="$(jq -r '.port_hopping.ports // (.listen_port|tostring)' "$STATE_FILE")"
+    HY2_HOP_INTERVAL="$(jq -r '.port_hopping.hop_interval_seconds // 30' "$STATE_FILE")"
+    echo "检测到现有 JPR3 状态：模式=${INSTALL_MODE}，端口=${INSTALL_PORT}，HY2 跳跃=${HY2_PORTS}，每连接强制上限=${HY2_LIMIT_MBPS}M。"
   fi
 
   CURRENT_STEP="刷新软件源并安装依赖"; log "$CURRENT_STEP"; upgrade_system_once
@@ -2821,7 +2810,8 @@ bootstrap() {
   mode_has_vless && echo "Xray-core：v$("$XRAY" version 2>/dev/null | awk 'NR==1{print $2}')（${XRAY_VERSION_SOURCE}）"
   mode_has_hy2 && echo "sing-box：v$("$SING_BOX" version 2>/dev/null | awk '/sing-box version/{print $3;exit}')（${SING_BOX_VERSION_SOURCE}）"
   mode_has_vless && echo "VLESS + REALITY：TCP/$(jq -r '.listen_port' "$STATE_FILE")，Xray=$(systemctl is-active xray)"
-  mode_has_hy2 && echo "Hysteria 2：UDP/$(jq -r '.listen_port' "$STATE_FILE")，sing-box=$(systemctl is-active sing-box)"
+  mode_has_hy2 && echo "Hysteria 2：UDP/$(jq -r '.port_hopping.ports' "$STATE_FILE") → $(jq -r '.listen_port' "$STATE_FILE")，每 $(jq -r '.port_hopping.hop_interval_seconds' "$STATE_FILE") 秒切换，sing-box=$(systemctl is-active sing-box)"
+  mode_has_hy2 && echo "重要：请在云厂商安全组及外部防火墙放行 UDP $(jq -r '.port_hopping.ports' "$STATE_FILE")。"
   echo "时区：Asia/Shanghai"
   systemctl is-active --quiet daily-reboot.timer 2>/dev/null && echo "每天北京时间 06:00 自动重启" || echo "自动重启：当前环境未启用"
   echo "以后重新显示日本直连节点：jp-show-nodes"
@@ -2840,6 +2830,12 @@ case "$RUN_MODE" in
     acquire_manager_lock
     install_shortcuts
     management_menu
+    ;;
+  --add-upstream)
+    CURRENT_STEP="检查日本运行环境"; check_runtime_environment
+    acquire_manager_lock
+    install_shortcuts
+    quick_add_upstream "${@:2}"
     ;;
   *)
     bootstrap

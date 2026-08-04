@@ -67,12 +67,14 @@ def vless_node(name, server, port, uuid, sni, public_key, short_id, udp=True):
     }
 
 
-def hy2_node(name, server, port, password, sni, obfs, pin='', fingerprint='', limit=50):
+def hy2_node(name, server, port, password, sni, obfs, pin='', fingerprint='', limit=50,
+             ports=None, hop_interval=30):
     return {
         'name': protocol_name(name, 'HY2'), 'protocol': 'hysteria2',
         'server': str(server), 'port': int(port), 'password': str(password),
         'sni': str(sni), 'obfs_password': str(obfs), 'pin': str(pin),
         'fingerprint': str(fingerprint), 'limit_mbps': int(limit), 'udp': True,
+        'ports': str(ports or port), 'hop_interval_seconds': int(hop_interval or 30),
     }
 
 
@@ -90,6 +92,9 @@ def main_contexts(state, root='/'):
     port = int(state.get('listen_port') or 0)
     sni = state.get('sni')
     limit = int(state.get('hy2_limit_mbps') or 50)
+    port_hopping = state.get('port_hopping') or {}
+    hop_ports = str(port_hopping.get('ports') or port)
+    hop_interval = int(port_hopping.get('hop_interval_seconds') or 30)
     vless = state.get('vless') or {}
     hy2 = state.get('hy2') or {}
     reality = vless.get('reality') or {}
@@ -103,7 +108,8 @@ def main_contexts(state, root='/'):
             nodes.append(hy2_node(base, server, port, h_password,
                                   hy2.get('server_name'), hy2.get('obfs_password'),
                                   hy2.get('certificate_pin_hex', ''),
-                                  hy2.get('certificate_fingerprint', ''), limit))
+                                  hy2.get('certificate_fingerprint', ''), limit,
+                                  hop_ports, hop_interval))
         return nodes
 
     direct_nodes = build(
@@ -172,6 +178,9 @@ def landing_contexts(state, root='/'):
     country = raw_name[:2].upper() if len(raw_name) >= 3 and raw_name[:2].isalpha() and raw_name[2] == '-' else ''
     name = (country + '-' if country else '') + f'中转-{server}:{port}'
     limit = int(state.get('hy2_limit_mbps') or 50)
+    port_hopping = state.get('japan_port_hopping') or {}
+    hop_ports = str(port_hopping.get('ports') or port)
+    hop_interval = int(port_hopping.get('hop_interval_seconds') or 30)
     nodes = []
     vless = state.get('vless') or {}
     hy2 = state.get('hy2') or {}
@@ -183,7 +192,8 @@ def landing_contexts(state, root='/'):
         nodes.append(hy2_node(name, server, port, hy2.get('japan_client_password'),
                               hy2.get('japan_server_name'), hy2.get('japan_obfs_password'),
                               hy2.get('japan_certificate_pin_hex', ''),
-                              hy2.get('japan_certificate_fingerprint', ''), limit))
+                              hy2.get('japan_certificate_fingerprint', ''), limit,
+                              hop_ports, hop_interval))
     return [{
         'id': 'landing', 'title': '中转客户端节点',
         'metadata': [f'线路：{name}', f'日本入口：{server}:{port}',
@@ -254,6 +264,7 @@ def atomic_write(path, data, mode=0o600):
 
 
 def render_context(context, adapter, obsolete=()):
+    obsolete = tuple(set(obsolete) | {'Loon-Shadowrocket.txt', 'NekoBoxForAndroid.yaml'})
     directory = Path(context['directory'])
     directory.mkdir(parents=True, exist_ok=True)
     os.chmod(directory, 0o700)

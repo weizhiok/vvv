@@ -30,9 +30,10 @@ def load(name, path):
 
 def sample_state():
     return {
-        'schema': 3, 'role': 'japan-hub', 'protocol_mode': 'dual',
+        'schema': 4, 'role': 'japan-hub', 'protocol_mode': 'dual',
         'public_ip': '198.51.100.10', 'listen_port': 443, 'sni': 'www.softbank.jp',
         'hy2_limit_mbps': 65, 'direct_base_name': 'JP-198.51.100.10:443',
+        'port_hopping': {'enabled': True, 'ports': '443,20000-50000', 'hop_interval_seconds': 30},
         'vless': {'reality': {'public_key': 'pub', 'short_id': '0123456789abcdef'},
                   'direct_user': {'uuid': '11111111-1111-4111-8111-111111111111'}},
         'hy2': {'server_name': 'jp-hy2.local', 'obfs_password': 'obfs', 'certificate_pin_hex': 'aa' * 32,
@@ -150,7 +151,7 @@ def test_node_names_and_clients():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         center.CFG = root / 'config.json'; center.DATA = root; center.HOSTS = root / 'hosts'; center.OUT = root / 'out'
-        center.REGISTRY = root / 'registry.json'; center.OVERRIDES = root / 'overrides.json'; center.BACKUP = root / 'missing.py'
+        center.REGISTRY = root / 'registry.json'; center.OVERRIDES = root / 'overrides.json'; center.ORDER = root / 'node-order.json'; center.BACKUP = root / 'missing.py'
         center.HOSTS.mkdir(); center.CFG.write_text('{}'); center.REGISTRY.write_text('{"hosts":[]}'); center.OVERRIDES.write_text('{}')
         doc = {'host_id': 'host-00000001', 'role': 'center-relay', 'state': sample_state()}
         center.atomic_json(center.HOSTS / 'host-00000001.json', doc)
@@ -165,15 +166,26 @@ def test_node_names_and_clients():
         rendered = adapters.render('clash', center.all_nodes())
         require(adapters.render('nekobox', center.all_nodes()) == rendered, 'NekoBox 没有使用 Clash Meta 格式')
         require('65 Mbps' in rendered, 'HY2 客户端模板未使用节点限速')
+        require('ports: "443,20000-50000"' in rendered and 'hop-interval: 30' in rendered,
+                'Mihomo 客户端模板缺少 HY2 端口跳跃')
+        loon = adapters.render('loon', center.all_nodes())
+        require('server-ports="443,20000-50000"' in loon and 'block-quic=true' in loon,
+                'Loon 客户端模板缺少 HY2 端口跳跃')
         shadow = base64.b64decode(adapters.render('shadowrocket', center.all_nodes())).decode()
         require('vless://' in shadow and 'hysteria2://' in shadow, '客户端订阅渲染不完整')
     host = read('core-src/host.sh')
     landing = read('core-src/landing.sh')
+    adapter = read('core-src/client_adapters.py')
+    package = read('core-src/client_package_renderer.py')
     bootstrap = read('core-src/bootstrap.sh')
-    require('NekoBoxForAndroid.yaml' in host and '【NekoBoxForAndroid（Clash Meta）】' in host,
-            '主机本地配置缺少 NekoBox')
-    require('NekoBoxForAndroid.yaml' in landing and '【NekoBoxForAndroid（Clash Meta）】' in landing,
-            '中转副机本地配置缺少 NekoBox')
+    require('NekoBoxForAndroid.txt' in adapter and "'nekobox-uri'" in adapter,
+            '本地配置缺少 NekoBox 独立分享链接')
+    require('Loon-Shadowrocket.txt' in package and 'NekoBoxForAndroid.yaml' in package,
+            '统一渲染器没有清理旧客户端输出')
+    require('client_package_renderer.py' in host and 'client_package_renderer.py' in bootstrap,
+            '主机或安装器没有接入统一客户端渲染器')
+    require('generate_client_files' in landing and 'CLIENT_PACKAGE_RENDERER' in landing,
+            '中转副机没有接入统一客户端渲染器')
     require('组合角色只允许在全新系统安装' in bootstrap and '中转副机只允许在全新系统安装' in bootstrap,
             '全新安装角色边界不完整')
 

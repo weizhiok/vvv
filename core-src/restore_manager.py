@@ -24,7 +24,7 @@ BACKUP_RE = re.compile(r'^VVV_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_[A-Za-z0-9_-]{
 ALLOWED_EXACT = {
     'manifest.json',
     'etc/vvv-sub/config.json', 'etc/vvv-sub/cloud.json', 'etc/vvv-sub/cloudflared.token',
-    'var/lib/vvv-sub/registry.json', 'var/lib/vvv-sub/node-overrides.json',
+    'var/lib/vvv-sub/registry.json', 'var/lib/vvv-sub/node-overrides.json', 'var/lib/vvv-sub/node-order.json',
     'etc/jp-relay/state.json', 'etc/jp-relay/landing-state.json', 'etc/jp-relay/pairing-key.txt',
     'var/lib/vvv-sub/relay-tickets.json',
     'etc/vvv/client.json', 'etc/vvv/roles.json',

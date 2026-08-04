@@ -22,6 +22,8 @@ python3 -m py_compile \
   "$ROOT/core-src/sync_agent.py" \
   "$ROOT/core-src/backup_manager.py" \
   "$ROOT/core-src/client_adapters.py" \
+  "$ROOT/core-src/client_package_renderer.py" \
+  "$ROOT/core-src/hy2_port_hop.py" \
   "$ROOT/core-src/adapter_manager.py" \
   "$ROOT/core-src/restore_manager.py" \
   "$ROOT/core-src/diagnostic_report.py" \
@@ -68,6 +70,10 @@ source "$WORK/manager-lib.sh"
 XRAY="$TEST_XRAY"
 SING_BOX="$TEST_SING_BOX"
 HY2_LIMIT_MBPS=50
+install -m755 "$ROOT/core-src/client_package_renderer.py" "$WORK/client_package_renderer.py"
+install -m755 "$ROOT/core-src/client_adapters.py" "$WORK/client_adapters.py"
+CLIENT_PACKAGE_RENDERER="$WORK/client_package_renderer.py"
+CLIENT_ADAPTER="$WORK/client_adapters.py"
 
 log 'Build fixed main and isolated slot fixtures'
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 -nodes -days 7 \
@@ -109,14 +115,20 @@ generate_client_files "$WORK/state-active.json" "" "$WORK/client-files" direct >
 [[ -s "$WORK/client-files/Loon.conf" ]]
 [[ -s "$WORK/client-files/Shadowrocket.txt" ]]
 [[ -s "$WORK/client-files/Clash-Verge-Rev.yaml" ]]
-[[ -s "$WORK/client-files/NekoBoxForAndroid.yaml" ]]
-cmp "$WORK/client-files/Clash-Verge-Rev.yaml" "$WORK/client-files/NekoBoxForAndroid.yaml"
+[[ -s "$WORK/client-files/NekoBoxForAndroid.txt" ]]
+[[ ! -e "$WORK/client-files/NekoBoxForAndroid.yaml" ]]
+[[ ! -e "$WORK/client-files/Loon-Shadowrocket.txt" ]]
 ! find "$WORK/client-files" -maxdepth 1 -type f -iname '*v2*' | grep -q .
 grep -q '^vless=' "$WORK/client-files/Quantumult-X.conf"
 grep -q 'Hysteria2' "$WORK/client-files/Loon.conf"
+grep -q 'server-ports="24443,30000-30031"' "$WORK/client-files/Loon.conf"
 grep -q '^hysteria2://' "$WORK/client-files/Shadowrocket.txt"
+grep -q '24443,30000-30031' "$WORK/client-files/Shadowrocket.txt"
 grep -q 'type: hysteria2' "$WORK/client-files/Clash-Verge-Rev.yaml"
-grep -q 'type: hysteria2' "$WORK/client-files/NekoBoxForAndroid.yaml"
+grep -q 'ports: "24443,30000-30031"' "$WORK/client-files/Clash-Verge-Rev.yaml"
+grep -q 'hop-interval: 30' "$WORK/client-files/Clash-Verge-Rev.yaml"
+grep -q '^hy2://' "$WORK/client-files/NekoBoxForAndroid.txt"
+grep -q '24443,30000-30031' "$WORK/client-files/NekoBoxForAndroid.txt"
 ! find "$WORK/client-files" -type f -name '*二维码*' | grep -q .
 [[ "$(find "$WORK/vless-empty" -type f | wc -l)" -eq 0 ]]
 [[ "$(find "$WORK/hy2-empty" -type f | wc -l)" -eq 0 ]]

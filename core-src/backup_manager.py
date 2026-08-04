@@ -31,6 +31,7 @@ CONFIG_FILES = [
     Path('/etc/vvv-sub/config.json'),
     Path('/var/lib/vvv-sub/registry.json'),
     Path('/var/lib/vvv-sub/node-overrides.json'),
+    Path('/var/lib/vvv-sub/node-order.json'),
     Path('/var/lib/vvv-sub/hosts'),
     Path('/etc/jp-relay/state.json'),
     Path('/etc/jp-relay/landing-state.json'),
