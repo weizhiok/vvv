@@ -36,9 +36,10 @@ def install_runtime(root):
 
 def sample_main_state():
     return {
-        'schema': 3, 'role': 'japan-hub', 'protocol_mode': 'dual',
+        'schema': 4, 'role': 'japan-hub', 'protocol_mode': 'dual',
         'public_ip': '198.51.100.10', 'listen_port': 443, 'sni': 'www.softbank.jp',
         'hy2_limit_mbps': 50, 'direct_base_name': 'JP-198.51.100.10:443',
+        'port_hopping': {'enabled': True, 'ports': '443,20000-50000', 'hop_interval_seconds': 30},
         'vless': {
             'reality': {'public_key': 'public-key', 'short_id': '0123456789abcdef'},
             'direct_user': {'uuid': '11111111-1111-4111-8111-111111111111'},
@@ -71,6 +72,7 @@ def sample_landing_state():
         'japan_public_ip': '198.51.100.10', 'japan_port': 443,
         'remote_public_ip': '203.0.113.20', 'remote_public_port': 443,
         'sni': 'www.softbank.jp', 'hy2_limit_mbps': 50,
+        'japan_port_hopping': {'enabled': True, 'ports': '443,20000-50000', 'hop_interval_seconds': 30},
         'vless': {
             'japan_client_uuid': '22222222-2222-4222-8222-222222222222',
             'japan_reality_public_key': 'public-key',
@@ -105,6 +107,25 @@ def verify_protected(root, values):
                 f'客户端升级修改了受保护文件：{absolute}')
 
 
+def seed_obsolete_outputs(directory):
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / 'NekoBoxForAndroid.yaml').write_text('obsolete\n', encoding='utf-8')
+    (directory / 'Loon-Shadowrocket.txt').write_text('obsolete\n', encoding='utf-8')
+
+
+def verify_new_outputs(directory, role):
+    neko = directory / 'NekoBoxForAndroid.txt'
+    require(neko.is_file(), f'{role}缺少 NekoBox 独立分享链接输出')
+    require('hy2://' in neko.read_text(encoding='utf-8'), f'{role} NekoBox 输出缺少 hy2:// 链接')
+    require(not (directory / 'NekoBoxForAndroid.yaml').exists(), f'{role}未清理旧 NekoBox YAML')
+    require(not (directory / 'Loon-Shadowrocket.txt').exists(), f'{role}未清理旧混合分享文件')
+    loon = (directory / 'Loon.conf').read_text(encoding='utf-8')
+    require('server-ports="443,20000-50000"' in loon, f'{role} Loon 输出缺少端口跳跃')
+    clash = (directory / 'Clash-Verge-Rev.yaml').read_text(encoding='utf-8')
+    require('ports: "443,20000-50000"' in clash and 'hop-interval: 30' in clash,
+            f'{role} Mihomo 输出缺少端口跳跃')
+
+
 def test_main_role_upgrade():
     engine = load('upgrade_engine_test', CORE / 'client_upgrade_engine.py')
     engine.validate_restricted_source(CORE / 'client_adapters.py')
@@ -114,14 +135,19 @@ def test_main_role_upgrade():
         state = root / 'etc/jp-relay/state.json'
         state.parent.mkdir(parents=True)
         state.write_text(json.dumps(sample_main_state(), ensure_ascii=False), encoding='utf-8')
+        direct_dir = root / 'root/日本VPS-直连客户端配置'
+        relay_dir = root / 'root/relay-packages/relay-1'
+        seed_obsolete_outputs(direct_dir)
+        seed_obsolete_outputs(relay_dir)
         protected = make_protected_files(root)
         state_hash = digest(state)
         payload = engine.apply_candidate(CORE / 'client_adapters.py', 'https://example.test/client_upgrade.py', root)
         require(payload['protected_proxy_files_unchanged'], '主机客户端升级没有通过保护检查')
         require(digest(state) == state_hash, '主机状态被客户端升级修改')
         verify_protected(root, protected)
-        require((root / 'root/日本VPS-直连客户端配置/NekoBoxForAndroid.yaml').is_file(), '主机缺少 NekoBox 输出')
-        require((root / 'root/relay-packages/relay-1/客户端节点.txt').is_file(), '中转线路本机输出未重新生成')
+        verify_new_outputs(direct_dir, '主机')
+        verify_new_outputs(relay_dir, '中转线路')
+        require((relay_dir / '客户端节点.txt').is_file(), '中转线路本机输出未重新生成')
         text = (root / 'root/日本VPS-客户端节点.txt').read_text(encoding='utf-8')
         require('NekoBoxForAndroid' in text and 'Quantumult X' in text, '主机汇总缺少客户端')
 
@@ -134,12 +160,14 @@ def test_landing_role_upgrade():
         state = root / 'etc/jp-relay/landing-state.json'
         state.parent.mkdir(parents=True)
         state.write_text(json.dumps(sample_landing_state(), ensure_ascii=False), encoding='utf-8')
+        output_dir = root / 'root/中转客户端配置'
+        seed_obsolete_outputs(output_dir)
         protected = make_protected_files(root)
         state_hash = digest(state)
         engine.apply_candidate(CORE / 'client_adapters.py', 'https://example.test/client_upgrade.py', root)
         require(digest(state) == state_hash, '中转副机状态被客户端升级修改')
         verify_protected(root, protected)
-        require((root / 'root/中转客户端配置/NekoBoxForAndroid.yaml').is_file(), '中转副机缺少 NekoBox 输出')
+        verify_new_outputs(output_dir, '中转副机')
         require('NekoBoxForAndroid' in (root / 'root/中转客户端节点.txt').read_text(encoding='utf-8'),
                 '中转副机汇总缺少 NekoBox')
 
@@ -168,7 +196,8 @@ def test_menu_and_handoff_contract():
             '中转副机统一菜单缺少客户端升级')
     require(default_url in center and 'client_support_handoff' in center and 'new_chat_instruction' in center,
             '请求头调试缺少跨对话交接信息')
-    for name in ('client_upgrade_engine.py', 'client_local_renderer.py'):
+    for name in ('client_upgrade_engine.py', 'client_local_renderer.py', 'client_package_renderer.py',
+                 'hy2_port_hop.py', 'hy2_port_hop.sh'):
         require(name in installer, f'安装器没有下载 {name}')
 
 
