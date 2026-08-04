@@ -1,0 +1,51 @@
+name: Apply HY2 final runtime fixture fix
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: apply-hy2-final-runtime-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+jobs:
+  apply-test-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/hy2-port-hopping-node-management
+          fetch-depth: 0
+      - name: Apply final runtime fixture fix
+        run: python3 tools/fix_final_runtime_hy2.py
+      - name: Download declared proxy cores
+        run: |
+          set -Eeuo pipefail
+          XRAY_VERSION="$(sed -n 's/^XRAY_FALLBACK_VERSION="\([^"]*\)"/\1/p' core-src/host.sh | head -n1)"
+          SING_VERSION="$(sed -n 's/^SING_BOX_FALLBACK_VERSION="\([^"]*\)"/\1/p' core-src/host.sh | head -n1)"
+          curl -fL --retry 5 --retry-all-errors "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip" -o /tmp/xray.zip
+          unzip -q /tmp/xray.zip xray -d /tmp/xray-unpack
+          install -m755 /tmp/xray-unpack/xray /tmp/xray
+          curl -fL --retry 5 --retry-all-errors "https://github.com/SagerNet/sing-box/releases/download/v${SING_VERSION}/sing-box-${SING_VERSION}-linux-amd64.tar.gz" -o /tmp/sing-box.tgz
+          tar -xzf /tmp/sing-box.tgz -C /tmp
+          install -m755 "/tmp/sing-box-${SING_VERSION}-linux-amd64/sing-box" /tmp/sing-box
+      - name: Run final runtime validation
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          chmod +x tests/final_runtime_validation.sh
+          tests/final_runtime_validation.sh /tmp/xray /tmp/sing-box
+      - name: Prepare source-only commit
+        run: |
+          rm -f tools/fix_final_runtime_hy2.py
+          find core-src tests -type d -name __pycache__ -prune -exec rm -rf {} +
+          git checkout HEAD -- .github/workflows/apply-final-runtime-hy2-fix.yml
+      - name: Commit and push
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Update final runtime fixtures for HY2 hopping'
+          git push origin HEAD:agent/hy2-port-hopping-node-management
