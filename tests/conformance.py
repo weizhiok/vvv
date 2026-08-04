@@ -93,6 +93,15 @@ def test_transports_and_management():
     require('只有直接 HTTPS 可以切换到 Tunnel' in transport and '只有 Tunnel 可以切换到直接 HTTPS' in transport,
             '安全模式切换边界不完整')
     require("api=\"http://$(value '.public_ip'):$(value '.listen_port')\"" in transport, '副机 API 不是固定 IP 地址')
+    for token in (
+        '2>"$error_log"', 'next_progress=10', 'elapsed >= next_progress',
+        '正在等待 HTTPS 证书和统一订阅入口就绪',
+        'HTTPS 证书和统一订阅入口已就绪，共等待',
+        '最近一次 curl 错误', 'journalctl -u caddy.service -n 80 --no-pager',
+    ):
+        require(token in transport, f'HTTPS 就绪等待输出缺少：{token}')
+    require('check_public_once && return 0' not in transport, '健康检查仍直接显示中间 curl 错误')
+    require('attempt % 10' not in transport, '健康检查仍使用旧的 20 秒进度输出')
 
 
 def test_hy2_server_hard_limit():
