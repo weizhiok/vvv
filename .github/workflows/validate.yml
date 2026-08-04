@@ -38,6 +38,10 @@ jobs:
         run: |
           chmod +x tests/test_deleted_slot_reclaim.sh
           tests/test_deleted_slot_reclaim.sh
+      - name: Validate complete node lifecycle transactions
+        run: |
+          chmod +x tests/test_node_lifecycle.sh
+          tests/test_node_lifecycle.sh
       - name: Download declared proxy cores
         run: |
           set -Eeuo pipefail

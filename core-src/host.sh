@@ -1000,32 +1000,61 @@ PY_BUILD_SING
 
 verify_xray_runtime() {
   mode_has_vless || return 0
-  local port
+  local port tmp_dir file slot
   port="$(jq -r '.listen_port' "$STATE_FILE")"
-  systemctl is-active --quiet xray || return 1
-  ss -H -lntp "sport = :${port}" 2>/dev/null | grep -qi xray || return 1
-  while IFS= read -r port; do
-    [[ -z "$port" ]] && continue
-    ss -H -lntp "sport = :${port}" 2>/dev/null | grep -qi xray || return 1
-  done < <(jq -r '.relays[]?.vless.test_socks_port // empty' "$STATE_FILE")
-  while IFS= read -r port; do
-    [[ -z "$port" ]] && continue
-    ss -H -lntp "sport = :${port}" 2>/dev/null | grep -qi xray || return 1
-  done < <(jq -r '.upstream_relays[]?.test_socks_port // empty' "$STATE_FILE")
+  systemctl is-active --quiet xray || { echo "错误：主 Xray 服务未运行。" >&2; return 1; }
+  ss -H -lntp "sport = :${port}" 2>/dev/null | grep -qi xray || {
+    echo "错误：主 Xray 端口 ${port} 未监听。" >&2
+    return 1
+  }
+
+  # 验证对象必须与槽位生成器完全一致；历史 assigned_id 只是不可复用墓碑，不代表服务应在线。
+  tmp_dir="$(mktemp -d /tmp/vvv-verify-vless.XXXXXX)"
+  TMP_FILES+=("$tmp_dir")
+  build_vless_slot_configs "$STATE_FILE" "$tmp_dir"
+  for file in "$tmp_dir"/*.json; do
+    [[ -e "$file" ]] || break
+    slot="$(basename "$file" .json)"
+    systemctl is-active --quiet "vvv-vless-slot@${slot}.service" || {
+      echo "错误：VLESS 活跃槽位 ${slot} 服务未运行。" >&2
+      return 1
+    }
+    port="$(jq -r '.inbounds[0].port' "$file")"
+    ss -H -lntp "sport = :${port}" 2>/dev/null | grep -qi xray || {
+      echo "错误：VLESS 活跃槽位 ${slot} 的本地端口 ${port} 未监听。" >&2
+      return 1
+    }
+  done
   return 0
 }
 
 verify_sing_runtime() {
   mode_has_hy2 || return 0
-  local port slot
+  local port tmp_dir file slot
   port="$(jq -r '.listen_port' "$STATE_FILE")"
-  systemctl is-active --quiet sing-box || return 1
-  ss -H -lnup "sport = :${port}" 2>/dev/null | grep -qi sing-box || return 1
-  while IFS=$'\t' read -r slot port; do
-    [[ -n "$slot" && -n "$port" ]] || continue
-    systemctl is-active --quiet "vvv-hy2-slot@${slot}.service" || return 1
-    ss -H -lntp "sport = :${port}" 2>/dev/null | grep -qi sing-box || return 1
-  done < <(jq -r '.hy2.reserve_users[]? | select(.assigned_id!=null) | [.slot,(.local_port|tostring)] | @tsv' "$STATE_FILE")
+  systemctl is-active --quiet sing-box || { echo "错误：主 sing-box 服务未运行。" >&2; return 1; }
+  ss -H -lnup "sport = :${port}" 2>/dev/null | grep -qi sing-box || {
+    echo "错误：主 Hysteria 2 端口 ${port} 未监听。" >&2
+    return 1
+  }
+
+  # 只验证能从现存正式线路或临时节点生成配置的活跃槽位。
+  tmp_dir="$(mktemp -d /tmp/vvv-verify-hy2.XXXXXX)"
+  TMP_FILES+=("$tmp_dir")
+  build_hy2_slot_configs "$STATE_FILE" "$tmp_dir"
+  for file in "$tmp_dir"/*.json; do
+    [[ -e "$file" ]] || break
+    slot="$(basename "$file" .json)"
+    systemctl is-active --quiet "vvv-hy2-slot@${slot}.service" || {
+      echo "错误：HY2 活跃槽位 ${slot} 服务未运行。" >&2
+      return 1
+    }
+    port="$(jq -r '.inbounds[0].listen_port' "$file")"
+    ss -H -lntp "sport = :${port}" 2>/dev/null | grep -qi sing-box || {
+      echo "错误：HY2 活跃槽位 ${slot} 的本地端口 ${port} 未监听。" >&2
+      return 1
+    }
+  done
   return 0
 }
 
@@ -1150,44 +1179,63 @@ EOF_VLESS_SLOT_SERVICE
 }
 
 sync_vless_slot_services() {
-  local old_state="$1" new_state="$2" old_dir new_dir slot file changed
-  old_dir="$(mktemp -d /tmp/vvv-vless-old.XXXXXX)"; new_dir="$(mktemp -d /tmp/vvv-vless-new.XXXXXX)"
-  TMP_FILES+=("$old_dir" "$new_dir")
-  build_vless_slot_configs "$old_state" "$old_dir"
+  local old_state="$1" new_state="$2" new_dir file link slot changed port unit
+  : "$old_state"
+  new_dir="$(mktemp -d /tmp/vvv-vless-new.XXXXXX)"
+  TMP_FILES+=("$new_dir")
   build_vless_slot_configs "$new_state" "$new_dir"
   install_vless_slot_service
+
   for file in "$new_dir"/*.json; do
     [[ -e "$file" ]] || break
     "$XRAY" run -test -format=json -config "$file"
   done
-  for file in "$old_dir"/*.json; do
+
+  # 以候选状态生成的配置为唯一事实来源，清理真实文件和遗留的 systemd 启用链接。
+  for file in /etc/vvv-slots/vless/*.json; do
     [[ -e "$file" ]] || break
     slot="$(basename "$file" .json)"
     if [[ ! -f "$new_dir/${slot}.json" ]]; then
       systemctl disable --now "vvv-vless-slot@${slot}.service" >/dev/null 2>&1 || true
-      rm -f "/etc/vvv-slots/vless/${slot}.json"
+      rm -f -- "$file"
     fi
   done
+  for link in /etc/systemd/system/multi-user.target.wants/vvv-vless-slot@*.service; do
+    [[ -e "$link" || -L "$link" ]] || break
+    unit="${link##*/}"; slot="${unit#vvv-vless-slot@}"; slot="${slot%.service}"
+    if [[ ! -f "$new_dir/${slot}.json" ]]; then
+      systemctl disable --now "$unit" >/dev/null 2>&1 || true
+      rm -f -- "$link" "/etc/vvv-slots/vless/${slot}.json"
+    fi
+  done
+  systemctl daemon-reload
+
   for file in "$new_dir"/*.json; do
     [[ -e "$file" ]] || break
     slot="$(basename "$file" .json)"; changed=1
     [[ ! -f "/etc/vvv-slots/vless/${slot}.json" ]] || cmp -s "$file" "/etc/vvv-slots/vless/${slot}.json" && changed=0
     install -o root -g xray -m640 "$file" "/etc/vvv-slots/vless/${slot}.json"
+    systemctl enable "vvv-vless-slot@${slot}.service" >/dev/null
     if (( changed==1 )); then
-      systemctl enable "vvv-vless-slot@${slot}.service" >/dev/null
       systemctl restart "vvv-vless-slot@${slot}.service"
     else
       systemctl start "vvv-vless-slot@${slot}.service"
     fi
   done
+
   sleep 2
   for file in "$new_dir"/*.json; do
     [[ -e "$file" ]] || break
     slot="$(basename "$file" .json)"
-    systemctl is-active --quiet "vvv-vless-slot@${slot}.service" || return 1
-    local port
+    systemctl is-active --quiet "vvv-vless-slot@${slot}.service" || {
+      echo "错误：VLESS 活跃槽位 ${slot} 服务未运行。" >&2
+      return 1
+    }
     port="$(jq -r '.inbounds[0].port' "$file")"
-    ss -H -lntp "sport = :${port}" 2>/dev/null | grep -qi xray || return 1
+    ss -H -lntp "sport = :${port}" 2>/dev/null | grep -qi xray || {
+      echo "错误：VLESS 活跃槽位 ${slot} 的本地端口 ${port} 未监听。" >&2
+      return 1
+    }
   done
 }
 
@@ -1226,25 +1274,38 @@ PY_HY2_SLOTS
 }
 
 sync_hy2_slot_services() {
-  local old_state="$1" new_state="$2" old_dir new_dir file slot changed port
-  old_dir="$(mktemp -d /tmp/vvv-hy2-old.XXXXXX)"; new_dir="$(mktemp -d /tmp/vvv-hy2-new.XXXXXX)"
-  TMP_FILES+=("$old_dir" "$new_dir")
-  build_hy2_slot_configs "$old_state" "$old_dir"
+  local old_state="$1" new_state="$2" new_dir file link slot changed port unit
+  : "$old_state"
+  new_dir="$(mktemp -d /tmp/vvv-hy2-new.XXXXXX)"
+  TMP_FILES+=("$new_dir")
   build_hy2_slot_configs "$new_state" "$new_dir"
   install -d -o root -g sing-box -m750 /etc/vvv-slots/hy2
   [[ -f /etc/systemd/system/vvv-hy2-slot@.service ]] || { fail "HY2 槽位 systemd 模板不存在。"; return 1; }
+
   for file in "$new_dir"/*.json; do
     [[ -e "$file" ]] || break
     "$SING_BOX" check -c "$file"
   done
-  for file in "$old_dir"/*.json; do
+
+  # 以候选状态生成的配置为唯一事实来源，清理真实文件和遗留的 systemd 启用链接。
+  for file in /etc/vvv-slots/hy2/*.json; do
     [[ -e "$file" ]] || break
     slot="$(basename "$file" .json)"
     if [[ ! -f "$new_dir/${slot}.json" ]]; then
       systemctl disable --now "vvv-hy2-slot@${slot}.service" >/dev/null 2>&1 || true
-      rm -f "/etc/vvv-slots/hy2/${slot}.json"
+      rm -f -- "$file"
     fi
   done
+  for link in /etc/systemd/system/multi-user.target.wants/vvv-hy2-slot@*.service; do
+    [[ -e "$link" || -L "$link" ]] || break
+    unit="${link##*/}"; slot="${unit#vvv-hy2-slot@}"; slot="${slot%.service}"
+    if [[ ! -f "$new_dir/${slot}.json" ]]; then
+      systemctl disable --now "$unit" >/dev/null 2>&1 || true
+      rm -f -- "$link" "/etc/vvv-slots/hy2/${slot}.json"
+    fi
+  done
+  systemctl daemon-reload
+
   for file in "$new_dir"/*.json; do
     [[ -e "$file" ]] || break
     slot="$(basename "$file" .json)"; changed=1
@@ -1257,13 +1318,20 @@ sync_hy2_slot_services() {
       systemctl start "vvv-hy2-slot@${slot}.service"
     fi
   done
+
   sleep 2
   for file in "$new_dir"/*.json; do
     [[ -e "$file" ]] || break
     slot="$(basename "$file" .json)"
-    systemctl is-active --quiet "vvv-hy2-slot@${slot}.service" || return 1
+    systemctl is-active --quiet "vvv-hy2-slot@${slot}.service" || {
+      echo "错误：HY2 活跃槽位 ${slot} 服务未运行。" >&2
+      return 1
+    }
     port="$(jq -r '.inbounds[0].listen_port' "$file")"
-    ss -H -lntp "sport = :${port}" 2>/dev/null | grep -qi sing-box || return 1
+    ss -H -lntp "sport = :${port}" 2>/dev/null | grep -qi sing-box || {
+      echo "错误：HY2 活跃槽位 ${slot} 的本地端口 ${port} 未监听。" >&2
+      return 1
+    }
   done
 }
 
@@ -1273,6 +1341,14 @@ apply_candidate_with_rollback() {
   candidate_xray="$(mktemp --suffix=.json /tmp/vvv-new-xray.XXXXXX)"; candidate_sing="$(mktemp --suffix=.json /tmp/vvv-new-sing.XXXXXX)"
   TMP_FILES+=("$old_state" "$old_xray" "$old_sing" "$candidate_xray" "$candidate_sing")
   cp -a "$STATE_FILE" "$old_state"; [[ ! -f "$XRAY_CFG" ]] || cp -a "$XRAY_CFG" "$old_xray"; [[ ! -f "$SING_CFG" ]] || cp -a "$SING_CFG" "$old_sing"
+  if ! validate_slot_references "$candidate_state"; then
+    fail "候选线路状态引用校验失败，未修改任何运行配置。"
+    return 1
+  fi
+  if ! validate_slot_references "$candidate_state"; then
+    fail "候选线路状态引用校验失败，未修改任何运行配置。"
+    return 1
+  fi
   release_orphaned_vless_slots "$candidate_state"; release_orphaned_hy2_slots "$candidate_state"
   vvv_event_backup before-line-change
   if mode_has_vless "$(jq -r '.protocol_mode' "$candidate_state")"; then
@@ -1556,6 +1632,176 @@ release_orphaned_hy2_slots() {
   [[ "$(jq -r '.hy2 // empty' "$state_path")" != "" ]] || return 0
   jq -e '[.hy2.reserve_users[]?.assigned_id | select(.!=null)] as $ids | ($ids|length)==($ids|unique|length)' "$state_path" >/dev/null || fail "Hysteria 2 固定槽位存在重复占用。"
   # 删除线路后保留 assigned_id 作为退役标记，防止旧用户名和密码在未来被其他线路复用。
+}
+
+validate_slot_references() {
+  local state_path="$1"
+  python3 - "$state_path" <<'PY_VALIDATE_SLOT_REFERENCES'
+import collections
+import json
+import sys
+from pathlib import Path
+
+state = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+relays = {str(x.get('id')): x for x in state.get('relays', [])}
+upstreams = {str(x.get('id')): x for x in state.get('upstream_relays', [])}
+temps = {str(x.get('id')): x for x in state.get('temporary_nodes', [])}
+
+all_ids = list(relays) + list(upstreams) + list(temps)
+duplicates = [x for x, n in collections.Counter(all_ids).items() if n > 1]
+if duplicates:
+    raise SystemExit('线路和临时节点 ID 重复：' + ', '.join(sorted(duplicates)))
+
+pools = {}
+for proto in ('vless', 'hy2'):
+    root = state.get(proto) or {}
+    slots = root.get('reserve_users', [])
+    slot_ids = [str(x.get('slot') or '') for x in slots]
+    if any(not x for x in slot_ids):
+        raise SystemExit(f'{proto.upper()} 固定槽位存在空 slot。')
+    repeated_slots = [x for x, n in collections.Counter(slot_ids).items() if n > 1]
+    if repeated_slots:
+        raise SystemExit(f'{proto.upper()} 固定槽位编号重复：' + ', '.join(sorted(repeated_slots)))
+    assigned = [str(x.get('assigned_id')) for x in slots if x.get('assigned_id') is not None]
+    repeated_ids = [x for x, n in collections.Counter(assigned).items() if n > 1]
+    if repeated_ids:
+        raise SystemExit(f'{proto.upper()} 固定槽位存在重复占用：' + ', '.join(sorted(repeated_ids)))
+    pools[proto] = {str(x['slot']): x for x in slots}
+
+claimed = set()
+
+def claim(proto, entity_id, reserve_slot, label):
+    if not reserve_slot:
+        raise SystemExit(f'{label} 缺少 {proto.upper()} reserve_slot。')
+    slot = pools.get(proto, {}).get(str(reserve_slot))
+    if slot is None:
+        raise SystemExit(f'{label} 引用了不存在的 {proto.upper()} 槽位 {reserve_slot}。')
+    if str(slot.get('assigned_id') or '') != str(entity_id):
+        raise SystemExit(
+            f'{label} 与 {proto.upper()} 槽位 {reserve_slot} 的 assigned_id 不一致：'
+            f'{slot.get("assigned_id")!r}'
+        )
+    key = (proto, str(reserve_slot))
+    if key in claimed:
+        raise SystemExit(f'{proto.upper()} 活跃槽位 {reserve_slot} 被多个节点引用。')
+    claimed.add(key)
+
+for rid, relay in relays.items():
+    if relay.get('vless') is not None:
+        claim('vless', rid, (relay.get('vless') or {}).get('reserve_slot'), f'VPS 中转线路 {rid}')
+    if relay.get('hy2') is not None:
+        claim('hy2', rid, (relay.get('hy2') or {}).get('reserve_slot'), f'VPS 中转线路 {rid}')
+
+for uid, upstream in upstreams.items():
+    claim('vless', uid, upstream.get('reserve_slot'), f'上游中转线路 {uid}')
+
+for tid, temp in temps.items():
+    source_type = temp.get('source_type')
+    source_id = str(temp.get('source_id') or '')
+    if source_type == 'vps':
+        source = relays.get(source_id)
+    elif source_type == 'upstream':
+        source = upstreams.get(source_id)
+    else:
+        raise SystemExit(f'临时节点 {tid} 的 source_type 无效。')
+    if source is None:
+        raise SystemExit(f'临时节点 {tid} 的来源 {source_id} 已不存在。')
+    if temp.get('vless') is not None:
+        if source_type == 'vps' and source.get('vless') is None:
+            raise SystemExit(f'临时节点 {tid} 请求了来源未启用的 VLESS。')
+        claim('vless', tid, (temp.get('vless') or {}).get('reserve_slot'), f'临时节点 {tid}')
+    if temp.get('hy2') is not None:
+        if source_type != 'vps' or source.get('hy2') is None:
+            raise SystemExit(f'临时节点 {tid} 请求了来源未启用的 HY2。')
+        claim('hy2', tid, (temp.get('hy2') or {}).get('reserve_slot'), f'临时节点 {tid}')
+
+print('槽位引用完整性检查通过。')
+PY_VALIDATE_SLOT_REFERENCES
+}
+
+validate_slot_references() {
+  local state_path="$1"
+  python3 - "$state_path" <<'PY_VALIDATE_SLOT_REFERENCES'
+import collections
+import json
+import sys
+from pathlib import Path
+
+state = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+relays = {str(x.get('id')): x for x in state.get('relays', [])}
+upstreams = {str(x.get('id')): x for x in state.get('upstream_relays', [])}
+temps = {str(x.get('id')): x for x in state.get('temporary_nodes', [])}
+
+all_ids = list(relays) + list(upstreams) + list(temps)
+duplicates = [x for x, n in collections.Counter(all_ids).items() if n > 1]
+if duplicates:
+    raise SystemExit('线路和临时节点 ID 重复：' + ', '.join(sorted(duplicates)))
+
+pools = {}
+for proto in ('vless', 'hy2'):
+    root = state.get(proto) or {}
+    slots = root.get('reserve_users', [])
+    slot_ids = [str(x.get('slot') or '') for x in slots]
+    if any(not x for x in slot_ids):
+        raise SystemExit(f'{proto.upper()} 固定槽位存在空 slot。')
+    repeated_slots = [x for x, n in collections.Counter(slot_ids).items() if n > 1]
+    if repeated_slots:
+        raise SystemExit(f'{proto.upper()} 固定槽位编号重复：' + ', '.join(sorted(repeated_slots)))
+    assigned = [str(x.get('assigned_id')) for x in slots if x.get('assigned_id') is not None]
+    repeated_ids = [x for x, n in collections.Counter(assigned).items() if n > 1]
+    if repeated_ids:
+        raise SystemExit(f'{proto.upper()} 固定槽位存在重复占用：' + ', '.join(sorted(repeated_ids)))
+    pools[proto] = {str(x['slot']): x for x in slots}
+
+claimed = set()
+
+def claim(proto, entity_id, reserve_slot, label):
+    if not reserve_slot:
+        raise SystemExit(f'{label} 缺少 {proto.upper()} reserve_slot。')
+    slot = pools.get(proto, {}).get(str(reserve_slot))
+    if slot is None:
+        raise SystemExit(f'{label} 引用了不存在的 {proto.upper()} 槽位 {reserve_slot}。')
+    if str(slot.get('assigned_id') or '') != str(entity_id):
+        raise SystemExit(
+            f'{label} 与 {proto.upper()} 槽位 {reserve_slot} 的 assigned_id 不一致：'
+            f'{slot.get("assigned_id")!r}'
+        )
+    key = (proto, str(reserve_slot))
+    if key in claimed:
+        raise SystemExit(f'{proto.upper()} 活跃槽位 {reserve_slot} 被多个节点引用。')
+    claimed.add(key)
+
+for rid, relay in relays.items():
+    if relay.get('vless') is not None:
+        claim('vless', rid, (relay.get('vless') or {}).get('reserve_slot'), f'VPS 中转线路 {rid}')
+    if relay.get('hy2') is not None:
+        claim('hy2', rid, (relay.get('hy2') or {}).get('reserve_slot'), f'VPS 中转线路 {rid}')
+
+for uid, upstream in upstreams.items():
+    claim('vless', uid, upstream.get('reserve_slot'), f'上游中转线路 {uid}')
+
+for tid, temp in temps.items():
+    source_type = temp.get('source_type')
+    source_id = str(temp.get('source_id') or '')
+    if source_type == 'vps':
+        source = relays.get(source_id)
+    elif source_type == 'upstream':
+        source = upstreams.get(source_id)
+    else:
+        raise SystemExit(f'临时节点 {tid} 的 source_type 无效。')
+    if source is None:
+        raise SystemExit(f'临时节点 {tid} 的来源 {source_id} 已不存在。')
+    if temp.get('vless') is not None:
+        if source_type == 'vps' and source.get('vless') is None:
+            raise SystemExit(f'临时节点 {tid} 请求了来源未启用的 VLESS。')
+        claim('vless', tid, (temp.get('vless') or {}).get('reserve_slot'), f'临时节点 {tid}')
+    if temp.get('hy2') is not None:
+        if source_type != 'vps' or source.get('hy2') is None:
+            raise SystemExit(f'临时节点 {tid} 请求了来源未启用的 HY2。')
+        claim('hy2', tid, (temp.get('hy2') or {}).get('reserve_slot'), f'临时节点 {tid}')
+
+print('槽位引用完整性检查通过。')
+PY_VALIDATE_SLOT_REFERENCES
 }
 
 prepare_add_or_overwrite() {
@@ -2149,32 +2395,146 @@ show_pairing_key() {
   echo "================================================================"
 }
 
+build_delete_candidate() {
+  local source_type="$1" source_id="$2" output="$3"
+  python3 - "$STATE_FILE" "$output" "$source_type" "$source_id" <<'PY_BUILD_DELETE_CANDIDATE'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+src, dst, source_type, source_id = sys.argv[1:]
+state = json.loads(Path(src).read_text(encoding='utf-8'))
+if source_type == 'vps':
+    collection = 'relays'
+elif source_type == 'upstream':
+    collection = 'upstream_relays'
+else:
+    raise SystemExit('删除来源类型无效。')
+
+items = state.get(collection, [])
+if not any(str(x.get('id')) == source_id for x in items):
+    raise SystemExit('准备删除的正式线路已经不存在。')
+
+removed_temps = []
+kept_temps = []
+for item in state.get('temporary_nodes', []):
+    matches = item.get('source_type') == source_type and str(item.get('source_id')) == source_id
+    if not matches:
+        kept_temps.append(item)
+        continue
+    removed_temps.append(item)
+    for proto in ('vless', 'hy2'):
+        detail = item.get(proto) or {}
+        reserve_slot = detail.get('reserve_slot')
+        if not reserve_slot:
+            continue
+        pool = (state.get(proto) or {}).get('reserve_users', [])
+        slot = next((x for x in pool if str(x.get('slot')) == str(reserve_slot)), None)
+        if slot is None:
+            raise SystemExit(f'依赖临时节点 {item.get("id")} 引用了不存在的 {proto.upper()} 槽位。')
+        if str(slot.get('assigned_id') or '') != str(item.get('id')):
+            raise SystemExit(f'依赖临时节点 {item.get("id")} 与 {proto.upper()} 槽位占用不一致。')
+        slot['assigned_id'] = None
+        slot['retired'] = True
+        slot['retired_id'] = item.get('id')
+
+state[collection] = [x for x in items if str(x.get('id')) != source_id]
+state['temporary_nodes'] = kept_temps
+state['updated_at'] = datetime.now(timezone.utc).isoformat()
+Path(dst).write_text(json.dumps(state, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+for item in removed_temps:
+    print(item.get('name') or item.get('id'))
+PY_BUILD_DELETE_CANDIDATE
+}
+
+build_delete_candidate() {
+  local source_type="$1" source_id="$2" output="$3"
+  python3 - "$STATE_FILE" "$output" "$source_type" "$source_id" <<'PY_BUILD_DELETE_CANDIDATE'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+src, dst, source_type, source_id = sys.argv[1:]
+state = json.loads(Path(src).read_text(encoding='utf-8'))
+if source_type == 'vps':
+    collection = 'relays'
+elif source_type == 'upstream':
+    collection = 'upstream_relays'
+else:
+    raise SystemExit('删除来源类型无效。')
+
+items = state.get(collection, [])
+if not any(str(x.get('id')) == source_id for x in items):
+    raise SystemExit('准备删除的正式线路已经不存在。')
+
+removed_temps = []
+kept_temps = []
+for item in state.get('temporary_nodes', []):
+    matches = item.get('source_type') == source_type and str(item.get('source_id')) == source_id
+    if not matches:
+        kept_temps.append(item)
+        continue
+    removed_temps.append(item)
+    for proto in ('vless', 'hy2'):
+        detail = item.get(proto) or {}
+        reserve_slot = detail.get('reserve_slot')
+        if not reserve_slot:
+            continue
+        pool = (state.get(proto) or {}).get('reserve_users', [])
+        slot = next((x for x in pool if str(x.get('slot')) == str(reserve_slot)), None)
+        if slot is None:
+            raise SystemExit(f'依赖临时节点 {item.get("id")} 引用了不存在的 {proto.upper()} 槽位。')
+        if str(slot.get('assigned_id') or '') != str(item.get('id')):
+            raise SystemExit(f'依赖临时节点 {item.get("id")} 与 {proto.upper()} 槽位占用不一致。')
+        slot['assigned_id'] = None
+        slot['retired'] = True
+        slot['retired_id'] = item.get('id')
+
+state[collection] = [x for x in items if str(x.get('id')) != source_id]
+state['temporary_nodes'] = kept_temps
+state['updated_at'] = datetime.now(timezone.utc).isoformat()
+Path(dst).write_text(json.dumps(state, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+for item in removed_temps:
+    print(item.get('name') or item.get('id'))
+PY_BUILD_DELETE_CANDIDATE
+}
+
 perform_delete() {
-  local relay_id="$1" name confirm candidate package_dir
+  local relay_id="$1" name confirm candidate package_dir dependent_names
+  CURRENT_STEP="删除 VPS 副机中转线路"
   name="$(jq -r --arg id "$relay_id" '.relays[]|select(.id==$id)|.name' "$STATE_FILE")"
   read -r -p "确认删除“${name}”？输入 Y 确认：" confirm
   case "$confirm" in [Yy]) ;; *) echo "已取消删除。"; return 0;; esac
   candidate="$(mktemp --suffix=.json /tmp/jp-delete.XXXXXX)"
   TMP_FILES+=("$candidate")
-  jq --arg id "$relay_id" --arg now "$(date --iso-8601=seconds)" \
-    '.relays |= map(select(.id!=$id)) | .updated_at=$now' "$STATE_FILE" > "$candidate"
+  dependent_names="$(build_delete_candidate vps "$relay_id" "$candidate")"
   package_dir="${PACKAGE_ROOT}/${relay_id}"
   apply_candidate_with_rollback "$candidate" "$package_dir"
   echo "线路“${name}”已删除。"
+  if [[ -n "$dependent_names" ]]; then
+    echo "同时清理了依赖该线路的临时节点："
+    while IFS= read -r item; do [[ -z "$item" ]] || echo "  - $item"; done <<<"$dependent_names"
+  fi
 }
 
 perform_delete_upstream() {
-  local upstream_id="$1" name confirm candidate package_dir
+  local upstream_id="$1" name confirm candidate package_dir dependent_names
+  CURRENT_STEP="删除 HTTP/HTTPS/SOCKS5 中转线路"
   name="$(jq -r --arg id "$upstream_id" '.upstream_relays[]|select(.id==$id)|.name' "$STATE_FILE")"
   read -r -p "确认删除“${name}”？输入 Y 确认：" confirm
   case "$confirm" in [Yy]) ;; *) echo "已取消删除。"; return 0;; esac
   candidate="$(mktemp --suffix=.json /tmp/jp-upstream-delete.XXXXXX)"
   TMP_FILES+=("$candidate")
-  jq --arg id "$upstream_id" --arg now "$(date --iso-8601=seconds)" \
-    '.upstream_relays |= map(select(.id!=$id)) | .updated_at=$now' "$STATE_FILE" > "$candidate"
+  dependent_names="$(build_delete_candidate upstream "$upstream_id" "$candidate")"
   package_dir="${PACKAGE_ROOT}/${upstream_id}"
   apply_candidate_with_rollback "$candidate" "$package_dir"
   echo "线路“${name}”已删除。"
+  if [[ -n "$dependent_names" ]]; then
+    echo "同时清理了依赖该线路的临时节点："
+    while IFS= read -r item; do [[ -z "$item" ]] || echo "  - $item"; done <<<"$dependent_names"
+  fi
 }
 
 upstream_submenu() {
