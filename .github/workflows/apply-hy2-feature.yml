@@ -18,6 +18,19 @@ jobs:
         with:
           ref: agent/hy2-port-hopping-node-management
           fetch-depth: 0
+      - name: Normalize one-shot patch matching
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tools/apply_hy2_feature.py')
+          text = path.read_text(encoding='utf-8')
+          start = text.index("replace_once('core-src/host.sh',\n'''    ca-certificates")
+          end = text.index("\n\nreplace_once('core-src/host.sh',", start + 1)
+          old = 'iproute2 procps ' + chr(92) + '\n'
+          new = 'iproute2 procps nftables ' + chr(92) + '\n'
+          call = "replace_once('core-src/host.sh',\n    " + repr(old) + ",\n    " + repr(new) + ")"
+          path.write_text(text[:start] + call + text[end:], encoding='utf-8')
+          PY
       - name: Apply integration patch
         run: python3 tools/apply_hy2_feature.py
       - name: Compile Python modules
