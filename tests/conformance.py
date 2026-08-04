@@ -180,11 +180,27 @@ def test_landing_and_direct_ip_change():
     require('generic_probe' in probe and 'curl_socks' in probe and '真实连接成功' in probe, '节点检测器不完整')
 
 
+def test_embedded_python_heredocs():
+    validator = load('embedded_python_validator_test', ROOT / 'src' / 'validate_embedded_python.py')
+    shell_files = [
+        ROOT / 'core-src' / name for name in (
+            'bootstrap.sh', 'host.sh', 'landing.sh', 'center_install.sh',
+            'register_sync.sh', 'vvv_manager.sh', 'rclone_manager.sh',
+            'center_transport.sh', 'center_manager.sh',
+        )
+    ]
+    count = validator.validate_paths(shell_files)
+    require(count >= 1, '没有验证任何 Shell 内嵌 Python')
+    bootstrap = read('core-src/bootstrap.sh')
+    require('print(file=f)' in bootstrap, '角色 JSON 写入仍依赖易损坏的反斜杠换行')
+
+
 def test_installer_and_diagnostics():
     installer = read('vvv-install.sh')
     validation = read('tests/final_runtime_validation.sh')
-    for name in ('restore_manager.py', 'diagnostic_report.py', 'node_probe.py'):
+    for name in ('restore_manager.py', 'diagnostic_report.py', 'node_probe.py', 'validate_embedded_python.py'):
         require(name in installer, f'安装器没有下载：{name}')
+    require('Shell 内嵌 Python 语法检查失败' in installer, '安装器没有在执行前检查 heredoc Python')
     diag = read('core-src/diagnostic_report.py')
     for token in ('VVV-诊断报告', 'SENSITIVE_KEYS', '最近错误日志', '云备份目录', 'vvv-temp-cleanup.timer'):
         require(token in diag, f'诊断报告缺少：{token}')
@@ -204,7 +220,7 @@ def main():
         test_transports_and_management, test_hy2_server_hard_limit,
         test_temporary_nodes_are_local_copies_only, test_config_only_backup_and_restore,
         test_node_names_and_clients, test_landing_and_direct_ip_change,
-        test_installer_and_diagnostics, test_no_qr_and_debian13,
+        test_embedded_python_heredocs, test_installer_and_diagnostics, test_no_qr_and_debian13,
     ]
     for test in tests:
         test(); print('PASS', test.__name__)
