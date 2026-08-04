@@ -204,7 +204,7 @@ def register(code, role):
     return save_registration(role, public_api, api_base, response, 'VVC1')
 
 
-def sync():
+def sync(emit=True):
     cfg = read(CFG)
     if not cfg:
         raise SystemExit('尚未配置订阅同步。')
@@ -220,7 +220,9 @@ def sync():
     if response.get('subscription_url'):
         cfg['subscription_url'] = response['subscription_url']
     atomic(CFG, cfg)
-    print(json.dumps(response, ensure_ascii=False))
+    if emit:
+        print(json.dumps(response, ensure_ascii=False))
+    return response
 
 
 def request_relay_ticket(relay_id):
@@ -231,7 +233,7 @@ def request_relay_ticket(relay_id):
     if not cfg:
         raise SystemExit('中转主机尚未注册订阅中心，无法生成一码注册票据。')
     try:
-        sync()
+        sync(emit=False)
     except Exception as exc:
         raise SystemExit(f'生成 JPR3 前同步中转线路失败：{exc}') from exc
     cfg = read(CFG) or cfg
