@@ -6,7 +6,7 @@ import json
 import re
 from urllib.parse import quote, urlencode
 
-VERSION = 3
+VERSION = 4
 DEFAULT_UPGRADE_URL = (
     "https://raw.githubusercontent.com/weizhiok/vvv/client-support/client_upgrade.py"
 )
@@ -42,7 +42,27 @@ def vless_uri(node):
     )
 
 
-def hy2_uri(node):
+def hy2_ports(node):
+    value = str(node.get('ports') or node.get('port_hopping_ports') or node['port']).strip()
+    return value or str(node['port'])
+
+
+def hy2_hop_interval(node):
+    try:
+        value = int(node.get('hop_interval_seconds') or 30)
+    except (TypeError, ValueError):
+        value = 30
+    return max(5, value)
+
+
+def endpoint_authority(server, ports):
+    host = str(server)
+    if ':' in host and not host.startswith('['):
+        host = f'[{host}]'
+    return f'{host}:{ports}'
+
+
+def hy2_uri(node, scheme='hysteria2'):
     params = [
         ('obfs', 'salamander'),
         ('obfs-password', node['obfs_password']),
@@ -52,8 +72,8 @@ def hy2_uri(node):
     if node.get('pin'):
         params.append(('pinSHA256', node['pin']))
     return (
-        f"hysteria2://{quote(node['password'], safe='')}@"
-        f"{node['server']}:{node['port']}/?{urlencode(params)}#"
+        f"{scheme}://{quote(node['password'], safe='')}@"
+        f"{endpoint_authority(node['server'], hy2_ports(node))}/?{urlencode(params)}#"
         f"{quote(node['name'], safe='')}"
     )
 
@@ -64,6 +84,22 @@ def render_share(nodes):
         for node in nodes
     )
     return text + ('\n' if text else '')
+
+
+def render_shadowrocket_uris(nodes):
+    lines = [
+        vless_uri(node) if node['protocol'] == 'vless' else hy2_uri(node, 'hysteria2')
+        for node in nodes
+    ]
+    return '\n'.join(lines) + ('\n' if lines else '')
+
+
+def render_nekobox_uris(nodes):
+    lines = [
+        vless_uri(node) if node['protocol'] == 'vless' else hy2_uri(node, 'hy2')
+        for node in nodes
+    ]
+    return '\n'.join(lines) + ('\n' if lines else '')
 
 
 def render_quantumultx(nodes):
@@ -93,17 +129,18 @@ def render_loon(nodes):
         else:
             lines.append(
                 f"{loon_name(node['name'])} = Hysteria2,{node['server']},{node['port']},"
-                f"{loon_q(node['password'])},skip-cert-verify=true,sni={node['sni']},"
-                f"udp=true,fast-open=true,salamander-password={loon_q(node['obfs_password'])}"
+                f"{node['password']},sni={node['sni']},skip-cert-verify=true,fast-open=true,"
+                f"salamander-password={node['obfs_password']},server-ports={loon_q(hy2_ports(node))},"
+                f"udp=true,block-quic=true"
             )
     return '\n'.join(lines) + ('\n' if lines else '')
 
 
 def render_shadowrocket(nodes):
-    return b64std(render_share(nodes)) + '\n'
+    return b64std(render_shadowrocket_uris(nodes)) + '\n'
 
 
-def render_clash(nodes):
+def render_mihomo_yaml(nodes):
     lines = ['mixed-port: 7890', 'allow-lan: false', 'mode: rule', 'log-level: info', 'proxies:']
     names = []
     for node in nodes:
@@ -134,6 +171,8 @@ def render_clash(nodes):
                 '    type: hysteria2',
                 f'    server: {node["server"]}',
                 f'    port: {node["port"]}',
+                f'    ports: {json.dumps(hy2_ports(node))}',
+                f'    hop-interval: {hy2_hop_interval(node)}',
                 f'    password: {json.dumps(node["password"])}',
                 f'    up: "{limit} Mbps"',
                 f'    down: "{limit} Mbps"',
@@ -162,22 +201,34 @@ def render_clash(nodes):
     return '\n'.join(lines)
 
 
+def render_clash(nodes):
+    return render_mihomo_yaml(nodes)
+
+
+def render_nekobox(nodes):
+    # NekoBox subscription detection explicitly requests Clash Meta format, but it
+    # has an independent renderer contract so future app-specific changes do not
+    # silently alter Clash Verge Rev output.
+    return render_mihomo_yaml(nodes)
+
+
 RENDERERS = {
     'clash': {'render': render_clash, 'content_type': 'text/yaml; charset=utf-8'},
-    'nekobox': {'render': render_clash, 'content_type': 'text/yaml; charset=utf-8'},
+    'nekobox': {'render': render_nekobox, 'content_type': 'text/yaml; charset=utf-8'},
+    'nekobox-uri': {'render': render_nekobox_uris, 'content_type': 'text/plain; charset=utf-8'},
     'quantumultx': {'render': render_quantumultx, 'content_type': 'text/plain; charset=utf-8'},
     'loon': {'render': render_loon, 'content_type': 'text/plain; charset=utf-8'},
     'shadowrocket': {'render': render_shadowrocket, 'content_type': 'text/plain; charset=utf-8'},
+    'shadowrocket-uri': {'render': render_shadowrocket_uris, 'content_type': 'text/plain; charset=utf-8'},
     'share': {'render': render_share, 'content_type': 'text/plain; charset=utf-8'},
 }
 
 LOCAL_OUTPUTS = [
     {'filename': 'Quantumult-X.conf', 'format': 'quantumultx', 'display_name': 'Quantumult X'},
     {'filename': 'Loon.conf', 'format': 'loon', 'display_name': 'Loon'},
-    {'filename': 'Loon-Shadowrocket.txt', 'format': 'share', 'display_name': 'Loon / Shadowrocket 分享链接'},
-    {'filename': 'Shadowrocket.txt', 'format': 'share', 'display_name': 'Shadowrocket 分享链接'},
+    {'filename': 'Shadowrocket.txt', 'format': 'shadowrocket-uri', 'display_name': 'Shadowrocket 分享链接'},
     {'filename': 'Clash-Verge-Rev.yaml', 'format': 'clash', 'display_name': 'Clash Verge Rev / Mihomo'},
-    {'filename': 'NekoBoxForAndroid.yaml', 'format': 'nekobox', 'display_name': 'NekoBoxForAndroid（Clash Meta）'},
+    {'filename': 'NekoBoxForAndroid.txt', 'format': 'nekobox-uri', 'display_name': 'NekoBoxForAndroid 分享链接'},
 ]
 
 CLIENT_RULES = [
@@ -232,7 +283,8 @@ def smoke_test():
         },
         {
             'name': 'JP-HY2-127.0.0.1:443', 'protocol': 'hysteria2', 'server': '127.0.0.1',
-            'port': 443, 'password': 'password', 'sni': 'jp-hy2.jp-relay.local',
+            'port': 443, 'ports': '443,20000-50000', 'hop_interval_seconds': 30,
+            'password': 'password', 'sni': 'jp-hy2.jp-relay.local',
             'obfs_password': 'salamander', 'pin': 'aa' * 32, 'limit_mbps': 50, 'udp': True,
         },
     ]
@@ -243,11 +295,23 @@ def smoke_test():
     detected = detect_client({'User-Agent': 'NekoBox/Android/1.4.2 (Prefer ClashMeta Format)'})
     if not detected or detected.get('name') != 'NekoBoxForAndroid' or detected.get('format') != 'nekobox':
         raise RuntimeError('NekoBoxForAndroid 1.4.2 user agent was not recognized')
-    if render('nekobox', sample) != render('clash', sample):
-        raise RuntimeError('NekoBox renderer must remain Clash Meta compatible')
+    expected_loon = (
+        'JP-HY2-127.0.0.1:443 = Hysteria2,127.0.0.1,443,password,'
+        'sni=jp-hy2.jp-relay.local,skip-cert-verify=true,fast-open=true,'
+        'salamander-password=salamander,server-ports="443,20000-50000",udp=true,block-quic=true'
+    )
+    if expected_loon not in render('loon', sample).splitlines():
+        raise RuntimeError('Loon Hysteria 2 port hopping contract changed')
+    clash = render('clash', sample)
+    if 'ports: "443,20000-50000"' not in clash or 'hop-interval: 30' not in clash:
+        raise RuntimeError('Mihomo Hysteria 2 port hopping fields are missing')
+    if not any(line.startswith('hy2://') for line in render('nekobox-uri', sample).splitlines()):
+        raise RuntimeError('NekoBox local Hysteria 2 link must use hy2://')
     names = [item['filename'] for item in local_outputs()]
-    if len(names) != len(set(names)) or 'NekoBoxForAndroid.yaml' not in names:
+    if len(names) != len(set(names)) or 'NekoBoxForAndroid.txt' not in names:
         raise RuntimeError('local output manifest is invalid')
+    if 'Loon-Shadowrocket.txt' in names or 'NekoBoxForAndroid.yaml' in names:
+        raise RuntimeError('obsolete duplicated local outputs are still present')
     return True
 
 
