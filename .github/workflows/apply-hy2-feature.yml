@@ -1,15 +1,12 @@
 name: Apply HY2 feature integration
 on:
-  push:
-    branches:
-      - agent/hy2-port-hopping-node-management
-    paths:
-      - '.github/workflows/apply-hy2-feature.yml'
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: write
 concurrency:
-  group: apply-hy2-feature
+  group: apply-hy2-feature-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 jobs:
   apply-and-test:
