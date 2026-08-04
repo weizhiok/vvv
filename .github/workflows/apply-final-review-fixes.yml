@@ -1,0 +1,46 @@
+name: Apply final HY2 review fixes
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: apply-final-hy2-review-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+jobs:
+  apply-test-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/hy2-port-hopping-node-management
+          fetch-depth: 0
+      - name: Apply review fixes
+        run: python3 tools/final_review_fixes.py
+      - name: Validate syntax and focused behavior
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          bash -n vvv-install.sh core-src/bootstrap.sh core-src/host.sh core-src/hy2_port_hop.sh core-src/center_manager.sh
+          sh -n core-src/landing.sh
+          python3 -m py_compile core-src/hy2_port_hop.py core-src/client_package_renderer.py core-src/client_adapters.py tests/test_hy2_port_hopping.py
+          python3 tests/test_hy2_port_hopping.py
+          python3 tests/test_client_port_hopping.py
+          python3 tests/test_subscription_node_order.py
+          chmod +x tests/test_quick_upstream_commands.sh
+          tests/test_quick_upstream_commands.sh
+      - name: Prepare source-only commit
+        run: |
+          rm -f tools/final_review_fixes.py
+          find core-src tests -type d -name __pycache__ -prune -exec rm -rf {} +
+          git checkout HEAD -- .github/workflows/apply-final-review-fixes.yml
+      - name: Commit and push
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Fix fresh-install HY2 module loading'
+          git push origin HEAD:agent/hy2-port-hopping-node-management
