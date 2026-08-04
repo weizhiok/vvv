@@ -1,5 +1,5 @@
 name: Apply HY2 feature integration
-# This one-shot workflow removes itself after a successful integration commit.
+# One-shot source integration. Workflow files are finalized separately.
 on:
   pull_request:
     branches: [main]
@@ -66,8 +66,12 @@ jobs:
           chmod +x tests/test_deleted_slot_reclaim.sh tests/test_node_lifecycle.sh
           tests/test_deleted_slot_reclaim.sh
           tests/test_node_lifecycle.sh
-      - name: Remove one-shot patch machinery
-        run: rm -f tools/apply_hy2_feature.py .github/workflows/apply-hy2-feature.yml
+      - name: Prepare validated source commit
+        run: |
+          rm -f tools/apply_hy2_feature.py
+          find core-src tests -type d -name __pycache__ -prune -exec rm -rf {} +
+          git checkout HEAD -- .github/workflows/apply-hy2-feature.yml .github/workflows/validate.yml
+          chmod 644 tests/test_deleted_slot_reclaim.sh tests/test_node_lifecycle.sh
       - name: Commit integrated feature
         run: |
           git config user.name 'github-actions[bot]'
