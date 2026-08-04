@@ -1513,8 +1513,13 @@ vvv_event_backup() {
 }
 
 allocate_vless_slot() {
-  local slot_json
-  slot_json="$(jq -c '[.vless.reserve_users[] | select(.assigned_id==null and (.retired // false)==false)][0] // empty' "$STATE_FILE")"
+  local target_id="${1:-}" slot_json
+  if [[ -n "$target_id" ]]; then
+    slot_json="$(jq -c --arg id "$target_id" '[.vless.reserve_users[] | select(.assigned_id==$id)][0] // empty' "$STATE_FILE")"
+  fi
+  if [[ -z "${slot_json:-}" ]]; then
+    slot_json="$(jq -c '[.vless.reserve_users[] | select(.assigned_id==null and (.retired // false)==false)][0] // empty' "$STATE_FILE")"
+  fi
   [[ -n "$slot_json" ]] || fail "VLESS 可用固定凭证槽位已用尽（已分配或退役共 256 条）。"
   ALLOC_VLESS_SLOT="$(jq -r '.slot' <<<"$slot_json")"
   ALLOC_VLESS_UUID="$(jq -r '.uuid' <<<"$slot_json")"
@@ -1531,8 +1536,13 @@ release_orphaned_vless_slots() {
 }
 
 allocate_hy2_slot() {
-  local slot_json
-  slot_json="$(jq -c '[.hy2.reserve_users[] | select(.assigned_id==null and (.retired // false)==false)][0] // empty' "$STATE_FILE")"
+  local target_id="${1:-}" slot_json
+  if [[ -n "$target_id" ]]; then
+    slot_json="$(jq -c --arg id "$target_id" '[.hy2.reserve_users[] | select(.assigned_id==$id)][0] // empty' "$STATE_FILE")"
+  fi
+  if [[ -z "${slot_json:-}" ]]; then
+    slot_json="$(jq -c '[.hy2.reserve_users[] | select(.assigned_id==null and (.retired // false)==false)][0] // empty' "$STATE_FILE")"
+  fi
   [[ -n "$slot_json" ]] || fail "Hysteria 2 可用固定凭证槽位已用尽（已分配或退役共 256 条）。"
   ALLOC_HY2_SLOT="$(jq -r '.slot' <<<"$slot_json")"
   ALLOC_HY2_USER="$(jq -r '.name' <<<"$slot_json")"
@@ -1585,7 +1595,7 @@ PY_OVERWRITE
     local vless_json='null' hy2_json='null'
     if mode_has_vless; then
       local client_uuid client_email reserve_slot outbound_uuid key_output private_key public_key short_id
-      allocate_vless_slot
+      allocate_vless_slot "$relay_id"
       test_vless="$ALLOC_VLESS_PORT"
       client_uuid="$ALLOC_VLESS_UUID"; client_email="$ALLOC_VLESS_EMAIL"; reserve_slot="$ALLOC_VLESS_SLOT"
       outbound_uuid="$(new_uuid)"
@@ -1600,7 +1610,7 @@ PY_OVERWRITE
     fi
     if mode_has_hy2; then
       local material client_user client_password reserve_slot outbound_password outbound_obfs
-      allocate_hy2_slot
+      allocate_hy2_slot "$relay_id"
       test_hy2="$ALLOC_HY2_PORT"
       client_user="$ALLOC_HY2_USER"; client_password="$ALLOC_HY2_PASSWORD"; reserve_slot="$ALLOC_HY2_SLOT"
       material="$(mktemp --suffix=.json /tmp/jp-hy2-material.XXXXXX)"
@@ -1714,7 +1724,7 @@ PY_UPSTREAM_OVERWRITE
     echo "覆盖同名动态代理线路，并复用原 VLESS UUID。"
   else
     upstream_id="$(printf '%s:%s:%s:%s' "$node_name" "$proxy_protocol" "$host" "$port" | sha256sum | awk '{print "upstream-" substr($1,1,20)}')"
-    allocate_vless_slot
+    allocate_vless_slot "$upstream_id"
     test_port="$ALLOC_VLESS_PORT"
     client_uuid="$ALLOC_VLESS_UUID"
     python3 - "$STATE_FILE" "$candidate" "$upstream_id" "$node_name" "$proxy_protocol" "$protocol_label" "$host" "$port" "$username" "$password" "$client_uuid" "$test_port" "$exit_ip" "$now" <<'PY_UPSTREAM_NEW'
