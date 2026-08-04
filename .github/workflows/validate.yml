@@ -33,7 +33,7 @@ jobs:
       - name: Install test dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ca-certificates curl unzip jq openssl iproute2 python3-venv
+          sudo apt-get install -y -qq ca-certificates curl unzip jq openssl iproute2 nftables python3-venv
       - name: Validate deleted relay slot reclaim
         run: |
           chmod +x tests/test_deleted_slot_reclaim.sh
@@ -44,6 +44,13 @@ jobs:
           tests/test_node_lifecycle.sh
       - name: Validate lifecycle source uniqueness
         run: python3 tests/test_lifecycle_source_uniqueness.py
+      - name: Validate Hysteria 2 port hopping and client formats
+        run: |
+          python3 tests/test_hy2_port_hopping.py
+          python3 tests/test_client_port_hopping.py
+          python3 tests/test_subscription_node_order.py
+          chmod +x tests/test_quick_upstream_commands.sh
+          tests/test_quick_upstream_commands.sh
       - name: Download declared proxy cores
         run: |
           set -Eeuo pipefail
