@@ -27,6 +27,7 @@ def main():
     expect_error('443,50000-20000', 443, '起始端口')
     expect_error('443,,20000-50000', 443, '空项目')
     expect_error('20000-50000', 443, '包含实际监听端口')
+    expect_error('443', 443, '至少包含两个')
     expect_error('0,443', 443, '1–65535')
 
     rules = hop.build_ruleset('443,20000-50000', 443)

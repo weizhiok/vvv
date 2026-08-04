@@ -502,8 +502,9 @@ prompt_initial_mode_and_port() {
   if [[ "$INSTALL_MODE" == dual || "$INSTALL_MODE" == hy2 ]]; then
     local validated
     validated="$(python3 "$HY2_HOP_ENGINE" validate --spec "$HY2_PORTS" --listen-port "$INSTALL_PORT" --hop-interval "$HY2_HOP_INTERVAL")" || return 1
-    HY2_PORTS="$(jq -r '.ports' <<<"$validated")"
-    HY2_HOP_INTERVAL="$(jq -r '.hop_interval_seconds' <<<"$validated")"
+    read -r HY2_PORTS HY2_HOP_INTERVAL < <(
+      python3 -c 'import json,sys; value=json.load(sys.stdin); print(value["ports"], value["hop_interval_seconds"])' <<<"$validated"
+    )
     echo "Hysteria 2 端口跳跃：${HY2_PORTS}（每 ${HY2_HOP_INTERVAL} 秒切换）"
   fi
 }

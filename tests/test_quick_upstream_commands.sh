@@ -28,4 +28,13 @@ grep -Fq -- "pipe_count" "$HOST"
 grep -Fq -- "prepare_add_or_overwrite_upstream" "$HOST"
 grep -Fq -- "英国动态IP代理|gw.dataimpulse.com:10000:用户名:密码" "$HOST"
 
-echo "Quick upstream command contract tests passed."
+INSTALLER="$ROOT/vvv-install.sh"
+for module in client_package_renderer.py hy2_port_hop.py hy2_port_hop.sh; do
+  grep -Fq -- "$module" "$INSTALLER"
+done
+if grep -Fq -- 'jq -r ".ports"' "$ROOT/core-src/bootstrap.sh"; then
+  echo "bootstrap must not require jq before dependencies are installed" >&2
+  exit 1
+fi
+
+echo "Quick upstream command and installer contract tests passed."

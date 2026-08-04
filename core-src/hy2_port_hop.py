@@ -63,6 +63,8 @@ def parse_port_spec(spec, listen_port=None):
         else:
             raise PortSpecError(f"范围 {item} 的连字符数量不正确。")
     merged = merge_intervals(intervals)
+    if sum(end - start + 1 for start, end in merged) < 2:
+        raise PortSpecError("端口跳跃范围必须至少包含两个不同的 UDP 端口。")
     if listen_port is not None:
         listener = parse_port(listen_port)
         if not any(start <= listener <= end for start, end in merged):

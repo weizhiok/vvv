@@ -336,7 +336,7 @@ ask_proxy_parameters(){
       input="$(printf '%s' "$input" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
       [[ -n "$input" ]] || input="$default_hop"
       if result="$(python3 "$HY2_HOP_ENGINE" validate --spec "$input" --listen-port "$VVV_PROXY_PORT" --hop-interval 30 --check-udp 2>&1)"; then
-        VVV_HY2_PORTS="$(jq -r '.ports' <<<"$result")"
+        VVV_HY2_PORTS="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["ports"])' <<<"$result")"
         break
       fi
       echo "$result"
