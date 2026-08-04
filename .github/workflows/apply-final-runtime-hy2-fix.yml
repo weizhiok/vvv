@@ -1,0 +1,32 @@
+name: Clean HY2 branch artifacts
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: clean-hy2-branch-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+jobs:
+  clean-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/hy2-port-hopping-node-management
+          fetch-depth: 0
+      - name: Remove generated artifacts
+        run: |
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+          git checkout HEAD -- .github/workflows/apply-final-runtime-hy2-fix.yml
+      - name: Commit cleanup
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Remove generated Python cache'
+          git push origin HEAD:agent/hy2-port-hopping-node-management
