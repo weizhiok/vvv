@@ -42,6 +42,8 @@ jobs:
         run: |
           chmod +x tests/test_node_lifecycle.sh
           tests/test_node_lifecycle.sh
+      - name: Validate lifecycle source uniqueness
+        run: python3 tests/test_lifecycle_source_uniqueness.py
       - name: Download declared proxy cores
         run: |
           set -Eeuo pipefail
