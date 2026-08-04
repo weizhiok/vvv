@@ -2811,6 +2811,7 @@ bootstrap() {
   mode_has_hy2 && echo "sing-box：v$("$SING_BOX" version 2>/dev/null | awk '/sing-box version/{print $3;exit}')（${SING_BOX_VERSION_SOURCE}）"
   mode_has_vless && echo "VLESS + REALITY：TCP/$(jq -r '.listen_port' "$STATE_FILE")，Xray=$(systemctl is-active xray)"
   mode_has_hy2 && echo "Hysteria 2：UDP/$(jq -r '.port_hopping.ports' "$STATE_FILE") → $(jq -r '.listen_port' "$STATE_FILE")，每 $(jq -r '.port_hopping.hop_interval_seconds' "$STATE_FILE") 秒切换，sing-box=$(systemctl is-active sing-box)"
+  mode_has_hy2 && echo "重要：请在云厂商安全组及外部防火墙放行 UDP $(jq -r '.port_hopping.ports' "$STATE_FILE")。"
   echo "时区：Asia/Shanghai"
   systemctl is-active --quiet daily-reboot.timer 2>/dev/null && echo "每天北京时间 06:00 自动重启" || echo "自动重启：当前环境未启用"
   echo "以后重新显示日本直连节点：jp-show-nodes"

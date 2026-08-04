@@ -36,5 +36,7 @@ if grep -Fq -- 'jq -r ".ports"' "$ROOT/core-src/bootstrap.sh"; then
   echo "bootstrap must not require jq before dependencies are installed" >&2
   exit 1
 fi
+grep -Fq -- "var/lib/vvv-sub/node-order.json" "$ROOT/core-src/restore_manager.py"
+grep -Fq -- "云厂商安全组及外部防火墙放行 UDP" "$HOST"
 
-echo "Quick upstream command and installer contract tests passed."
+echo "Quick upstream, installer, restore, and firewall contract tests passed."

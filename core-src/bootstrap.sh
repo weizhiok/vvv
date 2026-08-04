@@ -663,6 +663,7 @@ show_parameter_summary() {
     if [[ "$VVV_PROTOCOL_MODE" != vless ]]; then
       echo "Hysteria 2 限速：${VVV_HY2_LIMIT_MBPS}M"
       echo "Hysteria 2 端口跳跃：${VVV_HY2_PORTS}（每 ${VVV_HY2_HOP_INTERVAL} 秒切换）"
+      echo "云安全组：安装完成后需放行 UDP ${VVV_HY2_PORTS}"
     fi
     if [[ "$choice" == 4 ]]; then
       landing_port="$(jpr_field "$key" remote_public_port)"
