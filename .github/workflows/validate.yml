@@ -28,6 +28,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: Validate relay ticket stdout contract
+        run: python3 tests/test_relay_ticket_stdout.py
       - name: Install test dependencies
         run: |
           sudo apt-get update -qq
