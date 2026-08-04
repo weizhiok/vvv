@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Validate quoted Python heredocs before any installer role changes the VPS.
 import argparse
 import re
 from pathlib import Path
