@@ -1,0 +1,50 @@
+name: Apply HY2 feature integration
+on:
+  push:
+    branches:
+      - agent/hy2-port-hopping-node-management
+    paths:
+      - '.github/workflows/apply-hy2-feature.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: apply-hy2-feature
+  cancel-in-progress: false
+jobs:
+  apply-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/hy2-port-hopping-node-management
+          fetch-depth: 0
+      - name: Apply integration patch
+        run: python3 tools/apply_hy2_feature.py
+      - name: Compile Python modules
+        run: python3 -m py_compile core-src/*.py tests/*.py
+      - name: Run feature tests
+        run: |
+          python3 tests/test_hy2_port_hopping.py
+          python3 tests/test_client_port_hopping.py
+          python3 tests/test_subscription_node_order.py
+          chmod +x tests/test_quick_upstream_commands.sh
+          tests/test_quick_upstream_commands.sh
+      - name: Run existing fast regression tests
+        run: |
+          python3 tests/test_relay_ticket_stdout.py
+          python3 tests/test_lifecycle_source_uniqueness.py
+          chmod +x tests/test_deleted_slot_reclaim.sh tests/test_node_lifecycle.sh
+          tests/test_deleted_slot_reclaim.sh
+          tests/test_node_lifecycle.sh
+      - name: Remove one-shot patch machinery
+        run: rm -f tools/apply_hy2_feature.py .github/workflows/apply-hy2-feature.yml
+      - name: Commit integrated feature
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Add HY2 port hopping and subscription node controls'
+          git push origin HEAD:agent/hy2-port-hopping-node-management
