@@ -24,9 +24,11 @@ hy2_slots = [
     for i in range(1, 257)
 ]
 base = {
-    'schema': 3, 'role': 'japan-hub', 'protocol_mode': 'dual',
+    'schema': 4, 'role': 'japan-hub', 'protocol_mode': 'dual',
     'public_ip': '198.51.100.10', 'listen_port': 24443, 'sni': 'www.softbank.jp',
     'direct_base_name': 'JP-198.51.100.10:24443', 'xray_version': 'audit', 'sing_box_version': 'audit',
+    'hy2_limit_mbps': 50,
+    'port_hopping': {'enabled': True, 'ports': '24443,30000-30031', 'hop_interval_seconds': 30},
     'vless': {
         'reality': {'private_key': private_key, 'public_key': public_key, 'short_id': '0123456789abcdef'},
         'direct_user': {'uuid': '11111111-1111-4111-8111-111111111111', 'email': 'jp-direct@relay.local'},
