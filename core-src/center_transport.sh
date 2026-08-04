@@ -404,13 +404,53 @@ check_public_once(){
 }
 
 check_public(){
-  local attempt
-  for attempt in $(seq 1 120); do
-    check_public_once && return 0
-    (( attempt % 10 != 0 )) || echo "统一订阅入口仍在准备：已等待 $((attempt*2)) 秒……"
+  local mode attempt started elapsed next_progress error_log
+  mode="$(value '.transport_mode')"
+  started=$SECONDS
+  next_progress=10
+  error_log="$(mktemp /tmp/vvv-public-check.XXXXXX)"
+
+  for attempt in $(seq 1 121); do
+    : > "$error_log"
+    if check_public_once 2>"$error_log"; then
+      elapsed=$((SECONDS-started))
+      case "$mode" in
+        direct-https) echo "HTTPS 证书和统一订阅入口已就绪，共等待 ${elapsed} 秒。";;
+        tunnel) echo "Cloudflare Tunnel 和统一订阅入口已就绪，共等待 ${elapsed} 秒。";;
+        *) echo "统一订阅入口已就绪，共等待 ${elapsed} 秒。";;
+      esac
+      rm -f "$error_log"
+      return 0
+    fi
+
+    elapsed=$((SECONDS-started))
+    if (( attempt == 1 )); then
+      case "$mode" in
+        direct-https) echo "正在等待 HTTPS 证书和统一订阅入口就绪……";;
+        tunnel) echo "正在等待 Cloudflare Tunnel 和统一订阅入口就绪……";;
+        *) echo "正在等待统一订阅入口就绪……";;
+      esac
+    elif (( elapsed >= next_progress )); then
+      echo "统一订阅入口仍在准备：已等待 ${elapsed} 秒……"
+      next_progress=$((((elapsed/10)+1)*10))
+    fi
+
+    (( elapsed < 240 )) || break
     sleep 2
   done
-  echo "统一订阅入口在 240 秒内未通过健康检查。" >&2
+
+  elapsed=$((SECONDS-started))
+  echo "统一订阅入口在 ${elapsed} 秒内未通过健康检查。" >&2
+  if [[ -s "$error_log" ]]; then
+    echo "最近一次 curl 错误：" >&2
+    sed 's/^/  /' "$error_log" >&2
+  fi
+  echo "Caddy 当前状态和最近日志：" >&2
+  systemctl --no-pager --full status caddy.service >&2 || true
+  journalctl -u caddy.service -n 80 --no-pager >&2 || true
+  echo "订阅中心内部服务当前状态：" >&2
+  systemctl --no-pager --full status vvv-sub.service >&2 || true
+  rm -f "$error_log"
   return 1
 }
 
