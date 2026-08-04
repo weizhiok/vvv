@@ -71,7 +71,7 @@ def main():
         renamed = sub.all_nodes()
         assert [node['name'] for node in renamed] == ['新加坡一号', '日本二号']
         assert [node['id'] for node in renamed] == list(reversed(original_ids))
-        assert (sub.OUT / 'Loon.conf').exists()
+        assert (sub.OUT / 'loon').exists()
         assert (sub.OUT / 'nodes.json').exists()
 
         expect_failure(lambda: sub.bulk_rename('重复|重复'), '不能重复')
