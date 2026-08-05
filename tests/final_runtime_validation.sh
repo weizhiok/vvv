@@ -115,20 +115,32 @@ generate_client_files "$WORK/state-active.json" "" "$WORK/client-files" direct >
 [[ -s "$WORK/client-files/Loon.conf" ]]
 [[ -s "$WORK/client-files/Shadowrocket.txt" ]]
 [[ -s "$WORK/client-files/Clash-Verge-Rev.yaml" ]]
-[[ -s "$WORK/client-files/NekoBoxForAndroid.txt" ]]
+[[ -e "$WORK/client-files/NekoBoxForAndroid.txt" ]]
+[[ ! -s "$WORK/client-files/NekoBoxForAndroid.txt" ]]
+[[ -s "$WORK/client-files/NekoBoxForAndroid-基础URI.txt" ]]
+[[ -e "$WORK/client-files/Loon-Import.txt" && ! -s "$WORK/client-files/Loon-Import.txt" ]]
 [[ ! -e "$WORK/client-files/NekoBoxForAndroid.yaml" ]]
 [[ ! -e "$WORK/client-files/Loon-Shadowrocket.txt" ]]
 ! find "$WORK/client-files" -maxdepth 1 -type f -iname '*v2*' | grep -q .
 grep -q '^vless=' "$WORK/client-files/Quantumult-X.conf"
 grep -q 'Hysteria2' "$WORK/client-files/Loon.conf"
 grep -q 'server-ports="24443,30000-30031"' "$WORK/client-files/Loon.conf"
+grep -q 'hop-interval=30' "$WORK/client-files/Loon.conf"
+grep -q 'download-bandwidth=50' "$WORK/client-files/Loon.conf"
 grep -q '^hysteria2://' "$WORK/client-files/Shadowrocket.txt"
-grep -q '24443,30000-30031' "$WORK/client-files/Shadowrocket.txt"
+grep -q 'fastopen=1' "$WORK/client-files/Shadowrocket.txt"
+grep -q 'upmbps=30' "$WORK/client-files/Shadowrocket.txt"
+grep -q 'downmbps=50' "$WORK/client-files/Shadowrocket.txt"
+grep -q 'mport=24443,30000-30031' "$WORK/client-files/Shadowrocket.txt"
 grep -q 'type: hysteria2' "$WORK/client-files/Clash-Verge-Rev.yaml"
 grep -q 'ports: "24443,30000-30031"' "$WORK/client-files/Clash-Verge-Rev.yaml"
-grep -q 'hop-interval: 30' "$WORK/client-files/Clash-Verge-Rev.yaml"
-grep -q '^hy2://' "$WORK/client-files/NekoBoxForAndroid.txt"
-grep -q '24443,30000-30031' "$WORK/client-files/NekoBoxForAndroid.txt"
+grep -q 'hop-interval: "20-30"' "$WORK/client-files/Clash-Verge-Rev.yaml"
+grep -q 'up: "30 Mbps"' "$WORK/client-files/Clash-Verge-Rev.yaml"
+grep -q 'down: "50 Mbps"' "$WORK/client-files/Clash-Verge-Rev.yaml"
+! grep -q '^proxy-groups:' "$WORK/client-files/Clash-Verge-Rev.yaml"
+! grep -q '^rules:' "$WORK/client-files/Clash-Verge-Rev.yaml"
+grep -q '^hy2://' "$WORK/client-files/NekoBoxForAndroid-基础URI.txt"
+grep -q 'mport=24443,30000-30031' "$WORK/client-files/NekoBoxForAndroid-基础URI.txt"
 ! find "$WORK/client-files" -type f -name '*二维码*' | grep -q .
 [[ "$(find "$WORK/vless-empty" -type f | wc -l)" -eq 0 ]]
 [[ "$(find "$WORK/hy2-empty" -type f | wc -l)" -eq 0 ]]
