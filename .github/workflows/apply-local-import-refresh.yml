@@ -1,0 +1,123 @@
+name: Apply local import refresh
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-local-import-refresh.yml'
+      - 'core-src/sync_agent.py'
+      - 'tests/test_client_single_node_subscription.py'
+permissions:
+  contents: write
+concurrency:
+  group: local-import-refresh-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply refresh hook and tests
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('core-src/sync_agent.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('import socket\nimport time\n', 'import socket\nimport subprocess\nimport time\n', 1)
+          text = text.replace("LANDING_STATE = Path('/etc/jp-relay/landing-state.json')\n",
+                              "LANDING_STATE = Path('/etc/jp-relay/landing-state.json')\nLOCAL_RENDERER = Path('/usr/local/lib/vvv/client_local_renderer.py')\n", 1)
+          marker = "def save_registration(role, public_api, api_base, response, method):\n"
+          helper = '''def regenerate_local_clients():
+              if not LOCAL_RENDERER.is_file():
+                  return False
+              subprocess.run(
+                  ['python3', str(LOCAL_RENDERER), 'regenerate'],
+                  check=True, timeout=90, stdout=subprocess.DEVNULL,
+              )
+              return True
+
+
+          '''
+          if helper not in text:
+              if marker not in text:
+                  raise SystemExit('sync_agent save_registration marker not found')
+              text = text.replace(marker, helper + marker, 1)
+          old = "    atomic(CFG, obj)\n    return response\n\n\ndef register(code, role):\n"
+          new = "    atomic(CFG, obj)\n    regenerate_local_clients()\n    return response\n\n\ndef register(code, role):\n"
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('save_registration refresh hook not found')
+          old = "    atomic(CFG, cfg)\n    if emit:\n        print(json.dumps(response, ensure_ascii=False))\n"
+          new = "    atomic(CFG, cfg)\n    regenerate_local_clients()\n    if emit:\n        print(json.dumps(response, ensure_ascii=False))\n"
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('sync refresh hook not found')
+          path.write_text(text, encoding='utf-8')
+
+          path = Path('tests/test_client_single_node_subscription.py')
+          text = path.read_text(encoding='utf-8')
+          if 'def test_registration_refreshes_local_imports()' not in text:
+              insertion = '''
+
+          def test_registration_refreshes_local_imports():
+              import tempfile
+              from pathlib import Path
+              sync = load('sync_agent_refresh', CORE / 'sync_agent.py')
+              with tempfile.TemporaryDirectory(prefix='vvv-sync-refresh.') as td:
+                  root = Path(td)
+                  sync.CFG = root / 'client.json'
+                  sync.LOCAL_RENDERER = root / 'client_local_renderer.py'
+                  sync.LOCAL_RENDERER.write_text('# test renderer\\n', encoding='utf-8')
+                  calls = []
+                  original_run = sync.subprocess.run
+                  sync.subprocess.run = lambda command, **kwargs: calls.append((command, kwargs))
+                  try:
+                      sync.save_registration(
+                          'direct', 'http://203.0.113.1:18081', 'http://203.0.113.1:18081',
+                          {'host_token': 'token', 'subscription_url': 'https://sub.example.test/secret'},
+                          'VVC1',
+                      )
+                  finally:
+                      sync.subprocess.run = original_run
+                  require(sync.CFG.is_file(), '注册没有保存 client.json')
+                  require(len(calls) == 1 and calls[0][0][-1] == 'regenerate',
+                          '注册成功后没有重新生成本机客户端配置')
+
+          '''
+              main_marker = '\ndef main():\n'
+              if main_marker not in text:
+                  raise SystemExit('single-node test main marker not found')
+              text = text.replace(main_marker, insertion + main_marker, 1)
+              old_list = "        test_local_import_links,\n"
+              new_list = "        test_local_import_links,\n        test_registration_refreshes_local_imports,\n"
+              if old_list not in text:
+                  raise SystemExit('single-node test list marker not found')
+              text = text.replace(old_list, new_list, 1)
+              path.write_text(text, encoding='utf-8')
+          PY
+      - name: Validate refresh behavior
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile core-src/sync_agent.py tests/test_client_single_node_subscription.py
+          python3 tests/test_client_single_node_subscription.py
+          python3 tests/test_client_port_hopping.py
+          python3 tests/conformance.py
+          python3 tests/client_upgrade_isolation_validation.py
+      - name: Commit verified changes
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add core-src/sync_agent.py tests/test_client_single_node_subscription.py
+          if ! git diff --cached --quiet; then
+            git commit -m 'Refresh local import links after subscription sync'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
