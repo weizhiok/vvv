@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import client_adapters
 
@@ -125,6 +125,7 @@ def nodes_from_host(doc):
             'pin': hy2.get('certificate_pin_hex'), 'udp': True, 'category': category,
             'temporary': temporary, 'expires_at': expires_at, 'expected_exit_ip': expected_exit_ip,
             'limit_mbps': int(state.get('hy2_limit_mbps') or 50),
+            'client_up_mbps': 30, 'client_down_mbps': 50,
             'ports': str(((state.get('port_hopping') or {}).get('ports')) or port),
             'hop_interval_seconds': int(((state.get('port_hopping') or {}).get('hop_interval_seconds')) or 30),
             'pin_b64': hy2.get('certificate_public_key_sha256'),
@@ -284,6 +285,33 @@ def relay_ticket_record(source_host_id, relay_id):
     return current
 
 
+
+SINGLE_NODE_FORMATS = {'loon', 'nekobox'}
+
+
+def resolve_subscription_request(headers, query_string, nodes):
+    query = parse_qs(str(query_string or ''), keep_blank_values=True)
+    requested_format = str((query.get('format') or [''])[0]).strip()
+    requested_node = str((query.get('node') or [''])[0]).strip()
+    if requested_format or requested_node:
+        if requested_format not in SINGLE_NODE_FORMATS:
+            raise ValueError('单节点订阅格式无效。')
+        if not re.fullmatch(r'[0-9a-f]{24}', requested_node):
+            raise ValueError('单节点订阅 ID 无效。')
+        selected = [node for node in nodes if str(node.get('id')) == requested_node]
+        if not selected:
+            raise LookupError('单节点订阅不存在。')
+        return {
+            'name': 'Loon 单节点导入' if requested_format == 'loon' else 'NekoBoxForAndroid 单节点订阅',
+            'format': requested_format,
+            'content_type': client_adapters.RENDERERS[requested_format]['content_type'],
+        }, selected
+    recognition = client_adapters.detect_client(headers)
+    if not recognition:
+        return None, nodes
+    return recognition, nodes
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = 'StaticResource/4.0'
 
@@ -313,14 +341,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         cfg = read_json(CFG, {}) or {}
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         suffix = str(cfg.get('subscription_suffix') or '')
         if suffix and path == '/' + suffix:
-            recognition = client_adapters.detect_client(self.headers)
+            try:
+                recognition, nodes = resolve_subscription_request(self.headers, parsed.query, all_nodes())
+            except ValueError as exc:
+                return self.send_bytes(400, (str(exc) + '\n').encode())
+            except LookupError as exc:
+                return self.send_bytes(404, (str(exc) + '\n').encode())
             capture_debug(self, recognition, suffix)
             if not recognition:
                 return self.send_bytes(415, '未识别订阅客户端。\n'.encode(), extra_headers={'X-VVV-Client': 'unknown'})
-            return self.send_bytes(200, client_adapters.render(recognition['format'], all_nodes()).encode(),
+            return self.send_bytes(200, client_adapters.render(recognition['format'], nodes).encode(),
                                    recognition['content_type'], {'X-VVV-Client': recognition['name'], 'X-VVV-Format': recognition['format']})
         if path == '/health':
             return self.send_bytes(200, b'ok\n')
