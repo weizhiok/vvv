@@ -48,6 +48,7 @@ jobs:
         run: |
           python3 tests/test_hy2_port_hopping.py
           python3 tests/test_client_port_hopping.py
+          python3 tests/test_client_single_node_subscription.py
           python3 tests/test_subscription_node_order.py
           chmod +x tests/test_quick_upstream_commands.sh
           tests/test_quick_upstream_commands.sh
