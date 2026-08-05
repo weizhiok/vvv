@@ -41,17 +41,54 @@ jobs:
           from pathlib import Path
           path = Path('tests/conformance.py')
           text = path.read_text(encoding='utf-8')
-          old = "    require(\"node.get('limit_mbps')\" in adapter, '客户端模板仍固定写死 50M')\n"
-          new = (
+          old_bandwidth = "    require(\"node.get('limit_mbps')\" in adapter, '客户端模板仍固定写死 50M')\n"
+          new_bandwidth = (
               "    require('CLIENT_UP_MBPS = 30' in adapter and 'CLIENT_DOWN_MBPS = 50' in adapter, "
               "'客户端上下行带宽没有独立设置为 30/50 Mbps')\n"
               "    require(\"node.get('limit_mbps')\" not in adapter, '客户端模板仍错误复用服务器硬限速')\n"
           )
-          if old in text:
-              text = text.replace(old, new, 1)
-              path.write_text(text, encoding='utf-8')
-          elif new not in text:
+          if old_bandwidth in text:
+              text = text.replace(old_bandwidth, new_bandwidth, 1)
+          elif new_bandwidth not in text:
               raise SystemExit('tests/conformance.py bandwidth contract not found')
+          old_clients = '''        rendered = adapters.render('clash', center.all_nodes())
+          require(adapters.render('nekobox', center.all_nodes()) == rendered, 'NekoBox 没有使用 Clash Meta 格式')
+          require('65 Mbps' in rendered, 'HY2 客户端模板未使用节点限速')
+          require('ports: "443,20000-50000"' in rendered and 'hop-interval: 30' in rendered,
+                  'Mihomo 客户端模板缺少 HY2 端口跳跃')
+          loon = adapters.render('loon', center.all_nodes())
+          require('server-ports="443,20000-50000"' in loon and 'block-quic=true' in loon,
+                  'Loon 客户端模板缺少 HY2 端口跳跃')
+          shadow = base64.b64decode(adapters.render('shadowrocket', center.all_nodes())).decode()
+          require('vless://' in shadow and 'hysteria2://' in shadow, '客户端订阅渲染不完整')
+          '''
+          new_clients = '''        rendered = adapters.render('clash', center.all_nodes())
+          nekobox = adapters.render('nekobox', center.all_nodes())
+          require(rendered.startswith('proxies:\n') and nekobox.startswith('proxies:\n'),
+                  'Clash/NekoBox 没有使用节点型 Clash Meta 格式')
+          require('proxy-groups:' not in rendered and 'rules:' not in rendered,
+                  'Clash 节点订阅仍包含策略组或规则')
+          require('up: "30 Mbps"' in rendered and 'down: "50 Mbps"' in rendered,
+                  'Clash 客户端带宽不是 30/50 Mbps')
+          require('ports: "443,20000-50000"' in rendered and 'hop-interval: "20-30"' in rendered,
+                  'Mihomo 客户端模板缺少随机 HY2 端口跳跃')
+          require('up: "30 Mbps"' in nekobox and 'down: "50 Mbps"' in nekobox and 'hop-interval: 30' in nekobox,
+                  'NekoBox 客户端模板缺少固定 30 秒和 30/50 Mbps')
+          require(nekobox != rendered, 'NekoBox 与 Clash 的跳跃间隔仍被错误共用')
+          loon = adapters.render('loon', center.all_nodes())
+          require('server-ports="443,20000-50000"' in loon and 'hop-interval=30' in loon and
+                  'block-quic=true' in loon and 'download-bandwidth=50' in loon,
+                  'Loon 客户端模板缺少 HY2 端口跳跃或下载带宽')
+          shadow = base64.b64decode(adapters.render('shadowrocket', center.all_nodes())).decode()
+          require('vless://' in shadow and 'hysteria2://' in shadow, '客户端订阅渲染不完整')
+          for field in ('peer=', 'fastopen=1', 'upmbps=30', 'downmbps=50', 'mport=443,20000-50000'):
+              require(field in shadow, f'Shadowrocket HY2 缺少参数：{field}')
+          '''
+          if old_clients in text:
+              text = text.replace(old_clients, new_clients, 1)
+          elif new_clients not in text:
+              raise SystemExit('tests/conformance.py client renderer contract not found')
+          path.write_text(text, encoding='utf-8')
           PY
       - name: Validate syntax and client contracts
         run: |
