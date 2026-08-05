@@ -8,6 +8,7 @@ import os
 import platform
 import re
 import socket
+import subprocess
 import time
 import zlib
 from pathlib import Path
@@ -18,6 +19,7 @@ CFG = Path('/etc/vvv/client.json')
 CENTER_CFG = Path('/etc/vvv-sub/config.json')
 MAIN_STATE = Path('/etc/jp-relay/state.json')
 LANDING_STATE = Path('/etc/jp-relay/landing-state.json')
+LOCAL_RENDERER = Path('/usr/local/lib/vvv/client_local_renderer.py')
 
 
 def read(path, default=None):
@@ -165,6 +167,16 @@ def local_api_for(role, api_base):
     return api_base.rstrip('/')
 
 
+def regenerate_local_clients():
+    if not LOCAL_RENDERER.is_file():
+        return False
+    subprocess.run(
+        ['python3', str(LOCAL_RENDERER), 'regenerate'],
+        check=True, timeout=90, stdout=subprocess.DEVNULL,
+    )
+    return True
+
+
 def save_registration(role, public_api, api_base, response, method):
     current = time.time()
     obj = {
@@ -182,6 +194,7 @@ def save_registration(role, public_api, api_base, response, method):
         'registration_method': method,
     }
     atomic(CFG, obj)
+    regenerate_local_clients()
     return response
 
 
@@ -220,6 +233,7 @@ def sync(emit=True):
     if response.get('subscription_url'):
         cfg['subscription_url'] = response['subscription_url']
     atomic(CFG, cfg)
+    regenerate_local_clients()
     if emit:
         print(json.dumps(response, ensure_ascii=False))
     return response
