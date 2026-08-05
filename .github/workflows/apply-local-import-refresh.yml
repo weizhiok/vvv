@@ -29,9 +29,14 @@ jobs:
 
           path = Path('core-src/sync_agent.py')
           text = path.read_text(encoding='utf-8')
-          text = text.replace('import socket\nimport time\n', 'import socket\nimport subprocess\nimport time\n', 1)
-          text = text.replace("LANDING_STATE = Path('/etc/jp-relay/landing-state.json')\n",
-                              "LANDING_STATE = Path('/etc/jp-relay/landing-state.json')\nLOCAL_RENDERER = Path('/usr/local/lib/vvv/client_local_renderer.py')\n", 1)
+          if 'import subprocess\n' not in text:
+              text = text.replace('import socket\nimport time\n', 'import socket\nimport subprocess\nimport time\n', 1)
+          if "LOCAL_RENDERER = Path('/usr/local/lib/vvv/client_local_renderer.py')" not in text:
+              text = text.replace(
+                  "LANDING_STATE = Path('/etc/jp-relay/landing-state.json')\n",
+                  "LANDING_STATE = Path('/etc/jp-relay/landing-state.json')\nLOCAL_RENDERER = Path('/usr/local/lib/vvv/client_local_renderer.py')\n",
+                  1,
+              )
           marker = "def save_registration(role, public_api, api_base, response, method):\n"
           helper = '''def regenerate_local_clients():
               if not LOCAL_RENDERER.is_file():
@@ -69,7 +74,6 @@ jobs:
 
           def test_registration_refreshes_local_imports():
               import tempfile
-              from pathlib import Path
               sync = load('sync_agent_refresh', CORE / 'sync_agent.py')
               with tempfile.TemporaryDirectory(prefix='vvv-sync-refresh.') as td:
                   root = Path(td)
@@ -87,21 +91,21 @@ jobs:
                       )
                   finally:
                       sync.subprocess.run = original_run
-                  require(sync.CFG.is_file(), '注册没有保存 client.json')
-                  require(len(calls) == 1 and calls[0][0][-1] == 'regenerate',
-                          '注册成功后没有重新生成本机客户端配置')
+                  assert sync.CFG.is_file()
+                  assert len(calls) == 1 and calls[0][0][-1] == 'regenerate'
 
           '''
               main_marker = '\ndef main():\n'
               if main_marker not in text:
                   raise SystemExit('single-node test main marker not found')
               text = text.replace(main_marker, insertion + main_marker, 1)
-              old_list = "        test_local_import_links,\n"
-              new_list = "        test_local_import_links,\n        test_registration_refreshes_local_imports,\n"
-              if old_list not in text:
-                  raise SystemExit('single-node test list marker not found')
-              text = text.replace(old_list, new_list, 1)
-              path.write_text(text, encoding='utf-8')
+          call_marker = "    print('Single-node subscription tests passed.')\n"
+          call = "    test_registration_refreshes_local_imports()\n"
+          if call not in text:
+              if call_marker not in text:
+                  raise SystemExit('single-node test completion marker not found')
+              text = text.replace(call_marker, call + call_marker, 1)
+          path.write_text(text, encoding='utf-8')
           PY
       - name: Validate refresh behavior
         run: |
