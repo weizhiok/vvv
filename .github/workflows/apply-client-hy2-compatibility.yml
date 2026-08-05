@@ -11,6 +11,7 @@ on:
       - 'core-src/sub_center.py'
       - 'tests/test_client_port_hopping.py'
       - 'tests/test_client_single_node_subscription.py'
+      - 'tests/conformance.py'
 permissions:
   contents: write
 concurrency:
@@ -36,6 +37,22 @@ jobs:
             python3 -m py_compile /tmp/apply_client_formats.py
             python3 /tmp/apply_client_formats.py
           fi
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tests/conformance.py')
+          text = path.read_text(encoding='utf-8')
+          old = "    require(\"node.get('limit_mbps')\" in adapter, '客户端模板仍固定写死 50M')\n"
+          new = (
+              "    require('CLIENT_UP_MBPS = 30' in adapter and 'CLIENT_DOWN_MBPS = 50' in adapter, "
+              "'客户端上下行带宽没有独立设置为 30/50 Mbps')\n"
+              "    require(\"node.get('limit_mbps')\" not in adapter, '客户端模板仍错误复用服务器硬限速')\n"
+          )
+          if old in text:
+              text = text.replace(old, new, 1)
+              path.write_text(text, encoding='utf-8')
+          elif new not in text:
+              raise SystemExit('tests/conformance.py bandwidth contract not found')
+          PY
       - name: Validate syntax and client contracts
         run: |
           set -Eeuo pipefail
@@ -49,7 +66,7 @@ jobs:
           set -Eeuo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add core-src/client_adapters.py core-src/client_package_renderer.py core-src/client_local_renderer.py core-src/sub_center.py tests/test_client_port_hopping.py tests/test_client_single_node_subscription.py
+          git add core-src/client_adapters.py core-src/client_package_renderer.py core-src/client_local_renderer.py core-src/sub_center.py tests/test_client_port_hopping.py tests/test_client_single_node_subscription.py tests/conformance.py
           if ! git diff --cached --quiet; then
             git commit -m 'Improve HY2 client format compatibility'
             git push origin HEAD:${{ github.event.pull_request.head.ref }}
