@@ -113,17 +113,40 @@ def seed_obsolete_outputs(directory):
     (directory / 'Loon-Shadowrocket.txt').write_text('obsolete\n', encoding='utf-8')
 
 
-def verify_new_outputs(directory, role):
+def verify_new_outputs(directory, role, expect_subscription=False):
     neko = directory / 'NekoBoxForAndroid.txt'
-    require(neko.is_file(), f'{role}缺少 NekoBox 独立分享链接输出')
-    require('hy2://' in neko.read_text(encoding='utf-8'), f'{role} NekoBox 输出缺少 hy2:// 链接')
+    basic = directory / 'NekoBoxForAndroid-基础URI.txt'
+    require(neko.is_file(), f'{role}缺少 NekoBox 单节点订阅输出')
+    require(basic.is_file() and 'hy2://' in basic.read_text(encoding='utf-8'),
+            f'{role} NekoBox 基础 URI 缺失')
+    require('mport=443,20000-50000' in basic.read_text(encoding='utf-8'),
+            f'{role} NekoBox 基础 URI 缺少 mport')
+    loon_import = directory / 'Loon-Import.txt'
+    require(loon_import.is_file(), f'{role}缺少 Loon 正式导入文件')
+    if expect_subscription:
+        require('format=nekobox&node=' in neko.read_text(encoding='utf-8'),
+                f'{role} NekoBox 单节点订阅地址缺失')
+        require('loon://import?nodelist=' in loon_import.read_text(encoding='utf-8'),
+                f'{role} Loon 正式导入链接缺失')
+    else:
+        require(not neko.read_text(encoding='utf-8').strip(),
+                f'{role}未注册订阅中心却生成了完整 NekoBox 订阅')
+        require(not loon_import.read_text(encoding='utf-8').strip(),
+                f'{role}未注册订阅中心却生成了 Loon 导入链接')
     require(not (directory / 'NekoBoxForAndroid.yaml').exists(), f'{role}未清理旧 NekoBox YAML')
     require(not (directory / 'Loon-Shadowrocket.txt').exists(), f'{role}未清理旧混合分享文件')
     loon = (directory / 'Loon.conf').read_text(encoding='utf-8')
-    require('server-ports="443,20000-50000"' in loon, f'{role} Loon 输出缺少端口跳跃')
+    require('server-ports="443,20000-50000"' in loon and 'hop-interval=30' in loon and
+            'download-bandwidth=50' in loon, f'{role} Loon 输出缺少端口跳跃或下载带宽')
+    shadow = (directory / 'Shadowrocket.txt').read_text(encoding='utf-8')
+    for field in ('peer=', 'fastopen=1', 'upmbps=30', 'downmbps=50', 'mport=443,20000-50000'):
+        require(field in shadow, f'{role} Shadowrocket 缺少参数：{field}')
     clash = (directory / 'Clash-Verge-Rev.yaml').read_text(encoding='utf-8')
-    require('ports: "443,20000-50000"' in clash and 'hop-interval: 30' in clash,
-            f'{role} Mihomo 输出缺少端口跳跃')
+    require('ports: "443,20000-50000"' in clash and 'hop-interval: "20-30"' in clash and
+            'up: "30 Mbps"' in clash and 'down: "50 Mbps"' in clash,
+            f'{role} Mihomo 输出缺少随机跳跃或 30/50 Mbps')
+    require('proxy-groups:' not in clash and 'rules:' not in clash,
+            f'{role} Mihomo 输出仍包含策略组或规则')
 
 
 def test_main_role_upgrade():
@@ -135,6 +158,9 @@ def test_main_role_upgrade():
         state = root / 'etc/jp-relay/state.json'
         state.parent.mkdir(parents=True)
         state.write_text(json.dumps(sample_main_state(), ensure_ascii=False), encoding='utf-8')
+        client_cfg = root / 'etc/vvv/client.json'
+        client_cfg.parent.mkdir(parents=True, exist_ok=True)
+        client_cfg.write_text(json.dumps({'host_id': 'host-00000001', 'subscription_url': 'https://sub.example.test/secret'}), encoding='utf-8')
         direct_dir = root / 'root/日本VPS-直连客户端配置'
         relay_dir = root / 'root/relay-packages/relay-1'
         seed_obsolete_outputs(direct_dir)
@@ -145,11 +171,11 @@ def test_main_role_upgrade():
         require(payload['protected_proxy_files_unchanged'], '主机客户端升级没有通过保护检查')
         require(digest(state) == state_hash, '主机状态被客户端升级修改')
         verify_protected(root, protected)
-        verify_new_outputs(direct_dir, '主机')
-        verify_new_outputs(relay_dir, '中转线路')
+        verify_new_outputs(direct_dir, '主机', True)
+        verify_new_outputs(relay_dir, '中转线路', True)
         require((relay_dir / '客户端节点.txt').is_file(), '中转线路本机输出未重新生成')
         text = (root / 'root/日本VPS-客户端节点.txt').read_text(encoding='utf-8')
-        require('NekoBoxForAndroid' in text and 'Quantumult X' in text, '主机汇总缺少客户端')
+        require('NekoBoxForAndroid' in text and 'Shadowrocket' in text and 'Quantumult X' in text, '主机汇总缺少客户端')
 
 
 def test_landing_role_upgrade():
@@ -168,8 +194,8 @@ def test_landing_role_upgrade():
         require(digest(state) == state_hash, '中转副机状态被客户端升级修改')
         verify_protected(root, protected)
         verify_new_outputs(output_dir, '中转副机')
-        require('NekoBoxForAndroid' in (root / 'root/中转客户端节点.txt').read_text(encoding='utf-8'),
-                '中转副机汇总缺少 NekoBox')
+        require('Shadowrocket' in (root / 'root/中转客户端节点.txt').read_text(encoding='utf-8'),
+                '中转副机汇总缺少 Shadowrocket')
 
 
 def test_restricted_payload_rejection():

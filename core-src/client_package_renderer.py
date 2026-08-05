@@ -2,6 +2,7 @@
 """Render one VVV client package from a candidate or installed state."""
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -10,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 DEFAULT_ADAPTER = Path('/usr/local/lib/vvv/client_adapters.py')
+CLIENT_CFG = Path('/etc/vvv/client.json')
 OBSOLETE_OUTPUTS = ('Loon-Shadowrocket.txt', 'NekoBoxForAndroid.yaml')
 
 
@@ -28,6 +30,31 @@ def read_state(path):
     if not isinstance(value, dict):
         raise RuntimeError('状态文件不是 JSON 对象。')
     return value
+
+
+
+def read_json(path, default=None):
+    try:
+        return json.loads(Path(path).read_text(encoding='utf-8'))
+    except Exception:
+        return default
+
+
+def subscription_node_id(host_id, protocol, stable_key):
+    kind = 'hy2' if protocol == 'hysteria2' else 'vless'
+    return hashlib.sha256(f'{host_id}|{kind}|{stable_key}'.encode()).hexdigest()[:24]
+
+
+def decorate_subscription(nodes, stable_key):
+    cfg = read_json(CLIENT_CFG, {}) or {}
+    host_id = str(cfg.get('host_id') or '').strip()
+    subscription_url = str(cfg.get('subscription_url') or '').strip()
+    if not host_id or not subscription_url:
+        return nodes
+    for node in nodes:
+        node['id'] = subscription_node_id(host_id, node.get('protocol'), stable_key)
+        node['subscription_url'] = subscription_url
+    return nodes
 
 
 def protocol_name(base, proto):
@@ -64,7 +91,8 @@ def hy2_node(base, state, password):
         'sni': hy2['server_name'], 'obfs_password': hy2['obfs_password'],
         'pin': hy2.get('certificate_pin_hex', ''),
         'fingerprint': hy2.get('certificate_fingerprint', ''),
-        'limit_mbps': int(state.get('hy2_limit_mbps') or 50), 'udp': True,
+        'limit_mbps': int(state.get('hy2_limit_mbps') or 50),
+        'client_up_mbps': 30, 'client_down_mbps': 50, 'udp': True,
     }
 
 
@@ -79,6 +107,7 @@ def main_nodes(state, kind, item_id):
         title = '日本 VPS 直连节点'
         metadata = [f"日本入口：{state['public_ip']}:{state['listen_port']}", f'安装模式：{mode}']
         udp = True
+        stable_key = 'direct'
     elif kind == 'relay':
         relay = next(row for row in state.get('relays', []) if row.get('id') == item_id)
         raw_name = str(relay.get('name') or '')
@@ -93,6 +122,7 @@ def main_nodes(state, kind, item_id):
             f'安装模式：{mode}',
         ]
         udp = True
+        stable_key = item_id
     elif kind == 'upstream':
         upstream = next(row for row in state.get('upstream_relays', []) if row.get('id') == item_id)
         base = upstream.get('name') or item_id
@@ -105,6 +135,7 @@ def main_nodes(state, kind, item_id):
             'UDP：服务器端拒绝，防止绕过上游出口',
         ]
         udp = False
+        stable_key = item_id
     else:
         raise RuntimeError(f'未知客户端配置类型：{kind}')
     nodes = []
@@ -112,6 +143,7 @@ def main_nodes(state, kind, item_id):
         nodes.append(vless_node(base, state, v_uuid, udp))
     if h_password:
         nodes.append(hy2_node(base, state, h_password))
+    decorate_subscription(nodes, stable_key)
     if h_password:
         ports, interval = hopping(state)
         metadata.append(f'Hysteria 2 端口跳跃：{ports}（每 {interval} 秒切换）')
@@ -185,7 +217,7 @@ def render_package(adapter, title, metadata, nodes, out_dir):
     lines = [title, '=' * 36, *metadata]
     for row in outputs:
         content = rendered[row['filename']]
-        if content.strip():
+        if content.strip() and row.get('display', True):
             lines += ['', f"【{row.get('display_name') or row['filename']}】", content.rstrip()]
     summary = '\n'.join(lines).rstrip() + '\n'
     atomic_write(out / '客户端节点.txt', summary)

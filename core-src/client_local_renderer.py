@@ -7,6 +7,7 @@ subscription output cache when explicitly called by the fixed upgrade engine.
 """
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -15,6 +16,7 @@ import tempfile
 from pathlib import Path
 
 DEFAULT_ADAPTER = Path('/usr/local/lib/vvv/client_adapters.py')
+CLIENT_CFG = Path('/etc/vvv/client.json')
 
 
 def rooted(root, absolute):
@@ -42,6 +44,27 @@ def load_adapter(path=DEFAULT_ADAPTER):
             raise RuntimeError(f'客户端支持模块缺少 {name}。')
     module.smoke_test()
     return module
+
+
+
+def subscription_node_id(host_id, protocol, stable_key):
+    kind = 'hy2' if protocol == 'hysteria2' else 'vless'
+    return hashlib.sha256(f'{host_id}|{kind}|{stable_key}'.encode()).hexdigest()[:24]
+
+
+def subscription_identity(root='/'):
+    cfg = read_json(rooted(root, '/etc/vvv/client.json'), {}) or {}
+    return str(cfg.get('host_id') or '').strip(), str(cfg.get('subscription_url') or '').strip()
+
+
+def decorate_subscription(nodes, identity, stable_key):
+    host_id, subscription_url = identity
+    if not host_id or not subscription_url:
+        return nodes
+    for node in nodes:
+        node['id'] = subscription_node_id(host_id, node.get('protocol'), stable_key)
+        node['subscription_url'] = subscription_url
+    return nodes
 
 
 def protocol_name(base, protocol):
@@ -73,7 +96,8 @@ def hy2_node(name, server, port, password, sni, obfs, pin='', fingerprint='', li
         'name': protocol_name(name, 'HY2'), 'protocol': 'hysteria2',
         'server': str(server), 'port': int(port), 'password': str(password),
         'sni': str(sni), 'obfs_password': str(obfs), 'pin': str(pin),
-        'fingerprint': str(fingerprint), 'limit_mbps': int(limit), 'udp': True,
+        'fingerprint': str(fingerprint), 'limit_mbps': int(limit),
+        'client_up_mbps': 30, 'client_down_mbps': 50, 'udp': True,
         'ports': str(ports or port), 'hop_interval_seconds': int(hop_interval or 30),
     }
 
@@ -98,8 +122,9 @@ def main_contexts(state, root='/'):
     vless = state.get('vless') or {}
     hy2 = state.get('hy2') or {}
     reality = vless.get('reality') or {}
+    identity = subscription_identity(root)
 
-    def build(base, v_uuid=None, h_password=None, udp=True):
+    def build(base, v_uuid=None, h_password=None, udp=True, stable_key='direct'):
         nodes = []
         if v_uuid:
             nodes.append(vless_node(base, server, port, v_uuid, sni,
@@ -110,12 +135,13 @@ def main_contexts(state, root='/'):
                                   hy2.get('certificate_pin_hex', ''),
                                   hy2.get('certificate_fingerprint', ''), limit,
                                   hop_ports, hop_interval))
-        return nodes
+        return decorate_subscription(nodes, identity, stable_key)
 
     direct_nodes = build(
         state.get('direct_base_name') or f'{server}:{port}',
         (vless.get('direct_user') or {}).get('uuid') if mode in ('dual', 'vless') else None,
         (hy2.get('direct_user') or {}).get('password') if mode in ('dual', 'hy2') else None,
+        stable_key='direct',
     )
     contexts.append({
         'id': 'direct', 'title': '日本 VPS 直连节点',
@@ -132,7 +158,7 @@ def main_contexts(state, root='/'):
         raw_name = str(relay.get('name') or '')
         country = raw_name[:2].upper() if len(raw_name) >= 3 and raw_name[:2].isalpha() and raw_name[2] == '-' else ''
         relay_base = (country + '-' if country else '') + f'中转-{server}:{port}'
-        nodes = build(relay_base, rv.get('client_uuid'), rh.get('client_password'))
+        nodes = build(relay_base, rv.get('client_uuid'), rh.get('client_password'), stable_key=relay.get('id'))
         contexts.append({
             'id': relay.get('id'), 'title': f"中转节点：{relay.get('name') or relay.get('id')}",
             'metadata': [f'日本入口：{server}:{port}',
@@ -142,7 +168,7 @@ def main_contexts(state, root='/'):
         })
 
     for upstream in state.get('upstream_relays', []):
-        nodes = build(upstream.get('name') or upstream.get('id'), upstream.get('client_uuid'), None, False)
+        nodes = build(upstream.get('name') or upstream.get('id'), upstream.get('client_uuid'), None, False, upstream.get('id'))
         contexts.append({
             'id': upstream.get('id'), 'title': f"动态代理中转节点：{upstream.get('name') or upstream.get('id')}",
             'metadata': [f'日本入口：{server}:{port}',
@@ -159,7 +185,7 @@ def main_contexts(state, root='/'):
         vuuid = tv.get('client_uuid') or slot_value(vslots, tv.get('reserve_slot'), 'uuid')
         hpass = th.get('client_password') or slot_value(hslots, th.get('reserve_slot'), 'password')
         is_upstream = temp.get('source_type') == 'upstream'
-        nodes = build(temp.get('name') or temp.get('id'), vuuid, None if is_upstream else hpass, not is_upstream)
+        nodes = build(temp.get('name') or temp.get('id'), vuuid, None if is_upstream else hpass, not is_upstream, temp.get('id'))
         contexts.append({
             'id': temp.get('id'), 'title': f"临时节点：{temp.get('name') or temp.get('id')}",
             'metadata': [f'日本入口：{server}:{port}',
@@ -283,10 +309,8 @@ def render_context(context, adapter, obsolete=()):
     lines = [context['title'], '=' * 36, *context.get('metadata', [])]
     for row in outputs:
         filename = row['filename']
-        if filename == 'Shadowrocket.txt':
-            continue
         content = rendered.get(filename, '')
-        if not content.strip():
+        if not content.strip() or not row.get('display', True):
             continue
         lines += ['', f"【{row.get('display_name') or filename}】", content.rstrip()]
     summary = '\n'.join(lines).rstrip() + '\n'

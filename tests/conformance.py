@@ -114,7 +114,8 @@ def test_hy2_server_hard_limit():
         require('up_mbps' in source and 'down_mbps' in source, f'{label} HY2 缺少服务端限速')
     require('hy2_limit_mbps' in host and 'hy2_limit_mbps' in landing, 'HY2 限速没有进入状态/JPR3')
     adapter = read('core-src/client_adapters.py')
-    require("node.get('limit_mbps')" in adapter, '客户端模板仍固定写死 50M')
+    require('CLIENT_UP_MBPS = 30' in adapter and 'CLIENT_DOWN_MBPS = 50' in adapter, '客户端上下行带宽没有独立设置为 30/50 Mbps')
+    require("node.get('limit_mbps')" not in adapter, '客户端模板仍错误复用服务器硬限速')
 
 
 def test_temporary_nodes_are_local_copies_only():
@@ -164,15 +165,26 @@ def test_node_names_and_clients():
         require(recognition and recognition['name'] == 'NekoBoxForAndroid' and recognition['format'] == 'nekobox',
                 'NekoBoxForAndroid 1.4.2 请求头未被识别')
         rendered = adapters.render('clash', center.all_nodes())
-        require(adapters.render('nekobox', center.all_nodes()) == rendered, 'NekoBox 没有使用 Clash Meta 格式')
-        require('65 Mbps' in rendered, 'HY2 客户端模板未使用节点限速')
-        require('ports: "443,20000-50000"' in rendered and 'hop-interval: 30' in rendered,
-                'Mihomo 客户端模板缺少 HY2 端口跳跃')
+        nekobox = adapters.render('nekobox', center.all_nodes())
+        require(rendered.startswith('proxies:\n') and nekobox.startswith('proxies:\n'),
+                'Clash/NekoBox 没有使用节点型 Clash Meta 格式')
+        require('proxy-groups:' not in rendered and 'rules:' not in rendered,
+                'Clash 节点订阅仍包含策略组或规则')
+        require('up: "30 Mbps"' in rendered and 'down: "50 Mbps"' in rendered,
+                'Clash 客户端带宽不是 30/50 Mbps')
+        require('ports: "443,20000-50000"' in rendered and 'hop-interval: "20-30"' in rendered,
+                'Mihomo 客户端模板缺少随机 HY2 端口跳跃')
+        require('up: "30 Mbps"' in nekobox and 'down: "50 Mbps"' in nekobox and 'hop-interval: 30' in nekobox,
+                'NekoBox 客户端模板缺少固定 30 秒和 30/50 Mbps')
+        require(nekobox != rendered, 'NekoBox 与 Clash 的跳跃间隔仍被错误共用')
         loon = adapters.render('loon', center.all_nodes())
-        require('server-ports="443,20000-50000"' in loon and 'block-quic=true' in loon,
-                'Loon 客户端模板缺少 HY2 端口跳跃')
+        require('server-ports="443,20000-50000"' in loon and 'hop-interval=30' in loon and
+                'block-quic=true' in loon and 'download-bandwidth=50' in loon,
+                'Loon 客户端模板缺少 HY2 端口跳跃或下载带宽')
         shadow = base64.b64decode(adapters.render('shadowrocket', center.all_nodes())).decode()
         require('vless://' in shadow and 'hysteria2://' in shadow, '客户端订阅渲染不完整')
+        for field in ('peer=', 'fastopen=1', 'upmbps=30', 'downmbps=50', 'mport=443,20000-50000'):
+            require(field in shadow, f'Shadowrocket HY2 缺少参数：{field}')
     host = read('core-src/host.sh')
     landing = read('core-src/landing.sh')
     adapter = read('core-src/client_adapters.py')
