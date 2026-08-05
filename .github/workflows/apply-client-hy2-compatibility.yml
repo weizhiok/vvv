@@ -51,20 +51,9 @@ jobs:
               text = text.replace(old_bandwidth, new_bandwidth, 1)
           elif new_bandwidth not in text:
               raise SystemExit('tests/conformance.py bandwidth contract not found')
-          old_clients = '''        rendered = adapters.render('clash', center.all_nodes())
-          require(adapters.render('nekobox', center.all_nodes()) == rendered, 'NekoBox 没有使用 Clash Meta 格式')
-          require('65 Mbps' in rendered, 'HY2 客户端模板未使用节点限速')
-          require('ports: "443,20000-50000"' in rendered and 'hop-interval: 30' in rendered,
-                  'Mihomo 客户端模板缺少 HY2 端口跳跃')
-          loon = adapters.render('loon', center.all_nodes())
-          require('server-ports="443,20000-50000"' in loon and 'block-quic=true' in loon,
-                  'Loon 客户端模板缺少 HY2 端口跳跃')
-          shadow = base64.b64decode(adapters.render('shadowrocket', center.all_nodes())).decode()
-          require('vless://' in shadow and 'hysteria2://' in shadow, '客户端订阅渲染不完整')
-          '''
           new_clients = '''        rendered = adapters.render('clash', center.all_nodes())
           nekobox = adapters.render('nekobox', center.all_nodes())
-          require(rendered.startswith('proxies:\n') and nekobox.startswith('proxies:\n'),
+          require(rendered.startswith('proxies:\\n') and nekobox.startswith('proxies:\\n'),
                   'Clash/NekoBox 没有使用节点型 Clash Meta 格式')
           require('proxy-groups:' not in rendered and 'rules:' not in rendered,
                   'Clash 节点订阅仍包含策略组或规则')
@@ -84,10 +73,15 @@ jobs:
           for field in ('peer=', 'fastopen=1', 'upmbps=30', 'downmbps=50', 'mport=443,20000-50000'):
               require(field in shadow, f'Shadowrocket HY2 缺少参数：{field}')
           '''
-          if old_clients in text:
-              text = text.replace(old_clients, new_clients, 1)
-          elif new_clients not in text:
-              raise SystemExit('tests/conformance.py client renderer contract not found')
+          if new_clients not in text:
+              start_marker = "        rendered = adapters.render('clash', center.all_nodes())\n"
+              end_marker = "        require('vless://' in shadow and 'hysteria2://' in shadow, '客户端订阅渲染不完整')\n"
+              start = text.find(start_marker)
+              end = text.find(end_marker, start)
+              if start < 0 or end < 0:
+                  raise SystemExit('tests/conformance.py client renderer markers not found')
+              end += len(end_marker)
+              text = text[:start] + new_clients + text[end:]
           path.write_text(text, encoding='utf-8')
           PY
       - name: Validate syntax and client contracts
