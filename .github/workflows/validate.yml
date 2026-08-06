@@ -51,7 +51,7 @@ jobs:
           python3 tests/test_created_node_client_output.py
       - name: Validate global node-name guard
         run: |
-          python3 -m py_compile core-src/name_guard_runtime.py tests/test_global_node_name_guard.py
+          python3 -m py_compile core-src/name_guard_runtime.py core-src/name_guard_installer.py tests/test_global_node_name_guard.py
           bash -n vvv-install.sh
           bash -n upgrade/upgrade-global-node-name-guard.sh
           python3 tests/test_global_node_name_guard.py
