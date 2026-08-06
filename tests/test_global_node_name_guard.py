@@ -9,8 +9,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HOST = ROOT / 'core-src/host.sh'
 CENTER = ROOT / 'core-src/sub_center.py'
+CENTER_INSTALL = ROOT / 'core-src/center_install.sh'
 RENDERER = ROOT / 'core-src/client_package_renderer.py'
 GUARD = ROOT / 'core-src/name_guard_runtime.py'
+INSTALLER = ROOT / 'core-src/name_guard_installer.py'
+VVV_INSTALL = ROOT / 'vvv-install.sh'
 
 
 def load(path, name):
@@ -55,6 +58,22 @@ def test_manager_patch(renderer, guard, root):
     assert '(( count == 0 )) || fail "唯一名称保护失败：拒绝覆盖同名 VPS 中转线路。"' in patched
     assert '(( count == 0 )) || fail "唯一名称保护失败：拒绝覆盖同名动态代理线路。"' in patched
     assert guard.patched_manager_text(patched) == patched
+
+
+def test_center_installer_patch(installer, root):
+    target = root / 'center_install.sh'
+    target.write_text(CENTER_INSTALL.read_text(encoding='utf-8'), encoding='utf-8')
+    target.chmod(0o700)
+    assert installer.patch_file(target) is True
+    patched = target.read_text(encoding='utf-8')
+    subprocess.run(['bash', '-n', str(target)], check=True)
+    assert installer.MARKER in patched
+    assert patched.count('python3 /usr/local/lib/vvv/name_guard_runtime.py') == 1
+    assert patched.index(installer.MARKER) < patched.index('ensure_service vvv-sub.service restart 60')
+    assert installer.patch_file(target) is False
+    install_text = VVV_INSTALL.read_text(encoding='utf-8')
+    assert 'name_guard_installer.py' in install_text
+    assert 'name_guard_installer.py "$SOURCE_TARGET/center_install.sh"' in install_text
 
 
 def test_center_patch(guard, root):
@@ -137,9 +156,11 @@ def test_center_patch(guard, root):
 def main():
     renderer = load(RENDERER, 'vvv_renderer_for_name_guard')
     guard = load(GUARD, 'vvv_name_guard_test')
+    installer = load(INSTALLER, 'vvv_name_guard_installer_test')
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         test_manager_patch(renderer, guard, root)
+        test_center_installer_patch(installer, root)
         test_center_patch(guard, root)
     print('PASS global subscription node-name guard')
 
