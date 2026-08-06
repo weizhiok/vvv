@@ -48,7 +48,7 @@ PROTECTED_FILES = [
     '/etc/systemd/system/vvv-landing-xray.service',
     '/etc/systemd/system/vvv-landing-sing-box.service',
 ]
-ALLOWED_IMPORTS = {'base64', 'json', 're', 'urllib.parse'}
+ALLOWED_IMPORTS = {'base64', 'json', 're', 'urllib.parse', 'zlib'}
 FORBIDDEN_CALLS = {
     'open', 'exec', 'eval', 'compile', '__import__', 'input', 'breakpoint',
     'getattr', 'setattr', 'delattr', 'globals', 'locals', 'vars',

@@ -35,6 +35,21 @@ def sample_node():
 def main():
     adapters.smoke_test()
     node = sample_node()
+    vless_sn_node = {
+        'name': 'JP-VLESS-203.0.113.1:443', 'protocol': 'vless',
+        'server': '203.0.113.1', 'port': 443,
+        'uuid': '11111111-1111-4111-8111-111111111111',
+        'sni': 'www.softbank.jp',
+        'public_key': 'PublicKeyAudit-1234567890123456789012345678',
+        'short_id': '0123456789abcdef', 'udp': True,
+    }
+    hy2_sn_node = dict(node, obfs_password='test-obfs-password')
+    sn_links = adapters.render('nekobox-sn', [vless_sn_node, hy2_sn_node]).splitlines()
+    assert sn_links == [
+        'sn://vmess?eNpjYWBgMDIw1jPQMzQ01tu4m5GBYakhFOiCCRMQYQHjwkBFSU6xblFBUYVuWWZxZv67_0BQkvyhJOdzeXm5XnF-WklSYl62XtaHxkbG5Iyi_NynawJKk3Iyk71TKx1LUzJLdA2NjE1MzcwtLA0wWQihxKTklNRnDI1MDDDACMVeAbphPq7BwboI5xtamZhsbmwEAE3gPFY',
+        'sn://hysteria?eNpjZ2BgMDIw1jPQMzQ01ttowcLAwMQAASWpxSW6BYnFxeX5RU_gAvlJacVw0awC3YxKIz0gVZSak1ipl5OfnPimUQ5kJhAzNjLAAEjIxMRYx8gACHRNgcQGRqCQV4CuR6SRLsIBhlYmJpsbGwGtkyOX',
+    ], sn_links
+    assert adapters.render('nekobox', [node]).startswith('proxies:\n')
     loon = adapters.render('loon', [node]).strip()
     assert loon == (
         'JP-HY2-203.0.113.1:443 = Hysteria2,203.0.113.1,443,test-password,'
@@ -96,7 +111,11 @@ def main():
         neko_yaml_file = (out / 'NekoBoxForAndroid.yaml').read_text(encoding='utf-8')
         assert 'hop-interval: 30' in neko_yaml_file
         assert 'hop-interval: "20-30"' not in neko_yaml_file
-        assert '【NekoBoxForAndroid】' in summary
+        assert '【NekoBox For Android】' in summary
+        assert (out / 'NekoBoxForAndroid-SN.txt').read_text(encoding='utf-8').startswith('sn://hysteria?')
+        labels = ['【Loon】', '【Shadowrocket 分享链接】', '【NekoBox For Android】',
+                  '【Clash Verge Rev / Mihomo】']
+        assert [summary.index(label) for label in labels] == sorted(summary.index(label) for label in labels)
         assert (out / 'NekoBoxForAndroid-基础URI.txt').read_text(encoding='utf-8').startswith('hy2://')
 
     print('Client Hysteria 2 compatibility tests passed.')
