@@ -1,0 +1,61 @@
+name: Publish client support v8
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-client-support-v8.yml'
+permissions:
+  contents: write
+concurrency:
+  group: publish-client-support-v8
+  cancel-in-progress: true
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate main adapter
+        run: |
+          set -Eeuo pipefail
+          python3 core-src/client_adapters.py >/tmp/main-adapter.json
+          grep -q '"version": 8' /tmp/main-adapter.json
+          grep -q 'nekobox-yaml' /tmp/main-adapter.json
+          python3 - <<'PY'
+          import importlib.util,json
+          spec=importlib.util.spec_from_file_location('adapter','core-src/client_adapters.py')
+          module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+          node={'name':'JP-HY2-test','protocol':'hysteria2','server':'203.0.113.1','port':443,
+                'ports':'443,20000-50000','hop_interval_seconds':30,'password':'password',
+                'sni':'jp-hy2.jp-relay.local','obfs_password':'obfs','client_up_mbps':30,
+                'client_down_mbps':50,'udp':True}
+          data=json.loads(module.render('nekobox',[node]))
+          hy2=data['outbounds'][0]
+          assert hy2['server_ports']==['443','20000:50000']
+          assert hy2['hop_interval']=='30s'
+          PY
+      - name: Publish exact adapter to client-support
+        run: |
+          set -Eeuo pipefail
+          cp core-src/client_adapters.py /tmp/client_upgrade.py
+          git checkout client-support
+          cp /tmp/client_upgrade.py client_upgrade.py
+          python3 client_upgrade.py >/tmp/published-adapter.json
+          grep -q '"version": 8' /tmp/published-adapter.json
+          grep -q 'nekobox-yaml' /tmp/published-adapter.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add client_upgrade.py
+          if ! git diff --cached --quiet; then
+            git commit -m 'Publish client support v8'
+            git push origin client-support
+          fi
+      - name: Verify published branch
+        run: |
+          set -Eeuo pipefail
+          git fetch origin client-support
+          test "$(git rev-parse origin/client-support:client_upgrade.py)" = "$(git rev-parse main:core-src/client_adapters.py)"
