@@ -5,7 +5,9 @@ on:
     paths:
       - '.github/workflows/run-add-nekobox-sn-links.yml'
       - 'tools/add_nekobox_sn_links.py'
+      - 'tools/fix_sn_upgrade_sandbox.py'
       - 'core-src/client_adapters.py'
+      - 'core-src/client_upgrade_engine.py'
       - 'tests/test_client_port_hopping.py'
       - 'tests/client_upgrade_isolation_validation.py'
       - 'tests/conformance.py'
@@ -26,11 +28,13 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Add NekoBox SN links
-        run: python3 tools/add_nekobox_sn_links.py
+        run: |
+          python3 tools/add_nekobox_sn_links.py
+          python3 tools/fix_sn_upgrade_sandbox.py
       - name: Validate SN rendering and contracts
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile core-src/client_adapters.py
+          python3 -m py_compile core-src/client_adapters.py core-src/client_upgrade_engine.py
           bash -n tests/final_runtime_validation.sh
           python3 tests/test_client_port_hopping.py
           python3 tests/test_client_single_node_subscription.py
@@ -43,6 +47,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add \
             core-src/client_adapters.py \
+            core-src/client_upgrade_engine.py \
             tests/test_client_port_hopping.py \
             tests/client_upgrade_isolation_validation.py \
             tests/conformance.py \
