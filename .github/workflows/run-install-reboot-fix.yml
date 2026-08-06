@@ -35,7 +35,7 @@ jobs:
           set -Eeuo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add core-src/host.sh core-src/hy2_port_hop.sh tests/test_install_reboot_guard.py .github/workflows/validate.yml
+          git add core-src/host.sh core-src/hy2_port_hop.sh tests/test_install_reboot_guard.py
           if ! git diff --cached --quiet; then
             git commit -m 'Prevent install-time reboot disconnects'
             git push origin HEAD:${{ github.event.pull_request.head.ref }}
