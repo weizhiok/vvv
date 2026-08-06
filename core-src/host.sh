@@ -472,21 +472,25 @@ install_daily_reboot_cron() {
   chmod 600 /var/lib/vvv/daily-reboot-install-day
 
   cat > /usr/local/lib/vvv/daily-reboot.sh <<'EOF_DAILY_REBOOT'
-#!/usr/bin/env bash
-set -Eeuo pipefail
+#!/bin/sh
+set -eu
 
 marker=/var/lib/vvv/daily-reboot-install-day
-[[ -r "$marker" ]] || exit 0
-read -r install_day < "$marker"
+[ -r "$marker" ] || exit 0
+IFS= read -r install_day < "$marker" || exit 0
 current_day="$(date '+%Y%m%d')"
-[[ "$install_day" =~ ^[0-9]{8}$ && "$current_day" =~ ^[0-9]{8}$ ]] || exit 0
 
-if (( 10#$current_day <= 10#$install_day )); then
+case "$install_day:$current_day" in
+  *[!0-9:]*|????????:????????) ;;
+  *) exit 0 ;;
+esac
+
+if [ "$current_day" -le "$install_day" ]; then
   command -v logger >/dev/null 2>&1 && logger -t vvv-daily-reboot "忽略安装当天的重启任务；首次最早从次日 06:00 执行。"
   exit 0
 fi
 
-if [[ "$(date '+%H:%M')" != "06:00" ]]; then
+if [ "$(date '+%H:%M')" != "06:00" ]; then
   command -v logger >/dev/null 2>&1 && logger -t vvv-daily-reboot "忽略非 06:00 触发的重启请求。"
   exit 0
 fi
@@ -494,16 +498,16 @@ fi
 install -d -m755 /run/lock
 lock_dir=/run/lock/vvv-daily-reboot.lock
 mkdir "$lock_dir" 2>/dev/null || exit 0
-trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
+trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT HUP INT TERM
 
 command -v logger >/dev/null 2>&1 && logger -t vvv-daily-reboot "开始执行每天北京时间 06:00 自动重启。"
 sync
 sleep 2
 
-if command -v systemctl >/dev/null 2>&1 && [[ "$(cat /proc/1/comm 2>/dev/null | tr -d '[:space:]')" == systemd ]]; then
-  systemctl reboot --no-wall
+if command -v systemctl >/dev/null 2>&1 && [ "$(cat /proc/1/comm 2>/dev/null | tr -d '[:space:]')" = systemd ]; then
+  exec systemctl reboot --no-wall
 elif command -v reboot >/dev/null 2>&1; then
-  reboot
+  exec reboot
 else
   command -v logger >/dev/null 2>&1 && logger -t vvv-daily-reboot "找不到可用的系统重启命令。"
   exit 1

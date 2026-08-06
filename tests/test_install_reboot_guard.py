@@ -18,6 +18,7 @@ def between(text, start, end):
 
 configure_timezone = between(HOST, 'configure_timezone() {', 'install_daily_reboot_cron() {')
 daily_reboot = between(HOST, 'install_daily_reboot_cron() {', 'prompt_initial_mode_and_port() {')
+daily_reboot_helper = daily_reboot.split("cat > /usr/local/lib/vvv/daily-reboot.sh <<'EOF_DAILY_REBOOT'", 1)[1].split('EOF_DAILY_REBOOT', 1)[0]
 create_xray = between(HOST, 'create_xray_service() {', 'create_sing_box_service() {')
 create_sing = between(HOST, 'create_sing_box_service() {', 'parse_x25519_keys() {')
 initial = between(HOST, 'activate_initial_state() {', 'update_state_core_versions() {')
@@ -51,12 +52,16 @@ require('rc-update add crond default' in daily_reboot and
 require("date -d 'tomorrow" not in daily_reboot,
         '每日重启仍依赖 GNU date -d tomorrow')
 require('daily-reboot-install-day' in daily_reboot and
-        '10#$current_day <= 10#$install_day' in daily_reboot,
+        '[ "$current_day" -le "$install_day" ]' in daily_reboot,
         '每日重启脚本缺少跨 Debian/Alpine 的次日门槛')
 require("date '+%H:%M'" in daily_reboot and '06:00' in daily_reboot,
         '每日重启脚本缺少执行时刻二次校验')
 require('mkdir "$lock_dir"' in daily_reboot and 'flock' not in daily_reboot,
         '每日重启没有使用 Debian/Alpine 通用的原子目录锁')
+require('#!/bin/sh' in daily_reboot_helper and '#!/usr/bin/env bash' not in daily_reboot_helper,
+        'Alpine 重启助手没有使用 POSIX /bin/sh')
+require('[[' not in daily_reboot_helper and '((' not in daily_reboot_helper,
+        'Alpine 重启助手仍包含 Bash 专用语法')
 require('systemctl reboot --no-wall' in daily_reboot and 'command -v reboot' in daily_reboot,
         '每日重启脚本没有同时覆盖 systemd 与 Alpine reboot')
 require('systemctl enable cron.service' in daily_reboot and
