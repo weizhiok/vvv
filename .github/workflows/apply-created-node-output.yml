@@ -1,0 +1,30 @@
+name: Apply created-node client output
+on:
+  push:
+    branches: [agent/created-node-client-output]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/created-node-client-output
+          fetch-depth: 0
+      - name: Apply patch
+        run: python3 tools/apply_created_node_output_patch.py
+      - name: Validate focused changes
+        run: |
+          bash -n core-src/host.sh
+          bash -n upgrade/upgrade-created-node-client-output.sh
+          python3 -m py_compile core-src/client_package_renderer.py tests/test_created_node_client_output.py
+          python3 tests/test_created_node_client_output.py
+      - name: Commit patched sources
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add core-src/host.sh core-src/client_package_renderer.py tests/test_created_node_client_output.py tests/final_runtime_validation.sh upgrade/upgrade-created-node-client-output.sh
+          git commit -m "Print client configs after every node creation"
+          git push origin HEAD:agent/created-node-client-output
