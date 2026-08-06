@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/run-show-nekobox-local-config.yml'
       - 'tools/show_nekobox_local_config.py'
+      - 'tools/fix_nekobox_smoke_contract.py'
       - 'tests/test_client_port_hopping.py'
       - 'tests/client_upgrade_isolation_validation.py'
       - 'tests/conformance.py'
@@ -24,7 +25,9 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Add visible NekoBox configuration
-        run: python3 tools/show_nekobox_local_config.py
+        run: |
+          python3 tools/show_nekobox_local_config.py
+          python3 tools/fix_nekobox_smoke_contract.py
       - name: Validate NekoBox outputs
         run: |
           set -Eeuo pipefail
