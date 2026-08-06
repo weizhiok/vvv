@@ -68,7 +68,7 @@ debug_headers(){
   rm -f "$flag" "$log"; trap - EXIT INT TERM
 }
 node_menu(){
-  local rows count choice node_id name action new_name bulk_index order_index input
+  local rows count choice node_id name action new_name bulk_index order_index host_index input
   while true; do
     mapfile -t rows < <(python3 "$SUB" list-nodes --tsv)
     count=${#rows[@]}
@@ -76,9 +76,10 @@ node_menu(){
     if (( count==0 )); then echo "当前没有订阅节点。"; pause; return; fi
     local i
     for ((i=0;i<count;i++)); do IFS=$'	' read -r node_id name _ <<<"${rows[$i]}"; echo "$((i+1)). $name"; done
-    bulk_index=$((count+1)); order_index=$((count+2))
+    bulk_index=$((count+1)); order_index=$((count+2)); host_index=$((count+3))
     echo "${bulk_index}. 批量重命名"
     echo "${order_index}. 重新排序"
+    echo "${host_index}. 已注册主机管理"
     echo "0. 返回"
     read -r -p "请选择节点或操作：" choice
     [[ "$choice" == 0 ]] && return
@@ -101,6 +102,10 @@ node_menu(){
         echo "所有客户端订阅已按新顺序重新生成，请在客户端中手动刷新统一订阅地址。"
       fi
       pause; continue
+    fi
+    if (( choice==host_index )); then
+      host_menu
+      continue
     fi
     (( choice>=1 && choice<=count )) || { echo "请输入有效编号。"; continue; }
     IFS=$'	' read -r node_id name _ <<<"${rows[$((choice-1))]}"
@@ -129,19 +134,19 @@ node_menu(){
   done
 }
 host_menu(){
-  local rows count choice host_id role host name action confirm
+  local rows count choice host_id role host_ip sync_date action confirm
   while true; do
-    mapfile -t rows < <(python3 "$SUB" list-hosts --tsv)
+    mapfile -t rows < <(python3 "$SUB" list-hosts --summary-tsv)
     count=${#rows[@]}
     echo; echo "========== 已注册主机 =========="
     if (( count==0 )); then echo "暂无已注册主机。"; pause; return; fi
     local i
-    for ((i=0;i<count;i++)); do IFS=$'\t' read -r host_id role host name _ <<<"${rows[$i]}"; echo "$((i+1)). ${name:-$host} [$role]"; done
+    for ((i=0;i<count;i++)); do IFS=$'\t' read -r host_id role host_ip sync_date <<<"${rows[$i]}"; echo "$((i+1)). [$role] $host_ip $sync_date"; done
     echo "0. 返回"
     read -r -p "请选择：" choice
     [[ "$choice" == 0 ]] && return
     [[ "$choice" =~ ^[0-9]+$ ]] && ((10#$choice>=1 && 10#$choice<=count)) || { echo "请输入有效编号。"; continue; }
-    IFS=$'\t' read -r host_id role host name _ <<<"${rows[$((10#$choice-1))]}"
+    IFS=$'\t' read -r host_id role host_ip sync_date <<<"${rows[$((10#$choice-1))]}"
     echo "1. 查看节点"; echo "2. 删除该副机及其节点"; echo "0. 返回"
     read -r -p "请选择：" action
     case "$action" in
