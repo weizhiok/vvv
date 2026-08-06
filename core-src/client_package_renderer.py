@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render one VVV client package from a candidate or installed state."""
+"""Render one VVV client package and migrate the installed relay manager safely."""
 
 import argparse
 import hashlib
@@ -7,12 +7,196 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import tempfile
 from pathlib import Path
 
 DEFAULT_ADAPTER = Path('/usr/local/lib/vvv/client_adapters.py')
+DEFAULT_MANAGER = Path(os.environ.get('VVV_MANAGER_PATH', '/usr/local/sbin/jp-relay-manager'))
 CLIENT_CFG = Path('/etc/vvv/client.json')
 OBSOLETE_OUTPUTS = ('Loon-Shadowrocket.txt',)
+MANAGER_PATCH_MARKER = '# VVV_CREATED_NODE_OUTPUT_V1'
+
+
+def replace_once(text, old, new, label):
+    count = text.count(old)
+    if count != 1:
+        raise RuntimeError(f'{label}：预期匹配 1 次，实际 {count} 次。')
+    return text.replace(old, new, 1)
+
+
+def patched_manager_text(text):
+    if MANAGER_PATCH_MARKER in text:
+        return text
+    text = replace_once(
+        text,
+        'umask 077\n\nRUN_MODE=',
+        f'umask 077\n{MANAGER_PATCH_MARKER}\n\nRUN_MODE=',
+        '管理器版本标记',
+    )
+    text = replace_once(
+        text,
+        '''generate_direct_client_files() {
+  local dir="/root/日本VPS-直连客户端配置"
+  generate_client_files "$STATE_FILE" "" "$dir" direct
+  cp -f "$dir/客户端节点.txt" /root/日本VPS-客户端节点.txt
+  chmod 600 /root/日本VPS-客户端节点.txt
+}
+
+allocate_test_port() {
+''',
+        '''generate_direct_client_files() {
+  local dir="/root/日本VPS-直连客户端配置"
+  generate_client_files "$STATE_FILE" "" "$dir" direct
+  cp -f "$dir/客户端节点.txt" /root/日本VPS-客户端节点.txt
+  chmod 600 /root/日本VPS-客户端节点.txt
+}
+
+print_client_config() {
+  local kind="$1" item_id="$2" dir transient=0
+  case "$kind" in
+    relay|upstream)
+      dir="${PACKAGE_ROOT}/${item_id}"
+      ;;
+    temporary)
+      dir="$(mktemp -d /tmp/vvv-created-client.XXXXXX)"
+      TMP_FILES+=("$dir")
+      transient=1
+      ;;
+    *)
+      fail "未知客户端配置类型：${kind}"
+      return 1
+      ;;
+  esac
+  generate_client_files "$STATE_FILE" "$item_id" "$dir" "$kind" >/dev/null
+  echo
+  echo "==================== 客户端配置 ===================="
+  cat "$dir/客户端节点.txt"
+  echo "===================================================="
+  if (( transient == 0 )); then
+    echo "配置目录：$dir"
+  else
+    rm -rf -- "$dir"
+  fi
+}
+
+show_created_client_config() {
+  local kind="$1" item_id="$2"
+  print_client_config "$kind" "$item_id"
+  echo "已触发订阅中心同步，请在客户端中刷新统一订阅。"
+}
+
+allocate_test_port() {
+''',
+        '统一客户端配置打印函数',
+    )
+    text = replace_once(
+        text,
+        '''  echo "线路已通过运行时接口生效；Xray 主进程未重启。"
+  echo "客户端配置目录：${package_dir}"
+  echo
+  echo "==================== 落地 VPS JPR3 对接密钥 ===================="
+''',
+        '''  echo "线路已通过运行时接口生效；Xray 主进程未重启。"
+  show_created_client_config relay "$relay_id"
+  echo
+  echo "==================== 落地 VPS JPR3 对接密钥 ===================="
+''',
+        '新建 VPS 输出',
+    )
+    text = replace_once(
+        text,
+        '''  log "动态代理中转线路配置成功"
+  show_upstream_client_config "$upstream_id"
+  refresh_upstream_status "$upstream_id" || true
+''',
+        '''  log "动态代理中转线路配置成功"
+  show_created_client_config upstream "$upstream_id"
+  refresh_upstream_status "$upstream_id" || true
+''',
+        '新建动态代理输出',
+    )
+    text = replace_once(
+        text,
+        '''show_client_config() {
+  local relay_id="$1" dir="${PACKAGE_ROOT}/${relay_id}"
+  generate_client_files "$STATE_FILE" "$relay_id" "$dir" relay >/dev/null
+  echo
+  echo "==================== 客户端配置 ===================="
+  cat "$dir/客户端节点.txt"
+  echo "===================================================="
+  echo "配置目录：$dir"
+}
+
+show_upstream_client_config() {
+  local upstream_id="$1" dir="${PACKAGE_ROOT}/${upstream_id}"
+  generate_client_files "$STATE_FILE" "$upstream_id" "$dir" upstream >/dev/null
+  echo
+  echo "==================== 客户端配置 ===================="
+  cat "$dir/客户端节点.txt"
+  echo "===================================================="
+  echo "配置目录：$dir"
+}
+''',
+        '''show_client_config() {
+  print_client_config relay "$1"
+}
+
+show_upstream_client_config() {
+  print_client_config upstream "$1"
+}
+''',
+        '已有线路配置菜单',
+    )
+    text = replace_once(
+        text,
+        '''  apply_candidate_with_rollback "$candidate"
+  install_temp_cleanup_timer
+  echo "临时节点创建成功：${custom_name}"
+  echo "自动销毁时间：${expires_at}（${ttl} 分钟后）"
+  echo "副机和原正式线路均未修改。客户端刷新订阅后即可看到临时节点。"
+''',
+        '''  apply_candidate_with_rollback "$candidate"
+  install_temp_cleanup_timer
+  echo "临时节点创建成功：${custom_name}"
+  echo "自动销毁时间：${expires_at}（${ttl} 分钟后）"
+  echo "副机和原正式线路均未修改。"
+  show_created_client_config temporary "$temp_id"
+''',
+        '临时节点输出',
+    )
+    return text
+
+
+def install_manager_patch(path=DEFAULT_MANAGER, required=False):
+    path = Path(path)
+    if not path.is_file():
+        if required:
+            raise RuntimeError(f'未找到中转管理器：{path}')
+        return False
+    original = path.read_text(encoding='utf-8')
+    if MANAGER_PATCH_MARKER in original:
+        return False
+    updated = patched_manager_text(original)
+    mode = path.stat().st_mode & 0o777
+    uid = path.stat().st_uid
+    gid = path.stat().st_gid
+    fd, temporary = tempfile.mkstemp(prefix=f'.{path.name}.', dir=str(path.parent))
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+            handle.write(updated)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, mode or 0o700)
+        try:
+            os.chown(temporary, uid, gid)
+        except PermissionError:
+            pass
+        subprocess.run(['bash', '-n', temporary], check=True)
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    return True
 
 
 def load_adapter(path):
@@ -30,7 +214,6 @@ def read_state(path):
     if not isinstance(value, dict):
         raise RuntimeError('状态文件不是 JSON 对象。')
     return value
-
 
 
 def read_json(path, default=None):
@@ -151,6 +334,54 @@ def main_nodes(state, kind, item_id):
     return title, metadata, nodes
 
 
+def slot_value(items, slot, key):
+    for item in items or []:
+        if item.get('slot') == slot:
+            return item.get(key)
+    return None
+
+
+def temporary_nodes(state, item_id):
+    temp = next(row for row in state.get('temporary_nodes', []) if row.get('id') == item_id)
+    source_type = temp.get('source_type')
+    if source_type not in ('vps', 'upstream'):
+        raise RuntimeError(f'临时节点来源类型无效：{source_type}')
+    vless = temp.get('vless') or {}
+    hy2 = temp.get('hy2') or {}
+    v_uuid = vless.get('client_uuid') or slot_value(
+        (state.get('vless') or {}).get('reserve_users'), vless.get('reserve_slot'), 'uuid'
+    )
+    h_password = None
+    if source_type == 'vps':
+        h_password = hy2.get('client_password') or slot_value(
+            (state.get('hy2') or {}).get('reserve_users'), hy2.get('reserve_slot'), 'password'
+        )
+    base = temp.get('name') or item_id
+    metadata = [
+        f"日本入口：{state['public_ip']}:{state['listen_port']}",
+        f"复制来源：{temp.get('source_name') or temp.get('source_id')}",
+        f"到期时间：{temp.get('expires_at', '未知')}",
+    ]
+    if source_type == 'upstream':
+        metadata.append('UDP：服务器端拒绝，防止绕过上游出口')
+    nodes = []
+    if v_uuid:
+        nodes.append(vless_node(base, state, v_uuid, source_type != 'upstream'))
+    if h_password:
+        nodes.append(hy2_node(base, state, h_password))
+    if not nodes:
+        raise RuntimeError(f'临时节点 {item_id} 没有可用客户端凭据。')
+    decorate_subscription(nodes, item_id)
+    if h_password:
+        ports, interval = hopping(state)
+        metadata.append(f'Hysteria 2 端口跳跃：{ports}（每 {interval} 秒切换）')
+        metadata.append(
+            f"Hysteria 2 服务端硬上限：上行 {int(state.get('hy2_limit_mbps') or 50)} Mbps / "
+            f"下行 {int(state.get('hy2_limit_mbps') or 50)} Mbps"
+        )
+    return f'临时节点：{base}', metadata, nodes
+
+
 def landing_nodes(state):
     mode = state.get('protocol_mode')
     raw_name = str(state.get('node_name') or '')
@@ -226,16 +457,29 @@ def render_package(adapter, title, metadata, nodes, out_dir):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--state', required=True)
-    parser.add_argument('--kind', choices=('direct', 'relay', 'upstream', 'landing'), required=True)
+    parser.add_argument('--upgrade-manager-only', action='store_true')
+    parser.add_argument('--manager-path', default=str(DEFAULT_MANAGER))
+    parser.add_argument('--state')
+    parser.add_argument('--kind', choices=('direct', 'relay', 'upstream', 'temporary', 'landing'))
     parser.add_argument('--id', default='')
-    parser.add_argument('--out', required=True)
+    parser.add_argument('--out')
     parser.add_argument('--adapter', default=str(DEFAULT_ADAPTER))
     args = parser.parse_args()
+    manager_path = Path(args.manager_path)
+    if args.upgrade_manager_only:
+        changed = install_manager_patch(manager_path, required=True)
+        print('中转管理器已升级。' if changed else '中转管理器已经是最新版本。')
+        return
+    for name in ('state', 'kind', 'out'):
+        if not getattr(args, name):
+            parser.error(f'--{name.replace("_", "-")} is required')
+    install_manager_patch(manager_path, required=False)
     state = read_state(args.state)
     adapter = load_adapter(Path(args.adapter))
     if args.kind == 'landing':
         title, metadata, nodes = landing_nodes(state)
+    elif args.kind == 'temporary':
+        title, metadata, nodes = temporary_nodes(state, args.id)
     else:
         title, metadata, nodes = main_nodes(state, args.kind, args.id)
     render_package(adapter, title, metadata, nodes, args.out)
