@@ -452,69 +452,14 @@ EOF_NETWORK
   echo "UDP 缓冲区：rmem_max=$(sysctl -n net.core.rmem_max 2>/dev/null || echo 未知)，wmem_max=$(sysctl -n net.core.wmem_max 2>/dev/null || echo 未知)"
 }
 
-prepare_timezone_and_daily_reboot() {
+configure_timezone() {
   [[ -f /usr/share/zoneinfo/Asia/Shanghai ]] || fail "Asia/Shanghai 时区文件不存在。"
   ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
   echo 'Asia/Shanghai' > /etc/timezone
   timedatectl set-timezone Asia/Shanghai >/dev/null 2>&1 || true
-
-  # 安装尚未完成时，禁止任何旧定时器或新定时器触发整机重启。
-  systemctl disable --now daily-reboot.timer daily-reboot.service >/dev/null 2>&1 || true
-  install -d -m700 /var/lib/vvv /usr/local/lib/vvv
-  date -d 'tomorrow 00:00:00' +%s > /var/lib/vvv/daily-reboot-not-before
-  chmod 600 /var/lib/vvv/daily-reboot-not-before
-
-  cat > /usr/local/lib/vvv/daily-reboot-guard.sh <<'EOF_REBOOT_GUARD'
-#!/usr/bin/env bash
-set -Eeuo pipefail
-marker=/var/lib/vvv/daily-reboot-not-before
-[[ -r "$marker" ]] || exit 0
-read -r not_before < "$marker"
-[[ "$not_before" =~ ^[0-9]+$ ]] || exit 0
-now="$(date +%s)"
-if (( now < not_before )); then
-  logger -t vvv-daily-reboot "忽略安装当天或异常提前触发的重启任务；最早允许时间：${not_before}。"
-  exit 0
-fi
-exec /usr/bin/systemctl reboot
-EOF_REBOOT_GUARD
-  chmod 700 /usr/local/lib/vvv/daily-reboot-guard.sh
-
-  cat > /etc/systemd/system/daily-reboot.service <<'EOF_REBOOT_SERVICE'
-[Unit]
-Description=Daily reboot at 06:00 Asia/Shanghai
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/lib/vvv/daily-reboot-guard.sh
-EOF_REBOOT_SERVICE
-  cat > /etc/systemd/system/daily-reboot.timer <<'EOF_REBOOT_TIMER'
-[Unit]
-Description=Daily reboot timer at 06:00 Asia/Shanghai
-
-[Timer]
-OnCalendar=*-*-* 06:00:00
-AccuracySec=1min
-RandomizedDelaySec=0
-Persistent=false
-Unit=daily-reboot.service
-
-[Install]
-WantedBy=timers.target
-EOF_REBOOT_TIMER
-  systemctl daemon-reload
   echo "时区：Asia/Shanghai"
-  echo "安装期间自动重启：已禁止"
+  echo "自动重启：未安装"
   echo "当前时间：$(date '+%F %T %Z %z')"
-}
-
-activate_daily_reboot_timer() {
-  # 只有代理、客户端配置和管理命令全部安装成功后，才允许启用定时器。
-  systemctl daemon-reload
-  systemctl enable --now daily-reboot.timer >/dev/null
-  systemctl is-active --quiet daily-reboot.timer || fail "每天 06:00 自动重启定时器未运行。"
-  systemctl is-active --quiet daily-reboot.service && fail "检测到重启服务在安装完成时异常运行。"
-  echo "每日自动重启：北京时间 06:00（首次最早为明天）"
 }
 
 prompt_initial_mode_and_port() {
@@ -2805,7 +2750,7 @@ bootstrap() {
   CURRENT_STEP="检测官方最新稳定版"; log "$CURRENT_STEP"; resolve_core_versions
   CURRENT_STEP="配置 Swap"; log "$CURRENT_STEP"; configure_swap
   CURRENT_STEP="配置 BBR 与 UDP 缓冲区"; log "$CURRENT_STEP"; configure_network_tuning
-  CURRENT_STEP="设置上海时区并锁定安装期间禁止重启"; log "$CURRENT_STEP"; prepare_timezone_and_daily_reboot
+  CURRENT_STEP="设置上海时区"; log "$CURRENT_STEP"; configure_timezone
 
   if mode_has_vless "$INSTALL_MODE"; then
     CURRENT_STEP="检查 VLESS TCP 端口"; log "$CURRENT_STEP"; check_port_available tcp "$INSTALL_PORT" xray
@@ -2825,7 +2770,6 @@ bootstrap() {
   CURRENT_STEP="生成并启动代理服务"; log "$CURRENT_STEP"; activate_initial_state_with_fallback
   CURRENT_STEP="安装 vps 管理命令"; log "$CURRENT_STEP"; install_shortcuts
   CURRENT_STEP="生成日本直连节点"; log "$CURRENT_STEP"; generate_direct_client_files
-  CURRENT_STEP="启用每天 06:00 自动重启"; log "$CURRENT_STEP"; activate_daily_reboot_timer
 
   apt-get clean
   rm -rf /var/lib/apt/lists/*
@@ -2839,7 +2783,7 @@ bootstrap() {
   mode_has_hy2 && echo "Hysteria 2：UDP/$(jq -r '.port_hopping.ports' "$STATE_FILE") → $(jq -r '.listen_port' "$STATE_FILE")，每 $(jq -r '.port_hopping.hop_interval_seconds' "$STATE_FILE") 秒切换，sing-box=$(systemctl is-active sing-box)"
   mode_has_hy2 && echo "重要：请在云厂商安全组及外部防火墙放行 UDP $(jq -r '.port_hopping.ports' "$STATE_FILE")。"
   echo "时区：Asia/Shanghai"
-  systemctl is-active --quiet daily-reboot.timer 2>/dev/null && echo "每天北京时间 06:00 自动重启" || echo "自动重启：当前环境未启用"
+  echo "自动重启：未安装（避免安装完成后整机重启或断开 SSH）"
   echo "以后重新显示日本直连节点：jp-show-nodes"
   echo "如需新建或管理中转线路：vps"
   echo "本次没有立即重启服务器，只重启了启用的代理服务。"
