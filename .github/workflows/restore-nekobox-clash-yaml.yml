@@ -1,0 +1,55 @@
+name: Restore NekoBox Clash YAML
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-nekobox-clash-yaml.yml'
+      - 'tools/restore_nekobox_clash_yaml.py'
+permissions:
+  contents: write
+concurrency:
+  group: restore-nekobox-clash-yaml-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Restore NekoBox subscription YAML
+        run: python3 tools/restore_nekobox_clash_yaml.py
+      - name: Validate exact scope
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile core-src/client_adapters.py core-src/sub_center.py
+          bash -n tests/final_runtime_validation.sh
+          python3 tests/test_client_port_hopping.py
+          python3 tests/test_client_single_node_subscription.py
+          python3 tests/client_upgrade_isolation_validation.py
+          python3 tests/conformance.py
+          grep -Fq "VERSION = 9" core-src/client_adapters.py
+          grep -Fq "'nekobox': {'render': render_nekobox, 'content_type': 'text/yaml; charset=utf-8'}" core-src/client_adapters.py
+          ! grep -Fq 'render_nekobox_subscription' core-src/client_adapters.py
+          ! grep -Fq "'nekobox-yaml'" core-src/client_adapters.py
+          grep -Fq "'nekobox-sn'" core-src/client_adapters.py
+          grep -Fq '1. 使用 HTTPS【默认】' core-src/bootstrap.sh
+          grep -Fq '/etc/alpine-release' core-src/host.sh
+      - name: Commit production changes
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            core-src/client_adapters.py \
+            tests/test_client_port_hopping.py \
+            tests/test_client_single_node_subscription.py \
+            tests/conformance.py \
+            tests/final_runtime_validation.sh
+          if ! git diff --cached --quiet; then
+            git commit -m 'Restore NekoBox ClashMeta YAML subscriptions'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
