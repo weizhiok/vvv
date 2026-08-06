@@ -1,0 +1,49 @@
+name: Publish client support v9
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-client-support-v9.yml'
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate main adapter
+        run: |
+          set -Eeuo pipefail
+          python3 core-src/client_adapters.py >/dev/null
+          grep -Fq 'VERSION = 9' core-src/client_adapters.py
+          grep -Fq "'nekobox': {'render': render_nekobox, 'content_type': 'text/yaml; charset=utf-8'}" core-src/client_adapters.py
+          ! grep -Fq 'render_nekobox_subscription' core-src/client_adapters.py
+          grep -Fq "'nekobox-sn'" core-src/client_adapters.py
+      - name: Publish exact adapter to client-support
+        run: |
+          set -Eeuo pipefail
+          cp core-src/client_adapters.py /tmp/client_upgrade.py
+          git fetch origin client-support
+          git switch -C client-support origin/client-support
+          cp /tmp/client_upgrade.py client_upgrade.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add client_upgrade.py
+          if ! git diff --cached --quiet; then
+            git commit -m 'Publish client support v9'
+            git push origin client-support
+          fi
+      - name: Verify published branch
+        run: |
+          set -Eeuo pipefail
+          git fetch origin main client-support
+          main_blob="$(git rev-parse origin/main:core-src/client_adapters.py)"
+          support_blob="$(git rev-parse origin/client-support:client_upgrade.py)"
+          test "$main_blob" = "$support_blob"
+          git show origin/client-support:client_upgrade.py | grep -Fq 'VERSION = 9'
+          git show origin/client-support:client_upgrade.py | grep -Fq "'nekobox': {'render': render_nekobox, 'content_type': 'text/yaml; charset=utf-8'}"
