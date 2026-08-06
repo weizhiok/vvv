@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/run-nekobox-json-alpine-reboot.yml'
       - 'tools/make_alpine_reboot_posix.py'
+      - 'tools/scope_posix_reboot_test.py'
 permissions:
   contents: write
 concurrency:
@@ -21,7 +22,9 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Make Alpine helper POSIX
-        run: python3 tools/make_alpine_reboot_posix.py
+        run: |
+          python3 tools/make_alpine_reboot_posix.py
+          python3 tools/scope_posix_reboot_test.py
       - name: Validate source and contracts
         run: |
           set -Eeuo pipefail
