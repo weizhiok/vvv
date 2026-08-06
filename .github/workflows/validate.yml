@@ -47,6 +47,7 @@ jobs:
       - name: Validate Hysteria 2 port hopping and client formats
         run: |
           python3 tests/test_hy2_port_hopping.py
+          python3 tests/test_install_reboot_guard.py
           python3 tests/test_client_port_hopping.py
           python3 tests/test_client_single_node_subscription.py
           python3 tests/test_subscription_node_order.py
