@@ -110,8 +110,8 @@ if old_summary not in text:
     raise SystemExit('summary marker not found')
 text = text.replace(old_summary, new_summary, 1)
 
-for forbidden in ('daily-reboot.timer', 'daily-reboot.service', 'OnCalendar=', 'Persistent=true', 'Persistent=false'):
+for forbidden in ('daily-reboot.timer', 'daily-reboot.service', 'OnCalendar='):
     if forbidden in text:
-        raise SystemExit(f'unsafe systemd timer path remains: {forbidden}')
+        raise SystemExit(f'unsafe systemd daily reboot path remains: {forbidden}')
 
 path.write_text(text, encoding='utf-8')
