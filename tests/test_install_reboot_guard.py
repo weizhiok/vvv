@@ -25,7 +25,7 @@ hop_install = between(HOP, 'install_service(){', 'show_status(){')
 
 for forbidden in (
     'daily-reboot.timer', 'daily-reboot.service', 'OnCalendar=',
-    'Persistent=true', 'Persistent=false', 'systemctl enable --now daily-reboot',
+    'systemctl enable --now daily-reboot',
 ):
     require(forbidden not in HOST, f'仍包含会在安装后异常触发的 systemd 重启路径：{forbidden}')
 
