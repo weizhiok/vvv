@@ -93,6 +93,10 @@ def main():
         assert 'peer=jp-hy2.jp-relay.local' in summary
         assert 'hop-interval=30' in (out / 'Loon.conf').read_text(encoding='utf-8')
         assert 'hop-interval: "20-30"' in (out / 'Clash-Verge-Rev.yaml').read_text(encoding='utf-8')
+        neko_yaml_file = (out / 'NekoBoxForAndroid.yaml').read_text(encoding='utf-8')
+        assert 'hop-interval: 30' in neko_yaml_file
+        assert 'hop-interval: "20-30"' not in neko_yaml_file
+        assert '【NekoBoxForAndroid】' in summary
         assert (out / 'NekoBoxForAndroid-基础URI.txt').read_text(encoding='utf-8').startswith('hy2://')
 
     print('Client Hysteria 2 compatibility tests passed.')

@@ -290,7 +290,7 @@ def atomic_write(path, data, mode=0o600):
 
 
 def render_context(context, adapter, obsolete=()):
-    obsolete = tuple(set(obsolete) | {'Loon-Shadowrocket.txt', 'NekoBoxForAndroid.yaml'})
+    obsolete = tuple(set(obsolete) | {'Loon-Shadowrocket.txt'})
     directory = Path(context['directory'])
     directory.mkdir(parents=True, exist_ok=True)
     os.chmod(directory, 0o700)

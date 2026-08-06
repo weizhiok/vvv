@@ -6,7 +6,7 @@ import json
 import re
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
-VERSION = 5
+VERSION = 6
 DEFAULT_UPGRADE_URL = (
     "https://raw.githubusercontent.com/weizhiok/vvv/client-support/client_upgrade.py"
 )
@@ -298,6 +298,7 @@ LOCAL_OUTPUTS = [
     {'filename': 'Loon-Import.txt', 'format': 'loon-import', 'display_name': 'Loon 正式导入链接'},
     {'filename': 'Shadowrocket.txt', 'format': 'shadowrocket-uri', 'display_name': 'Shadowrocket 分享链接'},
     {'filename': 'Clash-Verge-Rev.yaml', 'format': 'clash', 'display_name': 'Clash Verge Rev / Mihomo'},
+    {'filename': 'NekoBoxForAndroid.yaml', 'format': 'nekobox', 'display_name': 'NekoBoxForAndroid'},
     {'filename': 'NekoBoxForAndroid.txt', 'format': 'nekobox-import', 'display_name': 'NekoBoxForAndroid 单节点订阅'},
     {'filename': 'NekoBoxForAndroid-基础URI.txt', 'format': 'nekobox-uri',
      'display_name': 'NekoBoxForAndroid 基础分享链接', 'display': False},
@@ -400,8 +401,10 @@ def smoke_test():
     names = [item['filename'] for item in local_outputs()]
     if len(names) != len(set(names)) or 'Shadowrocket.txt' not in names:
         raise RuntimeError('local output manifest is invalid')
-    if 'Loon-Shadowrocket.txt' in names or 'NekoBoxForAndroid.yaml' in names:
+    if 'Loon-Shadowrocket.txt' in names:
         raise RuntimeError('obsolete duplicated local outputs are still present')
+    if 'NekoBoxForAndroid.yaml' not in names:
+        raise RuntimeError('NekoBox full local YAML output is missing')
     return True
 
 

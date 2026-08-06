@@ -192,8 +192,10 @@ def test_node_names_and_clients():
     bootstrap = read('core-src/bootstrap.sh')
     require('NekoBoxForAndroid.txt' in adapter and "'nekobox-uri'" in adapter,
             '本地配置缺少 NekoBox 独立分享链接')
-    require('Loon-Shadowrocket.txt' in package and 'NekoBoxForAndroid.yaml' in package,
-            '统一渲染器没有清理旧客户端输出')
+    require("'filename': 'NekoBoxForAndroid.yaml'" in adapter and "'format': 'nekobox'" in adapter,
+            '本机汇总缺少 NekoBox 完整 YAML 输出')
+    require('Loon-Shadowrocket.txt' in package and 'NekoBoxForAndroid.yaml' not in package,
+            '统一渲染器仍把 NekoBox YAML 当作旧文件清理')
     require('client_package_renderer.py' in host and 'client_package_renderer.py' in bootstrap,
             '主机或安装器没有接入统一客户端渲染器')
     require('generate_client_files' in landing and 'CLIENT_PACKAGE_RENDERER' in landing,

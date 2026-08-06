@@ -119,7 +119,7 @@ generate_client_files "$WORK/state-active.json" "" "$WORK/client-files" direct >
 [[ ! -s "$WORK/client-files/NekoBoxForAndroid.txt" ]]
 [[ -s "$WORK/client-files/NekoBoxForAndroid-基础URI.txt" ]]
 [[ -e "$WORK/client-files/Loon-Import.txt" && ! -s "$WORK/client-files/Loon-Import.txt" ]]
-[[ ! -e "$WORK/client-files/NekoBoxForAndroid.yaml" ]]
+[[ -s "$WORK/client-files/NekoBoxForAndroid.yaml" ]]
 [[ ! -e "$WORK/client-files/Loon-Shadowrocket.txt" ]]
 ! find "$WORK/client-files" -maxdepth 1 -type f -iname '*v2*' | grep -q .
 grep -q '^vless=' "$WORK/client-files/Quantumult-X.conf"
@@ -139,6 +139,13 @@ grep -q 'up: "30 Mbps"' "$WORK/client-files/Clash-Verge-Rev.yaml"
 grep -q 'down: "50 Mbps"' "$WORK/client-files/Clash-Verge-Rev.yaml"
 ! grep -q '^proxy-groups:' "$WORK/client-files/Clash-Verge-Rev.yaml"
 ! grep -q '^rules:' "$WORK/client-files/Clash-Verge-Rev.yaml"
+grep -q '【NekoBoxForAndroid】' "$WORK/client-files/客户端节点.txt"
+grep -q 'type: hysteria2' "$WORK/client-files/NekoBoxForAndroid.yaml"
+grep -q 'ports: "24443,30000-30031"' "$WORK/client-files/NekoBoxForAndroid.yaml"
+grep -q 'hop-interval: 30' "$WORK/client-files/NekoBoxForAndroid.yaml"
+! grep -q 'hop-interval: "20-30"' "$WORK/client-files/NekoBoxForAndroid.yaml"
+grep -q 'up: "30 Mbps"' "$WORK/client-files/NekoBoxForAndroid.yaml"
+grep -q 'down: "50 Mbps"' "$WORK/client-files/NekoBoxForAndroid.yaml"
 grep -q '^hy2://' "$WORK/client-files/NekoBoxForAndroid-基础URI.txt"
 grep -q 'mport=24443,30000-30031' "$WORK/client-files/NekoBoxForAndroid-基础URI.txt"
 ! find "$WORK/client-files" -type f -name '*二维码*' | grep -q .
