@@ -452,11 +452,33 @@ EOF_NETWORK
   echo "UDP 缓冲区：rmem_max=$(sysctl -n net.core.rmem_max 2>/dev/null || echo 未知)，wmem_max=$(sysctl -n net.core.wmem_max 2>/dev/null || echo 未知)"
 }
 
-configure_timezone_and_daily_reboot() {
+prepare_timezone_and_daily_reboot() {
   [[ -f /usr/share/zoneinfo/Asia/Shanghai ]] || fail "Asia/Shanghai 时区文件不存在。"
   ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
   echo 'Asia/Shanghai' > /etc/timezone
   timedatectl set-timezone Asia/Shanghai >/dev/null 2>&1 || true
+
+  # 安装尚未完成时，禁止任何旧定时器或新定时器触发整机重启。
+  systemctl disable --now daily-reboot.timer daily-reboot.service >/dev/null 2>&1 || true
+  install -d -m700 /var/lib/vvv /usr/local/lib/vvv
+  date -d 'tomorrow 00:00:00' +%s > /var/lib/vvv/daily-reboot-not-before
+  chmod 600 /var/lib/vvv/daily-reboot-not-before
+
+  cat > /usr/local/lib/vvv/daily-reboot-guard.sh <<'EOF_REBOOT_GUARD'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+marker=/var/lib/vvv/daily-reboot-not-before
+[[ -r "$marker" ]] || exit 0
+read -r not_before < "$marker"
+[[ "$not_before" =~ ^[0-9]+$ ]] || exit 0
+now="$(date +%s)"
+if (( now < not_before )); then
+  logger -t vvv-daily-reboot "忽略安装当天或异常提前触发的重启任务；最早允许时间：${not_before}。"
+  exit 0
+fi
+exec /usr/bin/systemctl reboot
+EOF_REBOOT_GUARD
+  chmod 700 /usr/local/lib/vvv/daily-reboot-guard.sh
 
   cat > /etc/systemd/system/daily-reboot.service <<'EOF_REBOOT_SERVICE'
 [Unit]
@@ -464,7 +486,7 @@ Description=Daily reboot at 06:00 Asia/Shanghai
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/systemctl reboot
+ExecStart=/usr/local/lib/vvv/daily-reboot-guard.sh
 EOF_REBOOT_SERVICE
   cat > /etc/systemd/system/daily-reboot.timer <<'EOF_REBOOT_TIMER'
 [Unit]
@@ -480,14 +502,19 @@ Unit=daily-reboot.service
 [Install]
 WantedBy=timers.target
 EOF_REBOOT_TIMER
-  if systemctl daemon-reload >/dev/null 2>&1 && \
-     systemctl enable --now daily-reboot.timer >/dev/null 2>&1 && \
-     systemctl is-active --quiet daily-reboot.timer; then
-    echo "每日自动重启：北京时间 06:00"
-  else
-    echo "警告：当前 VPS 不允许启用自动重启定时器，代理安装将继续。"
-  fi
+  systemctl daemon-reload
+  echo "时区：Asia/Shanghai"
+  echo "安装期间自动重启：已禁止"
   echo "当前时间：$(date '+%F %T %Z %z')"
+}
+
+activate_daily_reboot_timer() {
+  # 只有代理、客户端配置和管理命令全部安装成功后，才允许启用定时器。
+  systemctl daemon-reload
+  systemctl enable --now daily-reboot.timer >/dev/null
+  systemctl is-active --quiet daily-reboot.timer || fail "每天 06:00 自动重启定时器未运行。"
+  systemctl is-active --quiet daily-reboot.service && fail "检测到重启服务在安装完成时异常运行。"
+  echo "每日自动重启：北京时间 06:00（首次最早为明天）"
 }
 
 prompt_initial_mode_and_port() {
@@ -695,8 +722,6 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF_XRAY_SERVICE
-  systemctl daemon-reload
-  systemctl enable xray >/dev/null
 }
 
 create_sing_box_service() {
@@ -748,8 +773,6 @@ LimitNOFILE=262144
 WantedBy=multi-user.target
 EOF_HY2_SLOT_SERVICE
   "$HY2_HOP_WRAPPER" install-service
-  systemctl daemon-reload
-  systemctl enable sing-box >/dev/null
 }
 
 parse_x25519_keys() {
@@ -1105,6 +1128,7 @@ activate_initial_state() {
     "$XRAY" run -test -format=json -config "$tmp" || return 1
     install -o root -g xray -m 640 "$tmp" "$XRAY_CFG" || return 1
     systemctl daemon-reload
+    systemctl enable xray.service >/dev/null || return 1
     systemctl restart xray || return 1
     sleep 2
     verify_xray_runtime || { journalctl -u xray --no-pager -n 80 || true; return 1; }
@@ -1121,6 +1145,7 @@ activate_initial_state() {
     chmod 640 "$cert" "$key"
     runuser -u sing-box -- "$SING_BOX" check -c "$SING_CFG" || return 1
     systemctl daemon-reload
+    systemctl enable vvv-hy2-port-hop.service sing-box.service >/dev/null || return 1
     systemctl restart vvv-hy2-port-hop.service || return 1
     systemctl restart sing-box || return 1
     sync_hy2_slot_services "$STATE_FILE" "$STATE_FILE" || return 1
@@ -2780,7 +2805,7 @@ bootstrap() {
   CURRENT_STEP="检测官方最新稳定版"; log "$CURRENT_STEP"; resolve_core_versions
   CURRENT_STEP="配置 Swap"; log "$CURRENT_STEP"; configure_swap
   CURRENT_STEP="配置 BBR 与 UDP 缓冲区"; log "$CURRENT_STEP"; configure_network_tuning
-  CURRENT_STEP="设置上海时区和每天 06:00 自动重启"; log "$CURRENT_STEP"; configure_timezone_and_daily_reboot
+  CURRENT_STEP="设置上海时区并锁定安装期间禁止重启"; log "$CURRENT_STEP"; prepare_timezone_and_daily_reboot
 
   if mode_has_vless "$INSTALL_MODE"; then
     CURRENT_STEP="检查 VLESS TCP 端口"; log "$CURRENT_STEP"; check_port_available tcp "$INSTALL_PORT" xray
@@ -2800,6 +2825,7 @@ bootstrap() {
   CURRENT_STEP="生成并启动代理服务"; log "$CURRENT_STEP"; activate_initial_state_with_fallback
   CURRENT_STEP="安装 vps 管理命令"; log "$CURRENT_STEP"; install_shortcuts
   CURRENT_STEP="生成日本直连节点"; log "$CURRENT_STEP"; generate_direct_client_files
+  CURRENT_STEP="启用每天 06:00 自动重启"; log "$CURRENT_STEP"; activate_daily_reboot_timer
 
   apt-get clean
   rm -rf /var/lib/apt/lists/*

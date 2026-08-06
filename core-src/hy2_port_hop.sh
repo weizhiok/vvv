@@ -63,8 +63,6 @@ RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target
 EOF_SERVICE
-  systemctl daemon-reload
-  systemctl enable vvv-hy2-port-hop.service >/dev/null
 }
 
 show_status(){
