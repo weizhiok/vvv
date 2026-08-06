@@ -44,6 +44,8 @@ jobs:
           tests/test_node_lifecycle.sh
       - name: Validate lifecycle source uniqueness
         run: python3 tests/test_lifecycle_source_uniqueness.py
+      - name: Validate created-node client output
+        run: python3 tests/test_created_node_client_output.py
       - name: Validate Hysteria 2 port hopping and client formats
         run: |
           python3 tests/test_hy2_port_hopping.py
