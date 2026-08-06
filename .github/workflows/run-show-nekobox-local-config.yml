@@ -1,0 +1,54 @@
+name: Show NekoBox local configuration
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/run-show-nekobox-local-config.yml'
+      - 'tools/show_nekobox_local_config.py'
+      - 'tests/test_client_port_hopping.py'
+      - 'tests/client_upgrade_isolation_validation.py'
+      - 'tests/conformance.py'
+permissions:
+  contents: write
+concurrency:
+  group: show-nekobox-local-config-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add visible NekoBox configuration
+        run: python3 tools/show_nekobox_local_config.py
+      - name: Validate NekoBox outputs
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile \
+            core-src/client_adapters.py \
+            core-src/client_package_renderer.py \
+            core-src/client_local_renderer.py
+          python3 tests/test_client_port_hopping.py
+          python3 tests/test_client_single_node_subscription.py
+          python3 tests/client_upgrade_isolation_validation.py
+          python3 tests/conformance.py
+      - name: Commit verified source and tests
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            core-src/client_adapters.py \
+            core-src/client_package_renderer.py \
+            core-src/client_local_renderer.py \
+            tests/test_client_port_hopping.py \
+            tests/client_upgrade_isolation_validation.py \
+            tests/conformance.py
+          if ! git diff --cached --quiet; then
+            git commit -m 'Show NekoBox local configuration'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
