@@ -1,0 +1,38 @@
+name: Update final runtime NekoBox checks
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/run-update-final-runtime-nekobox.yml'
+      - 'tools/update_final_runtime_nekobox.py'
+permissions:
+  contents: write
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update final runtime checks
+        run: python3 tools/update_final_runtime_nekobox.py
+      - name: Validate shell and assertions
+        run: |
+          set -Eeuo pipefail
+          bash -n tests/final_runtime_validation.sh
+          grep -q 'NekoBoxForAndroid.yaml' tests/final_runtime_validation.sh
+          grep -q 'hop-interval: 30' tests/final_runtime_validation.sh
+          grep -q '【NekoBoxForAndroid】' tests/final_runtime_validation.sh
+      - name: Commit permanent test change
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tests/final_runtime_validation.sh
+          if ! git diff --cached --quiet; then
+            git commit -m 'Validate NekoBox final runtime output'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
