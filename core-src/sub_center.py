@@ -582,6 +582,24 @@ def list_hosts():
     return registry.get('hosts', [])
 
 
+def host_summary(entry):
+    host_id = str(entry.get('host_id') or '')
+    doc = read_json(HOSTS / f'{host_id}.json', {}) or {}
+    role = str(entry.get('role') or doc.get('role') or 'unknown')
+    states = doc.get('states') or {}
+    state = (states.get('direct') or doc.get('state') or {}) if role == 'landing-direct' else (doc.get('state') or states.get('direct') or {})
+    raw_ip = (state.get('public_ip') or state.get('japan_public_ip') or
+              state.get('remote_public_ip') or (doc.get('meta') or {}).get('public_ip') or '')
+    try:
+        public_ip = str(ipaddress.ip_address(str(raw_ip).strip()))
+    except ValueError:
+        public_ip = '未知IP'
+    timestamp = str(entry.get('updated_at') or doc.get('last_seen') or entry.get('created_at') or '')
+    matched = re.match(r'^(\d{4}-\d{2}-\d{2})', timestamp)
+    sync_date = matched.group(1) if matched else '未知日期'
+    return {'host_id': host_id, 'role': role, 'public_ip': public_ip, 'sync_date': sync_date}
+
+
 def show_host(host_id):
     entry = next((item for item in list_hosts() if item.get('host_id') == host_id), None)
     if not entry:
@@ -604,7 +622,7 @@ if __name__ == '__main__':
     commands.add_parser('regenerate')
     listing = commands.add_parser('list-nodes'); listing.add_argument('--tsv', action='store_true')
     shown = commands.add_parser('show-node'); shown.add_argument('node_id')
-    hosts = commands.add_parser('list-hosts'); hosts.add_argument('--tsv', action='store_true')
+    hosts = commands.add_parser('list-hosts'); hosts.add_argument('--tsv', action='store_true'); hosts.add_argument('--summary-tsv', action='store_true')
     showh = commands.add_parser('show-host'); showh.add_argument('host_id')
     rename = commands.add_parser('rename-node'); rename.add_argument('node_id'); rename.add_argument('name')
     bulk = commands.add_parser('bulk-rename'); bulk.add_argument('names')
@@ -627,7 +645,11 @@ if __name__ == '__main__':
         print(json.dumps(show_node(args.node_id), ensure_ascii=False, indent=2))
     elif args.command == 'list-hosts':
         rows = list_hosts()
-        if args.tsv:
+        if args.summary_tsv:
+            for entry in rows:
+                summary = host_summary(entry)
+                print(f"{summary['host_id']}\t{summary['role']}\t{summary['public_ip']}\t{summary['sync_date']}")
+        elif args.tsv:
             for entry in rows:
                 print(f"{entry.get('host_id','')}\t{entry.get('role','')}\t{entry.get('hostname','')}\t{entry.get('display_name','')}\t{entry.get('updated_at','')}")
         else:
