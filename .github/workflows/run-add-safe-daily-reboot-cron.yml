@@ -1,0 +1,42 @@
+name: Add safe daily 6am reboot cron
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/run-add-safe-daily-reboot-cron.yml'
+      - 'tools/add_safe_daily_reboot_cron.py'
+      - 'tests/test_install_reboot_guard.py'
+permissions:
+  contents: write
+concurrency:
+  group: add-safe-daily-reboot-cron-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add safe cron reboot
+        run: python3 tools/add_safe_daily_reboot_cron.py
+      - name: Validate implementation
+        run: |
+          set -Eeuo pipefail
+          bash -n core-src/host.sh
+          python3 tests/test_install_reboot_guard.py
+          python3 tests/test_hy2_port_hopping.py
+          python3 tests/conformance.py
+      - name: Commit verified source change
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add core-src/host.sh
+          if ! git diff --cached --quiet; then
+            git commit -m 'Add safe daily 6am reboot cron'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
