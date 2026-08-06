@@ -7,7 +7,7 @@ import re
 import zlib
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
-VERSION = 7
+VERSION = 8
 DEFAULT_UPGRADE_URL = (
     "https://raw.githubusercontent.com/weizhiok/vvv/client-support/client_upgrade.py"
 )
@@ -393,6 +393,69 @@ def render_mihomo_proxies(nodes, hop_interval, include_fast_open=False):
     return '\n'.join(lines)
 
 
+def _sing_box_server_ports(node):
+    values = []
+    for item in hy2_ports(node).split(','):
+        item = item.strip()
+        if not item:
+            continue
+        if '-' in item:
+            start, end = item.split('-', 1)
+            values.append(f'{start}:{end}')
+        else:
+            values.append(item)
+    return values or [str(node['port'])]
+
+
+def render_nekobox_subscription(nodes):
+    outbounds = []
+    for node in nodes:
+        if node['protocol'] == 'vless':
+            outbounds.append({
+                'type': 'vless',
+                'tag': node['name'],
+                'server': node['server'],
+                'server_port': int(node['port']),
+                'uuid': node['uuid'],
+                'flow': 'xtls-rprx-vision',
+                'network': 'tcp',
+                'packet_encoding': 'xudp',
+                'tls': {
+                    'enabled': True,
+                    'server_name': node['sni'],
+                    'insecure': True,
+                    'utls': {'enabled': True, 'fingerprint': 'chrome'},
+                    'reality': {
+                        'enabled': True,
+                        'public_key': node['public_key'],
+                        'short_id': node['short_id'],
+                    },
+                },
+            })
+        else:
+            outbounds.append({
+                'type': 'hysteria2',
+                'tag': node['name'],
+                'server': node['server'],
+                'server_ports': _sing_box_server_ports(node),
+                'hop_interval': f'{fixed_hop_interval(node)}s',
+                'up_mbps': client_up_mbps(node),
+                'down_mbps': client_down_mbps(node),
+                'obfs': {
+                    'type': 'salamander',
+                    'password': node['obfs_password'],
+                },
+                'password': node['password'],
+                'tls': {
+                    'enabled': True,
+                    'server_name': node['sni'],
+                    'insecure': True,
+                    'alpn': ['h3'],
+                },
+            })
+    return json.dumps({'outbounds': outbounds}, ensure_ascii=False, indent=2) + '\n'
+
+
 def render_clash(nodes):
     return render_mihomo_proxies(nodes, MIHOMO_HOP_INTERVAL)
 
@@ -403,7 +466,8 @@ def render_nekobox(nodes):
 
 RENDERERS = {
     'clash': {'render': render_clash, 'content_type': 'text/yaml; charset=utf-8'},
-    'nekobox': {'render': render_nekobox, 'content_type': 'text/yaml; charset=utf-8'},
+    'nekobox': {'render': render_nekobox_subscription, 'content_type': 'application/json; charset=utf-8'},
+    'nekobox-yaml': {'render': render_nekobox, 'content_type': 'text/yaml; charset=utf-8'},
     'nekobox-sn': {'render': render_nekobox_sn_links, 'content_type': 'text/plain; charset=utf-8'},
     'nekobox-uri': {'render': render_nekobox_uris, 'content_type': 'text/plain; charset=utf-8'},
     'nekobox-import': {'render': render_nekobox_import, 'content_type': 'text/plain; charset=utf-8'},
@@ -423,7 +487,7 @@ LOCAL_OUTPUTS = [
     {'filename': 'Shadowrocket.txt', 'format': 'shadowrocket-uri', 'display_name': 'Shadowrocket 分享链接'},
     {'filename': 'NekoBoxForAndroid-SN.txt', 'format': 'nekobox-sn', 'display_name': 'NekoBox For Android'},
     {'filename': 'Clash-Verge-Rev.yaml', 'format': 'clash', 'display_name': 'Clash Verge Rev / Mihomo'},
-    {'filename': 'NekoBoxForAndroid.yaml', 'format': 'nekobox',
+    {'filename': 'NekoBoxForAndroid.yaml', 'format': 'nekobox-yaml',
      'display_name': 'NekoBoxForAndroid YAML', 'display': False},
     {'filename': 'NekoBoxForAndroid.txt', 'format': 'nekobox-import',
      'display_name': 'NekoBoxForAndroid 单节点订阅', 'display': False},
@@ -511,9 +575,22 @@ def smoke_test():
         raise RuntimeError('Mihomo Hysteria 2 client tuning fields are missing')
     if 'proxy-groups:' in clash or 'rules:' in clash or 'mixed-port:' in clash:
         raise RuntimeError('Clash node-only output contains full-profile fields')
-    neko = render('nekobox', sample)
-    if 'hop-interval: 30' not in neko or 'hop-interval: "20-30"' in neko:
-        raise RuntimeError('NekoBox subscription YAML must use fixed 30-second hopping')
+    neko = json.loads(render('nekobox', sample))
+    if not isinstance(neko.get('outbounds'), list) or len(neko['outbounds']) != 2:
+        raise RuntimeError('NekoBox sing-box subscription outbounds are missing')
+    neko_vless = next((item for item in neko['outbounds'] if item.get('type') == 'vless'), None)
+    neko_hy2 = next((item for item in neko['outbounds'] if item.get('type') == 'hysteria2'), None)
+    if not neko_vless or not neko_hy2:
+        raise RuntimeError('NekoBox sing-box subscription protocol output is incomplete')
+    if neko_hy2.get('server_ports') != ['443', '20000:50000'] or neko_hy2.get('hop_interval') != '30s':
+        raise RuntimeError('NekoBox sing-box subscription lost HY2 port hopping')
+    if neko_hy2.get('up_mbps') != 30 or neko_hy2.get('down_mbps') != 50:
+        raise RuntimeError('NekoBox sing-box subscription lost client bandwidth')
+    if ((neko_vless.get('tls') or {}).get('reality') or {}).get('short_id') != '0123456789abcdef':
+        raise RuntimeError('NekoBox sing-box subscription lost VLESS Reality')
+    neko_yaml = render('nekobox-yaml', sample)
+    if 'hop-interval: 30' not in neko_yaml or 'hop-interval: "20-30"' in neko_yaml:
+        raise RuntimeError('NekoBox hidden local YAML must keep fixed 30-second hopping')
     neko_sn = render('nekobox-sn', sample).splitlines()
     if len(neko_sn) != 2 or not neko_sn[0].startswith('sn://vmess?') or not neko_sn[1].startswith('sn://hysteria?'):
         raise RuntimeError('NekoBox local SN links are missing')
