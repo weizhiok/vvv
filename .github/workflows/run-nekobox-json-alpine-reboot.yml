@@ -1,12 +1,10 @@
-name: Apply NekoBox JSON and Alpine reboot
+name: Validate NekoBox JSON and Alpine reboot
 on:
   pull_request:
     branches: [main]
     paths:
       - '.github/workflows/run-nekobox-json-alpine-reboot.yml'
-      - 'tools/apply_nekobox_json_alpine_reboot.py'
-      - 'tools/fix_generated_nekobox_renderer.py'
-      - 'tools/continue_nekobox_json_alpine_patch.py'
+      - 'tools/make_alpine_reboot_posix.py'
 permissions:
   contents: write
 concurrency:
@@ -22,19 +20,8 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Apply confirmed changes
-        run: |
-          set -Eeuo pipefail
-          set +e
-          output="$(python3 tools/apply_nekobox_json_alpine_reboot.py 2>&1)"
-          status=$?
-          set -e
-          printf '%s\n' "$output"
-          if (( status != 0 )); then
-            grep -Fq 'NekoBox conformance renderer: marker not found in tests/conformance.py' <<<"$output" || exit "$status"
-          fi
-          python3 tools/fix_generated_nekobox_renderer.py
-          python3 tools/continue_nekobox_json_alpine_patch.py
+      - name: Make Alpine helper POSIX
+        run: python3 tools/make_alpine_reboot_posix.py
       - name: Validate source and contracts
         run: |
           set -Eeuo pipefail
@@ -42,27 +29,29 @@ jobs:
           bash -n core-src/bootstrap.sh
           bash -n core-src/host.sh
           bash -n tests/final_runtime_validation.sh
+          python3 - <<'PY_POSIX_HELPER'
+          from pathlib import Path
+          import subprocess, tempfile
+          text = Path('core-src/host.sh').read_text(encoding='utf-8')
+          body = text.split("cat > /usr/local/lib/vvv/daily-reboot.sh <<'EOF_DAILY_REBOOT'", 1)[1].split('EOF_DAILY_REBOOT', 1)[0].lstrip('\n')
+          with tempfile.NamedTemporaryFile('w', encoding='utf-8', suffix='.sh') as handle:
+              handle.write(body)
+              handle.flush()
+              subprocess.run(['/bin/sh', '-n', handle.name], check=True)
+          PY_POSIX_HELPER
           python3 tests/test_client_port_hopping.py
           python3 tests/test_client_single_node_subscription.py
           python3 tests/client_upgrade_isolation_validation.py
           python3 tests/test_install_reboot_guard.py
           python3 tests/test_hy2_port_hopping.py
           python3 tests/conformance.py
-      - name: Commit verified production changes
+      - name: Commit verified POSIX helper
         run: |
           set -Eeuo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add \
-            core-src/client_adapters.py \
-            core-src/bootstrap.sh \
-            core-src/host.sh \
-            tests/test_client_port_hopping.py \
-            tests/test_client_single_node_subscription.py \
-            tests/test_install_reboot_guard.py \
-            tests/conformance.py \
-            tests/final_runtime_validation.sh
+          git add core-src/host.sh tests/test_install_reboot_guard.py
           if ! git diff --cached --quiet; then
-            git commit -m 'Use NekoBox sing-box JSON and support Alpine reboot'
+            git commit -m 'Make Alpine reboot helper POSIX sh'
             git push origin HEAD:${{ github.event.pull_request.head.ref }}
           fi
