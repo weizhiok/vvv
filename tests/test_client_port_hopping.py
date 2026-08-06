@@ -49,7 +49,16 @@ def main():
         'sn://vmess?eNpjYWBgMDIw1jPQMzQ01tu4m5GBYakhFOiCCRMQYQHjwkBFSU6xblFBUYVuWWZxZv67_0BQkvyhJOdzeXm5XnF-WklSYl62XtaHxkbG5Iyi_NynawJKk3Iyk71TKx1LUzJLdA2NjE1MzcwtLA0wWQihxKTklNRnDI1MDDDACMVeAbphPq7BwboI5xtamZhsbmwEAE3gPFY',
         'sn://hysteria?eNpjZ2BgMDIw1jPQMzQ01ttowcLAwMQAASWpxSW6BYnFxeX5RU_gAvlJacVw0awC3YxKIz0gVZSak1ipl5OfnPimUQ5kJhAzNjLAAEjIxMRYx8gACHRNgcQGRqCQV4CuR6SRLsIBhlYmJpsbGwGtkyOX',
     ], sn_links
-    assert adapters.render('nekobox', [node]).startswith('proxies:\n')
+    neko_subscription = json.loads(adapters.render('nekobox', [node]))
+    assert list(neko_subscription) == ['outbounds']
+    assert len(neko_subscription['outbounds']) == 1
+    hy2_outbound = neko_subscription['outbounds'][0]
+    assert hy2_outbound['type'] == 'hysteria2'
+    assert hy2_outbound['server_ports'] == ['443', '20000:50000']
+    assert hy2_outbound['hop_interval'] == '30s'
+    assert hy2_outbound['up_mbps'] == 30 and hy2_outbound['down_mbps'] == 50
+    assert hy2_outbound['obfs'] == {'type': 'salamander', 'password': 'test-obfs'}
+    assert hy2_outbound['tls']['server_name'] == 'jp-hy2.jp-relay.local'
     loon = adapters.render('loon', [node]).strip()
     assert loon == (
         'JP-HY2-203.0.113.1:443 = Hysteria2,203.0.113.1,443,test-password,'
@@ -65,7 +74,7 @@ def main():
     for forbidden in ('mixed-port:', 'proxy-groups:', 'rules:', 'fast-open: true'):
         assert forbidden not in clash, forbidden
 
-    neko_yaml = adapters.render('nekobox', [node])
+    neko_yaml = adapters.render('nekobox-yaml', [node])
     assert 'hop-interval: 30' in neko_yaml
     assert 'hop-interval: "20-30"' not in neko_yaml
     assert 'up: "30 Mbps"' in neko_yaml and 'down: "50 Mbps"' in neko_yaml

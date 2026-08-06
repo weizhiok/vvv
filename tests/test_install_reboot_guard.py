@@ -18,6 +18,7 @@ def between(text, start, end):
 
 configure_timezone = between(HOST, 'configure_timezone() {', 'install_daily_reboot_cron() {')
 daily_reboot = between(HOST, 'install_daily_reboot_cron() {', 'prompt_initial_mode_and_port() {')
+daily_reboot_helper = daily_reboot.split("cat > /usr/local/lib/vvv/daily-reboot.sh <<'EOF_DAILY_REBOOT'", 1)[1].split('EOF_DAILY_REBOOT', 1)[0]
 create_xray = between(HOST, 'create_xray_service() {', 'create_sing_box_service() {')
 create_sing = between(HOST, 'create_sing_box_service() {', 'parse_x25519_keys() {')
 initial = between(HOST, 'activate_initial_state() {', 'update_state_core_versions() {')
@@ -37,23 +38,36 @@ require('cron' in between(HOST, 'upgrade_system_once() {', 'configure_swap() {')
         '安装依赖没有包含 cron')
 
 require('/etc/cron.d/vvv-daily-reboot' in daily_reboot,
-        '缺少 VVV 专用 cron 文件')
+        '缺少 Debian VVV 专用 cron 文件')
 require('0 6 * * * root /usr/local/lib/vvv/daily-reboot.sh' in daily_reboot,
-        'cron 不是每天北京时间 06:00 执行')
-require("date -d 'tomorrow 00:00:00'" in daily_reboot,
-        '没有限制首次重启最早为安装次日')
-require('daily-reboot-not-before' in daily_reboot and 'now < not_before' in daily_reboot,
-        '每日重启脚本缺少次日门槛')
+        'Debian cron 不是每天北京时间 06:00 执行')
+require('/etc/alpine-release' in daily_reboot,
+        '每日重启模块没有识别 Alpine')
+require('/etc/crontabs/root' in daily_reboot and
+        '0 6 * * * /usr/local/lib/vvv/daily-reboot.sh' in daily_reboot,
+        'Alpine root crontab 不是每天北京时间 06:00 执行')
+require('rc-update add crond default' in daily_reboot and
+        'rc-service crond restart' in daily_reboot and 'rc-service crond status' in daily_reboot,
+        'Alpine crond 没有通过 OpenRC 启用、刷新和验证')
+require("date -d 'tomorrow" not in daily_reboot,
+        '每日重启仍依赖 GNU date -d tomorrow')
+require('daily-reboot-install-day' in daily_reboot and
+        '[ "$current_day" -le "$install_day" ]' in daily_reboot,
+        '每日重启脚本缺少跨 Debian/Alpine 的次日门槛')
 require("date '+%H:%M'" in daily_reboot and '06:00' in daily_reboot,
         '每日重启脚本缺少执行时刻二次校验')
-require('flock -n 9' in daily_reboot,
-        '每日重启脚本缺少并发锁')
-require('exec /usr/bin/systemctl reboot --no-wall' in daily_reboot,
-        '每日重启脚本没有使用明确的 systemctl reboot')
-require('systemctl enable cron.service' in daily_reboot and 'systemctl restart cron.service' in daily_reboot,
-        'cron 服务没有在安装完成后启用并刷新')
-require('systemctl is-active --quiet cron.service' in daily_reboot,
-        '安装后没有验证 cron 服务状态')
+require('mkdir "$lock_dir"' in daily_reboot and 'flock' not in daily_reboot,
+        '每日重启没有使用 Debian/Alpine 通用的原子目录锁')
+require('#!/bin/sh' in daily_reboot_helper and '#!/usr/bin/env bash' not in daily_reboot_helper,
+        'Alpine 重启助手没有使用 POSIX /bin/sh')
+require('[[' not in daily_reboot_helper and '((' not in daily_reboot_helper,
+        'Alpine 重启助手仍包含 Bash 专用语法')
+require('systemctl reboot --no-wall' in daily_reboot and 'command -v reboot' in daily_reboot,
+        '每日重启脚本没有同时覆盖 systemd 与 Alpine reboot')
+require('systemctl enable cron.service' in daily_reboot and
+        'systemctl restart cron.service' in daily_reboot and
+        'systemctl is-active --quiet cron.service' in daily_reboot,
+        'Debian cron 服务没有在安装完成后启用、刷新和验证')
 
 require('systemctl daemon-reload' not in create_xray and 'systemctl enable xray' not in create_xray,
         'Xray 服务定义阶段仍然操作 systemd 运行状态')

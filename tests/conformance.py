@@ -53,12 +53,16 @@ def test_install_menu_and_upfront_parameters():
     require(positions == sorted(positions), '初始菜单顺序错误')
     for token in ('安装参数（全部前置设置）', 'Hysteria 2 每连接服务器强制限速',
                   '10#$input>=30', '10#$input<=100', '请输入订阅中心对接码（支持 VVC1 或含注册票据的 JPR3；按回车跳过）',
-                  '参数已收集完毕，开始全自动安装'):
+                  '参数已收集完毕，开始全自动安装',
+                  '1. 使用 HTTPS【默认】', '2. 使用 HTTP', '3. 使用 Cloudflare Tunnel'):
         require(token in text, f'缺少前置参数功能：{token}')
     summary = text.index('show_parameter_summary')
     execute = text.index('case "$choice" in', summary)
     require('read -r' not in text[summary:execute], '参数总览后仍有输入')
     require('schema == 2 || "$schema" == 3' in text or '[[ "$schema" == 2 || "$schema" == 3 ]]' in text, '现有 schema 3 订阅中心不会无损迁移')
+    for obsolete in ('1. 直接 HTTPS【默认】', '域名由 Caddy 自动申请公共证书',
+                     '2. 直接 HTTP', '固定 HTTPS 域名（Cloudflare Tunnel）'):
+        require(obsolete not in text, f'订阅传输菜单仍包含旧说明：{obsolete}')
 
 
 def test_vvc1_ip_only_contract():
@@ -165,18 +169,26 @@ def test_node_names_and_clients():
         require(recognition and recognition['name'] == 'NekoBoxForAndroid' and recognition['format'] == 'nekobox',
                 'NekoBoxForAndroid 1.4.2 请求头未被识别')
         rendered = adapters.render('clash', center.all_nodes())
-        nekobox = adapters.render('nekobox', center.all_nodes())
-        require(rendered.startswith('proxies:\n') and nekobox.startswith('proxies:\n'),
-                'Clash/NekoBox 没有使用节点型 Clash Meta 格式')
+        nekobox = json.loads(adapters.render('nekobox', center.all_nodes()))
+        require(rendered.startswith('proxies:\n') and isinstance(nekobox.get('outbounds'), list),
+                'Clash YAML 或 NekoBox sing-box JSON 格式错误')
         require('proxy-groups:' not in rendered and 'rules:' not in rendered,
                 'Clash 节点订阅仍包含策略组或规则')
         require('up: "30 Mbps"' in rendered and 'down: "50 Mbps"' in rendered,
                 'Clash 客户端带宽不是 30/50 Mbps')
         require('ports: "443,20000-50000"' in rendered and 'hop-interval: "20-30"' in rendered,
                 'Mihomo 客户端模板缺少随机 HY2 端口跳跃')
-        require('up: "30 Mbps"' in nekobox and 'down: "50 Mbps"' in nekobox and 'hop-interval: 30' in nekobox,
-                'NekoBox 客户端模板缺少固定 30 秒和 30/50 Mbps')
-        require(nekobox != rendered, 'NekoBox 与 Clash 的跳跃间隔仍被错误共用')
+        hy2_outbound = next(item for item in nekobox['outbounds'] if item['type'] == 'hysteria2')
+        require(hy2_outbound['server_ports'] == ['443', '20000:50000'] and
+                hy2_outbound['hop_interval'] == '30s' and hy2_outbound['up_mbps'] == 30 and
+                hy2_outbound['down_mbps'] == 50,
+                'NekoBox sing-box 出站缺少固定 30 秒、端口跳跃或 30/50 Mbps')
+        vless_outbound = next(item for item in nekobox['outbounds'] if item['type'] == 'vless')
+        require(vless_outbound['flow'] == 'xtls-rprx-vision' and
+                vless_outbound['tls']['reality']['enabled'] is True,
+                'NekoBox sing-box 出站缺少 VLESS Reality')
+        require(adapters.render('nekobox-yaml', center.all_nodes()).startswith('proxies:\n'),
+                '本机隐藏 NekoBox YAML 输出丢失')
         loon = adapters.render('loon', center.all_nodes())
         require('server-ports="443,20000-50000"' in loon and 'hop-interval=30' in loon and
                 'block-quic=true' in loon and 'download-bandwidth=50' in loon,
@@ -192,10 +204,11 @@ def test_node_names_and_clients():
     bootstrap = read('core-src/bootstrap.sh')
     require('NekoBoxForAndroid-SN.txt' in adapter and "'nekobox-sn'" in adapter,
             '本地配置缺少 NekoBox SN LINK')
-    require("'filename': 'NekoBoxForAndroid.yaml'" in adapter and "'format': 'nekobox'" in adapter,
-            'NekoBox YAML 渲染器缺失')
-    require("'name': 'NekoBoxForAndroid', 'format': 'nekobox'" in adapter,
-            '订阅中心 NekoBox 下发不再是 YAML')
+    require("'filename': 'NekoBoxForAndroid.yaml'" in adapter and "'format': 'nekobox-yaml'" in adapter,
+            '本机隐藏 NekoBox YAML 渲染器缺失')
+    require("'name': 'NekoBoxForAndroid', 'format': 'nekobox'" in adapter and
+            'application/json; charset=utf-8' in adapter and 'render_nekobox_subscription' in adapter,
+            '订阅中心 NekoBox 没有下发 sing-box JSON')
     display_tokens = [
         "'display_name': 'Quantumult X'", "'display_name': 'Loon'",
         "'display_name': 'Shadowrocket 分享链接'", "'display_name': 'NekoBox For Android'",
