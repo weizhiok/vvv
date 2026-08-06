@@ -5,7 +5,7 @@ on:
     paths:
       - '.github/workflows/run-nekobox-json-alpine-reboot.yml'
       - 'tools/apply_nekobox_json_alpine_reboot.py'
-      - 'tools/fix_nekobox_json_alpine_patch.py'
+      - 'tools/continue_nekobox_json_alpine_patch.py'
 permissions:
   contents: write
 concurrency:
@@ -23,8 +23,16 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Apply confirmed changes
         run: |
-          python3 tools/apply_nekobox_json_alpine_reboot.py
-          python3 tools/fix_nekobox_json_alpine_patch.py
+          set -Eeuo pipefail
+          set +e
+          output="$(python3 tools/apply_nekobox_json_alpine_reboot.py 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          if (( status != 0 )); then
+            grep -Fq 'NekoBox conformance renderer: marker not found in tests/conformance.py' <<<"$output" || exit "$status"
+          fi
+          python3 tools/continue_nekobox_json_alpine_patch.py
       - name: Validate source and contracts
         run: |
           set -Eeuo pipefail
