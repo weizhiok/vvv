@@ -115,6 +115,7 @@ def seed_obsolete_outputs(directory):
 
 def verify_new_outputs(directory, role, expect_subscription=False):
     neko_yaml = directory / 'NekoBoxForAndroid.yaml'
+    neko_sn = directory / 'NekoBoxForAndroid-SN.txt'
     neko = directory / 'NekoBoxForAndroid.txt'
     basic = directory / 'NekoBoxForAndroid-基础URI.txt'
     require(neko_yaml.is_file(), f'{role}缺少 NekoBox 完整 YAML 输出')
@@ -123,6 +124,12 @@ def verify_new_outputs(directory, role, expect_subscription=False):
             f'{role} NekoBox YAML 缺少完整节点或固定 30 秒跳跃')
     require('hop-interval: "20-30"' not in neko_yaml_text,
             f'{role} NekoBox YAML 错误复用了 Mihomo 随机跳跃')
+    require(neko_sn.is_file(), f'{role}缺少 NekoBox SN LINK 输出')
+    sn_lines = neko_sn.read_text(encoding='utf-8').splitlines()
+    require(any(line.startswith('sn://vmess?') for line in sn_lines),
+            f'{role} NekoBox SN LINK 缺少 VLESS')
+    require(any(line.startswith('sn://hysteria?') for line in sn_lines),
+            f'{role} NekoBox SN LINK 缺少 Hysteria 2')
     require(neko.is_file(), f'{role}缺少 NekoBox 单节点订阅输出')
     require(basic.is_file() and 'hy2://' in basic.read_text(encoding='utf-8'),
             f'{role} NekoBox 基础 URI 缺失')
@@ -153,6 +160,11 @@ def verify_new_outputs(directory, role, expect_subscription=False):
             f'{role} Mihomo 输出缺少随机跳跃或 30/50 Mbps')
     require('proxy-groups:' not in clash and 'rules:' not in clash,
             f'{role} Mihomo 输出仍包含策略组或规则')
+    summary = (directory / '客户端节点.txt').read_text(encoding='utf-8')
+    labels = ['【Quantumult X】', '【Loon】', '【Shadowrocket 分享链接】',
+              '【NekoBox For Android】', '【Clash Verge Rev / Mihomo】']
+    positions = [summary.index(label) for label in labels]
+    require(positions == sorted(positions), f'{role}本机客户端显示顺序错误')
 
 
 def test_main_role_upgrade():
@@ -181,7 +193,7 @@ def test_main_role_upgrade():
         verify_new_outputs(relay_dir, '中转线路', True)
         require((relay_dir / '客户端节点.txt').is_file(), '中转线路本机输出未重新生成')
         text = (root / 'root/日本VPS-客户端节点.txt').read_text(encoding='utf-8')
-        require('NekoBoxForAndroid' in text and 'Shadowrocket' in text and 'Quantumult X' in text, '主机汇总缺少客户端')
+        require('NekoBox For Android' in text and 'Shadowrocket' in text and 'Quantumult X' in text, '主机汇总缺少客户端')
 
 
 def test_landing_role_upgrade():
@@ -201,8 +213,8 @@ def test_landing_role_upgrade():
         verify_protected(root, protected)
         verify_new_outputs(output_dir, '中转副机')
         landing_summary = (root / 'root/中转客户端节点.txt').read_text(encoding='utf-8')
-        require('Shadowrocket' in landing_summary and 'NekoBoxForAndroid' in landing_summary,
-                '中转副机汇总缺少 Shadowrocket 或 NekoBoxForAndroid')
+        require('Shadowrocket' in landing_summary and 'NekoBox For Android' in landing_summary,
+                '中转副机汇总缺少 Shadowrocket 或 NekoBox For Android')
 
 
 def test_restricted_payload_rejection():

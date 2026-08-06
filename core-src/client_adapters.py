@@ -4,9 +4,10 @@
 import base64
 import json
 import re
+import zlib
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
-VERSION = 6
+VERSION = 7
 DEFAULT_UPGRADE_URL = (
     "https://raw.githubusercontent.com/weizhiok/vvv/client-support/client_upgrade.py"
 )
@@ -72,6 +73,127 @@ def client_down_mbps(node):
         return max(1, int(node.get('client_down_mbps') or CLIENT_DOWN_MBPS))
     except (TypeError, ValueError):
         return CLIENT_DOWN_MBPS
+
+
+def _sn_write_int(buffer, value):
+    buffer.extend(int(value).to_bytes(4, 'little', signed=True))
+
+
+def _sn_write_bool(buffer, value):
+    buffer.append(1 if value else 0)
+
+
+def _sn_write_utf8_length(buffer, value):
+    if value >> 6 == 0:
+        buffer.append(0x80 | value)
+    elif value >> 13 == 0:
+        buffer.append(0xC0 | (value & 0x3F))
+        buffer.append(value >> 6)
+    elif value >> 20 == 0:
+        buffer.append(0xC0 | (value & 0x3F))
+        buffer.append(0x80 | ((value >> 6) & 0x7F))
+        buffer.append(value >> 13)
+    elif value >> 27 == 0:
+        buffer.append(0xC0 | (value & 0x3F))
+        buffer.append(0x80 | ((value >> 6) & 0x7F))
+        buffer.append(0x80 | ((value >> 13) & 0x7F))
+        buffer.append(value >> 20)
+    else:
+        buffer.append(0xC0 | (value & 0x3F))
+        buffer.append(0x80 | ((value >> 6) & 0x7F))
+        buffer.append(0x80 | ((value >> 13) & 0x7F))
+        buffer.append(0x80 | ((value >> 20) & 0x7F))
+        buffer.append(value >> 27)
+
+
+def _sn_write_string(buffer, value):
+    if value is None:
+        buffer.append(0x80)
+        return
+    value = str(value)
+    if not value:
+        buffer.append(0x81)
+        return
+    if 1 < len(value) < 32 and all(ord(char) <= 0x7F for char in value):
+        encoded = bytearray(value.encode('ascii'))
+        encoded[-1] |= 0x80
+        buffer.extend(encoded)
+        return
+    char_count = len(value.encode('utf-16-le')) // 2
+    _sn_write_utf8_length(buffer, char_count + 1)
+    buffer.extend(value.encode('utf-8'))
+
+
+def _sn_link(type_name, payload):
+    encoded = base64.urlsafe_b64encode(zlib.compress(payload, 9)).decode().rstrip('=')
+    return f'sn://{type_name}?{encoded}'
+
+
+def _nekobox_vless_sn(node):
+    data = bytearray()
+    _sn_write_int(data, 4)  # StandardV2RayBean serialization version.
+    _sn_write_string(data, node['server'])
+    _sn_write_int(data, node['port'])
+    _sn_write_string(data, node['uuid'])
+    _sn_write_string(data, 'xtls-rprx-vision')
+    _sn_write_int(data, -1)  # VMessBean alterId=-1 means VLESS.
+    _sn_write_string(data, 'tcp')
+    _sn_write_string(data, 'tls')
+    _sn_write_string(data, node['sni'])
+    _sn_write_string(data, '')  # ALPN
+    _sn_write_string(data, '')  # Certificates
+    _sn_write_bool(data, True)  # allowInsecure
+    _sn_write_string(data, 'chrome')
+    _sn_write_string(data, node['public_key'])
+    _sn_write_string(data, node['short_id'])
+    _sn_write_bool(data, False)  # ECH
+    _sn_write_string(data, '')
+    _sn_write_int(data, 2)  # packetEncoding=xudp
+    _sn_write_bool(data, False)  # mux
+    _sn_write_bool(data, False)  # mux padding
+    _sn_write_int(data, 0)  # mux type
+    _sn_write_int(data, 1)  # mux concurrency
+    _sn_write_int(data, 1)  # AbstractBean extra version
+    _sn_write_string(data, node['name'])
+    _sn_write_string(data, '')  # custom outbound JSON
+    _sn_write_string(data, '')  # custom config JSON
+    return _sn_link('vmess', bytes(data))
+
+
+def _nekobox_hy2_sn(node):
+    data = bytearray()
+    _sn_write_int(data, 7)  # HysteriaBean serialization version.
+    _sn_write_string(data, node['server'])
+    _sn_write_int(data, 1080)  # HysteriaBean uses serverPorts; exported serverPort stays default.
+    _sn_write_int(data, 2)  # Hysteria 2
+    _sn_write_int(data, 0)  # auth payload type used by NekoBox exports
+    _sn_write_string(data, node['password'])
+    _sn_write_int(data, 0)  # UDP
+    _sn_write_string(data, node['obfs_password'])
+    _sn_write_string(data, node['sni'])
+    _sn_write_string(data, '')  # ALPN
+    _sn_write_int(data, client_up_mbps(node))
+    _sn_write_int(data, client_down_mbps(node))
+    _sn_write_bool(data, True)  # allowInsecure
+    _sn_write_string(data, '')  # CA text
+    _sn_write_int(data, 0)  # stream receive window
+    _sn_write_int(data, 0)  # connection receive window
+    _sn_write_bool(data, False)  # disable MTU discovery
+    _sn_write_int(data, fixed_hop_interval(node))
+    _sn_write_string(data, hy2_ports(node))
+    _sn_write_int(data, 1)  # AbstractBean extra version
+    _sn_write_string(data, node['name'])
+    _sn_write_string(data, '')
+    _sn_write_string(data, '')
+    return _sn_link('hysteria', bytes(data))
+
+
+def render_nekobox_sn_links(nodes):
+    lines = [
+        _nekobox_vless_sn(node) if node['protocol'] == 'vless' else _nekobox_hy2_sn(node)
+        for node in nodes
+    ]
+    return '\n'.join(lines) + ('\n' if lines else '')
 
 
 def endpoint_authority(server, port):
@@ -282,6 +404,7 @@ def render_nekobox(nodes):
 RENDERERS = {
     'clash': {'render': render_clash, 'content_type': 'text/yaml; charset=utf-8'},
     'nekobox': {'render': render_nekobox, 'content_type': 'text/yaml; charset=utf-8'},
+    'nekobox-sn': {'render': render_nekobox_sn_links, 'content_type': 'text/plain; charset=utf-8'},
     'nekobox-uri': {'render': render_nekobox_uris, 'content_type': 'text/plain; charset=utf-8'},
     'nekobox-import': {'render': render_nekobox_import, 'content_type': 'text/plain; charset=utf-8'},
     'quantumultx': {'render': render_quantumultx, 'content_type': 'text/plain; charset=utf-8'},
@@ -295,11 +418,15 @@ RENDERERS = {
 LOCAL_OUTPUTS = [
     {'filename': 'Quantumult-X.conf', 'format': 'quantumultx', 'display_name': 'Quantumult X'},
     {'filename': 'Loon.conf', 'format': 'loon', 'display_name': 'Loon'},
-    {'filename': 'Loon-Import.txt', 'format': 'loon-import', 'display_name': 'Loon 正式导入链接'},
+    {'filename': 'Loon-Import.txt', 'format': 'loon-import',
+     'display_name': 'Loon 正式导入链接', 'display': False},
     {'filename': 'Shadowrocket.txt', 'format': 'shadowrocket-uri', 'display_name': 'Shadowrocket 分享链接'},
+    {'filename': 'NekoBoxForAndroid-SN.txt', 'format': 'nekobox-sn', 'display_name': 'NekoBox For Android'},
     {'filename': 'Clash-Verge-Rev.yaml', 'format': 'clash', 'display_name': 'Clash Verge Rev / Mihomo'},
-    {'filename': 'NekoBoxForAndroid.yaml', 'format': 'nekobox', 'display_name': 'NekoBoxForAndroid'},
-    {'filename': 'NekoBoxForAndroid.txt', 'format': 'nekobox-import', 'display_name': 'NekoBoxForAndroid 单节点订阅'},
+    {'filename': 'NekoBoxForAndroid.yaml', 'format': 'nekobox',
+     'display_name': 'NekoBoxForAndroid YAML', 'display': False},
+    {'filename': 'NekoBoxForAndroid.txt', 'format': 'nekobox-import',
+     'display_name': 'NekoBoxForAndroid 单节点订阅', 'display': False},
     {'filename': 'NekoBoxForAndroid-基础URI.txt', 'format': 'nekobox-uri',
      'display_name': 'NekoBoxForAndroid 基础分享链接', 'display': False},
 ]
@@ -386,7 +513,10 @@ def smoke_test():
         raise RuntimeError('Clash node-only output contains full-profile fields')
     neko = render('nekobox', sample)
     if 'hop-interval: 30' not in neko or 'hop-interval: "20-30"' in neko:
-        raise RuntimeError('NekoBox must use fixed 30-second hopping')
+        raise RuntimeError('NekoBox subscription YAML must use fixed 30-second hopping')
+    neko_sn = render('nekobox-sn', sample).splitlines()
+    if len(neko_sn) != 2 or not neko_sn[0].startswith('sn://vmess?') or not neko_sn[1].startswith('sn://hysteria?'):
+        raise RuntimeError('NekoBox local SN links are missing')
     shadow = render('shadowrocket-uri', sample)
     for value in ('peer=', 'fastopen=1', 'upmbps=30', 'downmbps=50', 'hpkp=', 'mport='):
         if value not in shadow:
@@ -403,8 +533,12 @@ def smoke_test():
         raise RuntimeError('local output manifest is invalid')
     if 'Loon-Shadowrocket.txt' in names:
         raise RuntimeError('obsolete duplicated local outputs are still present')
-    if 'NekoBoxForAndroid.yaml' not in names:
-        raise RuntimeError('NekoBox full local YAML output is missing')
+    if 'NekoBoxForAndroid.yaml' not in names or 'NekoBoxForAndroid-SN.txt' not in names:
+        raise RuntimeError('NekoBox local YAML or SN output is missing')
+    display_order = [item['display_name'] for item in local_outputs() if item.get('display', True)]
+    if display_order != ['Quantumult X', 'Loon', 'Shadowrocket 分享链接',
+                         'NekoBox For Android', 'Clash Verge Rev / Mihomo']:
+        raise RuntimeError('local client display order changed')
     return True
 
 

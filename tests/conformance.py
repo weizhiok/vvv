@@ -190,12 +190,21 @@ def test_node_names_and_clients():
     adapter = read('core-src/client_adapters.py')
     package = read('core-src/client_package_renderer.py')
     bootstrap = read('core-src/bootstrap.sh')
-    require('NekoBoxForAndroid.txt' in adapter and "'nekobox-uri'" in adapter,
-            '本地配置缺少 NekoBox 独立分享链接')
+    require('NekoBoxForAndroid-SN.txt' in adapter and "'nekobox-sn'" in adapter,
+            '本地配置缺少 NekoBox SN LINK')
     require("'filename': 'NekoBoxForAndroid.yaml'" in adapter and "'format': 'nekobox'" in adapter,
-            '本机汇总缺少 NekoBox 完整 YAML 输出')
+            'NekoBox YAML 渲染器缺失')
+    require("'name': 'NekoBoxForAndroid', 'format': 'nekobox'" in adapter,
+            '订阅中心 NekoBox 下发不再是 YAML')
+    display_tokens = [
+        "'display_name': 'Quantumult X'", "'display_name': 'Loon'",
+        "'display_name': 'Shadowrocket 分享链接'", "'display_name': 'NekoBox For Android'",
+        "'display_name': 'Clash Verge Rev / Mihomo'",
+    ]
+    display_positions = [adapter.index(token) for token in display_tokens]
+    require(display_positions == sorted(display_positions), '本机客户端显示顺序错误')
     require('Loon-Shadowrocket.txt' in package and 'NekoBoxForAndroid.yaml' not in package,
-            '统一渲染器仍把 NekoBox YAML 当作旧文件清理')
+            '统一渲染器错误清理 NekoBox YAML')
     require('client_package_renderer.py' in host and 'client_package_renderer.py' in bootstrap,
             '主机或安装器没有接入统一客户端渲染器')
     require('generate_client_files' in landing and 'CLIENT_PACKAGE_RENDERER' in landing,
