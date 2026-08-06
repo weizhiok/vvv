@@ -1,0 +1,42 @@
+name: Remove clean-install automatic reboot
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/run-remove-clean-install-auto-reboot.yml'
+      - 'tools/remove_clean_install_auto_reboot.py'
+      - 'tests/test_install_reboot_guard.py'
+permissions:
+  contents: write
+concurrency:
+  group: remove-clean-install-auto-reboot-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Remove automatic reboot path
+        run: python3 tools/remove_clean_install_auto_reboot.py
+      - name: Validate clean install
+        run: |
+          set -Eeuo pipefail
+          bash -n core-src/host.sh
+          python3 tests/test_install_reboot_guard.py
+          python3 tests/test_hy2_port_hopping.py
+          python3 tests/conformance.py
+      - name: Commit verified source change
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add core-src/host.sh
+          if ! git diff --cached --quiet; then
+            git commit -m 'Remove automatic reboots from clean installs'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
