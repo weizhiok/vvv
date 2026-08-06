@@ -366,12 +366,9 @@ ask_center_parameters(){
   done
   echo
   echo "请选择订阅传输方式："
-  echo "1. 直接 HTTPS【默认】"
-  echo "   域名由 Caddy 自动申请公共证书；IP 由 Certbot 申请 Let's Encrypt IP 证书。"
-  echo "2. 直接 HTTP"
-  echo "   不申请证书，仅限临时调试；请勿长期使用。"
-  echo "3. 固定 HTTPS 域名（Cloudflare Tunnel）"
-  echo "   公共地址使用标准 443，VPS 只运行本地 HTTP；需提前创建 Tunnel 公共主机名。"
+  echo "1. 使用 HTTPS【默认】"
+  echo "2. 使用 HTTP"
+  echo "3. 使用 Cloudflare Tunnel"
   while true; do
     read -r -p "请输入编号 [默认 1]：" choice
     [[ -n "$choice" ]] || choice=1

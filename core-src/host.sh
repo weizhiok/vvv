@@ -463,56 +463,87 @@ configure_timezone() {
 }
 
 install_daily_reboot_cron() {
-  [[ -x /usr/sbin/cron ]] || fail "cron 未安装，无法配置每天 06:00 自动重启。"
-  command -v flock >/dev/null 2>&1 || fail "系统缺少 flock，无法安全配置每天自动重启。"
+  local install_day backend root_crontab temporary
 
   install -d -m700 /usr/local/lib/vvv /var/lib/vvv
-  date -d 'tomorrow 00:00:00' +%s > /var/lib/vvv/daily-reboot-not-before
-  chmod 600 /var/lib/vvv/daily-reboot-not-before
+  install_day="$(date '+%Y%m%d')"
+  [[ "$install_day" =~ ^[0-9]{8}$ ]] || fail "无法读取当前日期，不能安全配置每天自动重启。"
+  printf '%s\n' "$install_day" > /var/lib/vvv/daily-reboot-install-day
+  chmod 600 /var/lib/vvv/daily-reboot-install-day
 
   cat > /usr/local/lib/vvv/daily-reboot.sh <<'EOF_DAILY_REBOOT'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-marker=/var/lib/vvv/daily-reboot-not-before
+marker=/var/lib/vvv/daily-reboot-install-day
 [[ -r "$marker" ]] || exit 0
-read -r not_before < "$marker"
-[[ "$not_before" =~ ^[0-9]+$ ]] || exit 0
+read -r install_day < "$marker"
+current_day="$(date '+%Y%m%d')"
+[[ "$install_day" =~ ^[0-9]{8}$ && "$current_day" =~ ^[0-9]{8}$ ]] || exit 0
 
-now="$(date +%s)"
-if (( now < not_before )); then
-  logger -t vvv-daily-reboot "忽略安装当天的重启任务；首次最早从次日 06:00 执行。"
+if (( 10#$current_day <= 10#$install_day )); then
+  command -v logger >/dev/null 2>&1 && logger -t vvv-daily-reboot "忽略安装当天的重启任务；首次最早从次日 06:00 执行。"
   exit 0
 fi
 
 if [[ "$(date '+%H:%M')" != "06:00" ]]; then
-  logger -t vvv-daily-reboot "忽略非 06:00 触发的重启请求。"
+  command -v logger >/dev/null 2>&1 && logger -t vvv-daily-reboot "忽略非 06:00 触发的重启请求。"
   exit 0
 fi
 
 install -d -m755 /run/lock
-exec 9>/run/lock/vvv-daily-reboot.lock
-flock -n 9 || exit 0
+lock_dir=/run/lock/vvv-daily-reboot.lock
+mkdir "$lock_dir" 2>/dev/null || exit 0
+trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
 
-logger -t vvv-daily-reboot "开始执行每天北京时间 06:00 自动重启。"
+command -v logger >/dev/null 2>&1 && logger -t vvv-daily-reboot "开始执行每天北京时间 06:00 自动重启。"
 sync
 sleep 2
-exec /usr/bin/systemctl reboot --no-wall
+
+if command -v systemctl >/dev/null 2>&1 && [[ "$(cat /proc/1/comm 2>/dev/null | tr -d '[:space:]')" == systemd ]]; then
+  systemctl reboot --no-wall
+elif command -v reboot >/dev/null 2>&1; then
+  reboot
+else
+  command -v logger >/dev/null 2>&1 && logger -t vvv-daily-reboot "找不到可用的系统重启命令。"
+  exit 1
+fi
 EOF_DAILY_REBOOT
   chmod 700 /usr/local/lib/vvv/daily-reboot.sh
 
-  cat > /etc/cron.d/vvv-daily-reboot <<'EOF_DAILY_REBOOT_CRON'
+  if [[ -f /etc/alpine-release ]]; then
+    command -v crond >/dev/null 2>&1 || fail "Alpine 缺少 BusyBox crond，无法配置每天 06:00 自动重启。"
+    command -v rc-update >/dev/null 2>&1 || fail "Alpine 缺少 OpenRC rc-update。"
+    command -v rc-service >/dev/null 2>&1 || fail "Alpine 缺少 OpenRC rc-service。"
+    install -d -m755 /etc/crontabs
+    root_crontab=/etc/crontabs/root
+    temporary="$(mktemp /tmp/vvv-root-crontab.XXXXXX)"
+    if [[ -f "$root_crontab" ]]; then
+      grep -vF '/usr/local/lib/vvv/daily-reboot.sh' "$root_crontab" > "$temporary" || true
+    fi
+    printf '%s\n' '0 6 * * * /usr/local/lib/vvv/daily-reboot.sh' >> "$temporary"
+    install -m600 "$temporary" "$root_crontab"
+    rm -f "$temporary"
+    rc-update add crond default >/dev/null
+    rc-service crond restart >/dev/null
+    rc-service crond status >/dev/null 2>&1 || fail "Alpine crond 服务未运行。"
+    backend='Alpine BusyBox crond / OpenRC'
+  else
+    [[ -x /usr/sbin/cron || -x /usr/bin/cron ]] || fail "cron 未安装，无法配置每天 06:00 自动重启。"
+    cat > /etc/cron.d/vvv-daily-reboot <<'EOF_DAILY_REBOOT_CRON'
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 0 6 * * * root /usr/local/lib/vvv/daily-reboot.sh
 EOF_DAILY_REBOOT_CRON
-  chmod 644 /etc/cron.d/vvv-daily-reboot
-
-  systemctl enable cron.service >/dev/null
-  systemctl restart cron.service
-  systemctl is-active --quiet cron.service || fail "cron 服务未运行，无法保证每天 06:00 自动重启。"
-  echo "每天北京时间 06:00 自动重启：已启用（cron，首次最早为明天）"
+    chmod 644 /etc/cron.d/vvv-daily-reboot
+    systemctl enable cron.service >/dev/null
+    systemctl restart cron.service
+    systemctl is-active --quiet cron.service || fail "cron 服务未运行，无法保证每天 06:00 自动重启。"
+    backend='Debian cron / systemd'
+  fi
+  echo "每天北京时间 06:00 自动重启：已启用（${backend}，首次最早为明天）"
 }
+
 
 prompt_initial_mode_and_port() {
   local preset_mode="${VVV_PROTOCOL_MODE:-dual}" preset_port="${VVV_PROXY_PORT:-443}"
