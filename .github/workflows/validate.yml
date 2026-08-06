@@ -49,6 +49,12 @@ jobs:
           python3 -m py_compile core-src/client_package_renderer.py tests/test_created_node_client_output.py
           bash -n upgrade/upgrade-created-node-client-output.sh
           python3 tests/test_created_node_client_output.py
+      - name: Validate global node-name guard
+        run: |
+          python3 -m py_compile core-src/name_guard_runtime.py tests/test_global_node_name_guard.py
+          bash -n vvv-install.sh
+          bash -n upgrade/upgrade-global-node-name-guard.sh
+          python3 tests/test_global_node_name_guard.py
       - name: Validate Hysteria 2 port hopping and client formats
         run: |
           python3 tests/test_hy2_port_hopping.py
