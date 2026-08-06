@@ -19,7 +19,7 @@ CENTER_MARKER='# VVV_GLOBAL_NAME_GUARD_V1'
 SOURCE_REF="${VVV_SOURCE_REF:-main}"
 RAW_BASE="https://raw.githubusercontent.com/weizhiok/vvv/${SOURCE_REF}"
 EXPECTED_RENDERER_BLOB='407a56f00c1d5c0f2e036d3070e5de3aa52afb2c'
-EXPECTED_GUARD_BLOB='9707c51a2fe69ffaf028888a493d0fe3e0233050'
+EXPECTED_GUARD_BLOB='b60520ef81eaa3635c6269d2f91a5a9b19ee13cb'
 WORK="$(mktemp -d /tmp/vvv-name-guard-upgrade.XXXXXX)"
 BACKUP="/root/vvv-name-guard-backup-$(date +%Y%m%d-%H%M%S)"
 cleanup() { rm -rf -- "$WORK"; }
