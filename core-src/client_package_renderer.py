@@ -12,7 +12,7 @@ from pathlib import Path
 
 DEFAULT_ADAPTER = Path('/usr/local/lib/vvv/client_adapters.py')
 CLIENT_CFG = Path('/etc/vvv/client.json')
-OBSOLETE_OUTPUTS = ('Loon-Shadowrocket.txt', 'NekoBoxForAndroid.yaml')
+OBSOLETE_OUTPUTS = ('Loon-Shadowrocket.txt',)
 
 
 def load_adapter(path):

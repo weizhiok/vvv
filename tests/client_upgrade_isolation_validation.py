@@ -114,8 +114,15 @@ def seed_obsolete_outputs(directory):
 
 
 def verify_new_outputs(directory, role, expect_subscription=False):
+    neko_yaml = directory / 'NekoBoxForAndroid.yaml'
     neko = directory / 'NekoBoxForAndroid.txt'
     basic = directory / 'NekoBoxForAndroid-基础URI.txt'
+    require(neko_yaml.is_file(), f'{role}缺少 NekoBox 完整 YAML 输出')
+    neko_yaml_text = neko_yaml.read_text(encoding='utf-8')
+    require('proxies:' in neko_yaml_text and 'hop-interval: 30' in neko_yaml_text,
+            f'{role} NekoBox YAML 缺少完整节点或固定 30 秒跳跃')
+    require('hop-interval: "20-30"' not in neko_yaml_text,
+            f'{role} NekoBox YAML 错误复用了 Mihomo 随机跳跃')
     require(neko.is_file(), f'{role}缺少 NekoBox 单节点订阅输出')
     require(basic.is_file() and 'hy2://' in basic.read_text(encoding='utf-8'),
             f'{role} NekoBox 基础 URI 缺失')
@@ -133,7 +140,6 @@ def verify_new_outputs(directory, role, expect_subscription=False):
                 f'{role}未注册订阅中心却生成了完整 NekoBox 订阅')
         require(not loon_import.read_text(encoding='utf-8').strip(),
                 f'{role}未注册订阅中心却生成了 Loon 导入链接')
-    require(not (directory / 'NekoBoxForAndroid.yaml').exists(), f'{role}未清理旧 NekoBox YAML')
     require(not (directory / 'Loon-Shadowrocket.txt').exists(), f'{role}未清理旧混合分享文件')
     loon = (directory / 'Loon.conf').read_text(encoding='utf-8')
     require('server-ports="443,20000-50000"' in loon and 'hop-interval=30' in loon and
@@ -194,8 +200,9 @@ def test_landing_role_upgrade():
         require(digest(state) == state_hash, '中转副机状态被客户端升级修改')
         verify_protected(root, protected)
         verify_new_outputs(output_dir, '中转副机')
-        require('Shadowrocket' in (root / 'root/中转客户端节点.txt').read_text(encoding='utf-8'),
-                '中转副机汇总缺少 Shadowrocket')
+        landing_summary = (root / 'root/中转客户端节点.txt').read_text(encoding='utf-8')
+        require('Shadowrocket' in landing_summary and 'NekoBoxForAndroid' in landing_summary,
+                '中转副机汇总缺少 Shadowrocket 或 NekoBoxForAndroid')
 
 
 def test_restricted_payload_rejection():
