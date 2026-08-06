@@ -151,8 +151,8 @@ grep -q 'up: "30 Mbps"' "$WORK/client-files/NekoBoxForAndroid.yaml"
 grep -q 'down: "50 Mbps"' "$WORK/client-files/NekoBoxForAndroid.yaml"
 grep -q '^hy2://' "$WORK/client-files/NekoBoxForAndroid-基础URI.txt"
 grep -q 'mport=24443,30000-30031' "$WORK/client-files/NekoBoxForAndroid-基础URI.txt"
-python3 - "$CLIENT_ADAPTER" "$CLIENT_PACKAGE_RENDERER" "$WORK/state-active.json" "$WORK/nekobox-subscription.json" <<'PY_NEKOBOX_SUBSCRIPTION'
-import importlib.util,json,sys
+python3 - "$CLIENT_ADAPTER" "$CLIENT_PACKAGE_RENDERER" "$WORK/state-active.json" "$WORK/nekobox-subscription.yaml" <<'PY_NEKOBOX_SUBSCRIPTION'
+import importlib.util,sys
 from pathlib import Path
 adapter_path,package_path,state_path,out_path=sys.argv[1:]
 def load(name,path):
@@ -162,23 +162,22 @@ def load(name,path):
     return module
 adapters=load('runtime_adapters',adapter_path)
 packages=load('runtime_packages',package_path)
+import json
 state=json.loads(Path(state_path).read_text(encoding='utf-8'))
 _,_,nodes=packages.main_nodes(state,'direct','')
 payload=adapters.render('nekobox',nodes)
-obj=json.loads(payload)
-assert isinstance(obj.get('outbounds'),list) and len(obj['outbounds'])==2
-hy2=next(row for row in obj['outbounds'] if row['type']=='hysteria2')
-assert hy2['server_ports']==['24443','30000:30031']
-assert hy2['hop_interval']=='30s'
-assert hy2['up_mbps']==30 and hy2['down_mbps']==50
-assert hy2['obfs']['type']=='salamander'
-vless=next(row for row in obj['outbounds'] if row['type']=='vless')
-assert vless['flow']=='xtls-rprx-vision'
-assert vless['tls']['reality']['enabled'] is True
+assert payload.startswith('proxies:\n')
+assert 'type: vless' in payload and 'type: hysteria2' in payload
+assert 'ports: "24443,30000-30031"' in payload
+assert 'hop-interval: 30' in payload
+assert 'hop-interval: "20-30"' not in payload
+assert 'up: "30 Mbps"' in payload and 'down: "50 Mbps"' in payload
+assert 'flow: xtls-rprx-vision' in payload and 'reality-opts:' in payload
 Path(out_path).write_text(payload,encoding='utf-8')
 PY_NEKOBOX_SUBSCRIPTION
-jq -e '.outbounds | length == 2' "$WORK/nekobox-subscription.json" >/dev/null
-jq -e '.outbounds[] | select(.type == "hysteria2") | .hop_interval == "30s"' "$WORK/nekobox-subscription.json" >/dev/null
+grep -q '^proxies:$' "$WORK/nekobox-subscription.yaml"
+grep -q 'hop-interval: 30' "$WORK/nekobox-subscription.yaml"
+! grep -q 'hop-interval: "20-30"' "$WORK/nekobox-subscription.yaml"
 ! find "$WORK/client-files" -type f -name '*二维码*' | grep -q .
 [[ "$(find "$WORK/vless-empty" -type f | wc -l)" -eq 0 ]]
 [[ "$(find "$WORK/hy2-empty" -type f | wc -l)" -eq 0 ]]

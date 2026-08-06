@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import importlib.util
-import json
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -76,13 +75,14 @@ def main():
         {'User-Agent': 'NekoBox/Android/1.4.2'}, 'format=nekobox&node=' + 'b' * 24, [item]
     )
     assert recognition['format'] == 'nekobox' and selected == [item]
-    assert recognition['content_type'] == 'application/json; charset=utf-8'
-    payload = json.loads(adapters.render('nekobox', selected))
-    outbound = payload['outbounds'][0]
-    assert outbound['type'] == 'hysteria2'
-    assert outbound['server_ports'] == ['443', '20000:50000']
-    assert outbound['hop_interval'] == '30s'
-    assert outbound['up_mbps'] == 30 and outbound['down_mbps'] == 50
+    assert recognition['content_type'] == 'text/yaml; charset=utf-8'
+    payload = adapters.render('nekobox', selected)
+    assert payload.startswith('proxies:\n')
+    assert 'type: hysteria2' in payload
+    assert 'ports: \"443,20000-50000\"' in payload
+    assert 'hop-interval: 30' in payload
+    assert 'hop-interval: \"20-30\"' not in payload
+    assert 'up: \"30 Mbps\"' in payload and 'down: \"50 Mbps\"' in payload
 
     try:
         center.resolve_subscription_request({}, 'format=clash&node=' + 'b' * 24, [item])
