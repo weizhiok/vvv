@@ -13,6 +13,7 @@ from pathlib import Path
 
 DEFAULT_ADAPTER = Path('/usr/local/lib/vvv/client_adapters.py')
 DEFAULT_MANAGER = Path(os.environ.get('VVV_MANAGER_PATH', '/usr/local/sbin/jp-relay-manager'))
+DEFAULT_NAME_GUARD = Path(os.environ.get('VVV_NAME_GUARD_PATH', '/usr/local/lib/vvv/name_guard_runtime.py'))
 CLIENT_CFG = Path('/etc/vvv/client.json')
 OBSOLETE_OUTPUTS = ('Loon-Shadowrocket.txt',)
 MANAGER_PATCH_MARKER = '# VVV_CREATED_NODE_OUTPUT_V1'
@@ -197,6 +198,29 @@ def install_manager_patch(path=DEFAULT_MANAGER, required=False):
     finally:
         Path(temporary).unlink(missing_ok=True)
     return True
+
+
+def load_name_guard(path=DEFAULT_NAME_GUARD, required=False):
+    path = Path(path)
+    if not path.is_file():
+        if required:
+            raise RuntimeError(f'未找到全局名称保护模块：{path}')
+        return None
+    spec = importlib.util.spec_from_file_location('vvv_name_guard_runtime', str(path))
+    module = importlib.util.module_from_spec(spec)
+    if not spec.loader:
+        raise RuntimeError('无法加载全局名称保护模块。')
+    spec.loader.exec_module(module)
+    if not callable(getattr(module, 'apply_installed', None)):
+        raise RuntimeError('全局名称保护模块缺少 apply_installed。')
+    return module
+
+
+def apply_name_guard(path=DEFAULT_NAME_GUARD, required=False, restart_center=True):
+    module = load_name_guard(path, required=required)
+    if module is None:
+        return {'manager_changed': False, 'center_changed': False}
+    return module.apply_installed(restart_center=restart_center, required=False)
 
 
 def load_adapter(path):
@@ -458,7 +482,9 @@ def render_package(adapter, title, metadata, nodes, out_dir):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--upgrade-manager-only', action='store_true')
+    parser.add_argument('--upgrade-name-guard-only', action='store_true')
     parser.add_argument('--manager-path', default=str(DEFAULT_MANAGER))
+    parser.add_argument('--name-guard-path', default=str(DEFAULT_NAME_GUARD))
     parser.add_argument('--state')
     parser.add_argument('--kind', choices=('direct', 'relay', 'upstream', 'temporary', 'landing'))
     parser.add_argument('--id', default='')
@@ -470,10 +496,16 @@ def main():
         changed = install_manager_patch(manager_path, required=True)
         print('中转管理器已升级。' if changed else '中转管理器已经是最新版本。')
         return
+    if args.upgrade_name_guard_only:
+        install_manager_patch(manager_path, required=True)
+        result = apply_name_guard(Path(args.name_guard_path), required=True, restart_center=True)
+        print(json.dumps(result, ensure_ascii=False))
+        return
     for name in ('state', 'kind', 'out'):
         if not getattr(args, name):
             parser.error(f'--{name.replace("_", "-")} is required')
     install_manager_patch(manager_path, required=False)
+    apply_name_guard(Path(args.name_guard_path), required=False, restart_center=True)
     state = read_state(args.state)
     adapter = load_adapter(Path(args.adapter))
     if args.kind == 'landing':
