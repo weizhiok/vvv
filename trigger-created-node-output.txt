@@ -1,1 +1,1 @@
-trigger pull request workflows
+trigger ready pull request validation
