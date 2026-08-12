@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# VVV_DEBIAN_12_13_COMPAT_V1
 set -Eeuo pipefail
 umask 077
 
@@ -13,8 +14,8 @@ HY2_HOP_ENGINE="$BASE_DIR/hy2_port_hop.py"
 [[ -r /etc/os-release ]] || { echo "错误：无法读取 /etc/os-release。" >&2; exit 1; }
 # shellcheck disable=SC1091
 source /etc/os-release
-[[ "${ID:-}" == debian && "${VERSION_ID:-}" == 13 ]] || { echo "错误：VVV 仅支持 Debian 13。当前系统：${PRETTY_NAME:-未知}" >&2; exit 1; }
-command -v systemctl >/dev/null 2>&1 || { echo "错误：Debian 13 缺少 systemd。" >&2; exit 1; }
+[[ "${ID:-}" == debian && "${VERSION_ID:-}" =~ ^(12|13)$ ]] || { echo "错误：VVV 仅支持 Debian 12/13。当前系统：${PRETTY_NAME:-未知}" >&2; exit 1; }
+command -v systemctl >/dev/null 2>&1 || { echo "错误：当前 Debian 缺少 systemd。" >&2; exit 1; }
 
 valid_port(){ [[ "${1:-}" =~ ^[0-9]+$ ]] && ((10#$1>=1 && 10#$1<=65535)); }
 valid_domain(){ [[ "${1:-}" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]; }

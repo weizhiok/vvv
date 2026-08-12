@@ -1,4 +1,5 @@
 #!/bin/sh
+# VVV_DEBIAN_12_13_COMPAT_V1
 # 构建编号：040203（落地端，多 VPS 兼容修复 + Hysteria 2 限速 50 Mbps）
 # 构建版本：213222；基于 040203，新增 HTTP/HTTPS/SOCKS5 上游中转与 Loon 优先输出。
 # 可作为文件执行，也可整段粘贴到 SSH 终端。
@@ -142,9 +143,13 @@ detect_os() {
   [ -r /etc/os-release ] || fail "无法读取 /etc/os-release。"
   # shellcheck disable=SC1091
   . /etc/os-release
-  [ "${ID:-}" = "debian" ] && [ "${VERSION_ID:-}" = "13" ] || fail "落地脚本仅支持 Debian 13。当前系统：${PRETTY_NAME:-未知}"
-  command -v apt-get >/dev/null 2>&1 || fail "当前 Debian 13 找不到 apt-get。"
-  command -v systemctl >/dev/null 2>&1 || fail "当前 Debian 13 找不到 systemd。"
+  [ "${ID:-}" = "debian" ] || fail "落地脚本仅支持 Debian 12/13。当前系统：${PRETTY_NAME:-未知}"
+  case "${VERSION_ID:-}" in
+    12|13) ;;
+    *) fail "落地脚本仅支持 Debian 12/13。当前系统：${PRETTY_NAME:-未知}" ;;
+  esac
+  command -v apt-get >/dev/null 2>&1 || fail "当前 Debian 找不到 apt-get。"
+  command -v systemctl >/dev/null 2>&1 || fail "当前 Debian 找不到 systemd。"
   [ "$(cat /proc/1/comm 2>/dev/null | tr -d '[:space:]')" = "systemd" ] || fail "当前系统不是以 systemd 作为 PID 1。"
 
   if grep -qE 'lxcfs|/dev/\.incus|/dev/incus' /proc/mounts 2>/dev/null || \
@@ -174,7 +179,7 @@ upgrade_system_once() {
     ca-certificates curl unzip tar gzip openssl jq iproute2 procps \
     tzdata kmod util-linux python3 || fail "落地端依赖安装失败。若提示锁被占用，已等待最多 10 秒，请稍后重新运行。"
   update-ca-certificates >/dev/null 2>&1 || true
-  echo "Debian 13 核心组件保持 VPS 镜像原版本，仅安装代理所需依赖。"
+  echo "Debian 12/13 核心组件保持 VPS 镜像原版本，仅安装代理所需依赖。"
 }
 
 parse_pairing_key() {
