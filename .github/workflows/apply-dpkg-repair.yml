@@ -1,0 +1,31 @@
+name: Apply interrupted dpkg repair patch
+
+on:
+  push:
+    branches: [agent/repair-interrupted-dpkg]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/repair-interrupted-dpkg
+      - name: Patch fresh-install apt paths
+        run: |
+          python3 tools/apply_dpkg_repair.py
+          bash -n vvv-install.sh
+          bash -n core-src/host.sh
+          sh -n core-src/landing.sh
+          bash -n core-src/center_install.sh
+      - name: Commit patched sources
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add vvv-install.sh core-src/host.sh core-src/landing.sh core-src/center_install.sh
+          git commit -m 'Auto-repair interrupted dpkg state before installs'
+          git push origin HEAD:agent/repair-interrupted-dpkg
