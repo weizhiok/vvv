@@ -55,6 +55,10 @@ jobs:
           bash -n vvv-install.sh
           bash -n upgrade/upgrade-global-node-name-guard.sh
           python3 tests/test_global_node_name_guard.py
+      - name: Validate interrupted dpkg recovery
+        run: |
+          python3 -m py_compile tests/test_interrupted_dpkg_repair.py
+          python3 tests/test_interrupted_dpkg_repair.py
       - name: Validate Hysteria 2 port hopping and client formats
         run: |
           python3 tests/test_hy2_port_hopping.py
