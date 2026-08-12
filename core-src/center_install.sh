@@ -41,6 +41,41 @@ apt_run(){
   fi
   echo "${label}失败。" >&2; rm -f "$log"; return 1
 }
+
+repair_dpkg_state() {
+  local audit
+  command -v dpkg >/dev/null 2>&1 || fail "当前 Debian 找不到 dpkg，无法继续安装。"
+  export DEBIAN_FRONTEND=noninteractive
+  export NEEDRESTART_MODE=a
+
+  echo "检查并修复 dpkg 配置状态……"
+  if ! dpkg --force-confold --configure -a; then
+    echo "检测到未完成或依赖异常的 dpkg 状态，尝试安全修复（禁止自动删除软件包）……"
+    apt-get \
+      -o DPkg::Lock::Timeout=10 \
+      -o Acquire::Retries=2 \
+      -o Acquire::PDiffs=false \
+      -o Acquire::IndexTargets::deb-src::Sources::DefaultEnabled=false \
+      update || fail "修复 dpkg 前刷新 APT 索引失败。若提示锁被占用，请等待系统自动更新结束后重试。"
+    apt-get \
+      -o DPkg::Lock::Timeout=10 \
+      -o Acquire::Retries=2 \
+      -o Dpkg::Options::=--force-confold \
+      --fix-broken --no-remove install -y --no-install-recommends \
+      || fail "自动修复损坏依赖失败；为避免误删系统软件包，脚本已停止。"
+    dpkg --force-confold --configure -a \
+      || fail "dpkg 仍有未完成配置，请检查上方具体软件包错误后重试。"
+  fi
+
+  audit="$(dpkg --audit 2>/dev/null || true)"
+  if [[ -n "$audit" ]]; then
+    echo "dpkg 审计仍发现异常：" >&2
+    printf '%s\n' "$audit" >&2
+    fail "dpkg 状态仍不完整，已停止安装，未删除任何锁文件或软件包。"
+  fi
+  echo "dpkg 状态：正常。"
+}
+
 install_caddy(){
   local arch api asset_name url digest expected actual tmp
   case "$(uname -m)" in x86_64|amd64) arch=amd64;; aarch64|arm64) arch=arm64;; *) fail "Caddy 不支持当前架构。";; esac
@@ -139,6 +174,7 @@ if [[ -n "$domain" && "$transport" == direct-https ]]; then
 fi
 
 section "准备订阅中心依赖"
+repair_dpkg_state
 required=(ca-certificates curl jq openssl python3 tar gzip)
 [[ "$transport" != direct-https || -n "$domain" ]] || required+=(python3-venv)
 missing=()
