@@ -104,10 +104,11 @@ replace_once(
 )
 
 transport = ROOT / 'core-src/center_transport.sh'
-replace_once(
+replace_all_checked(
     transport,
     ':${port} {\n  log {',
     ':${port} {\n  bind 0.0.0.0\n  log {',
+    2,
     'HTTP Caddy IPv4 bind',
 )
 replace_once(
