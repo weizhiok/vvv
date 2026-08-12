@@ -16,6 +16,10 @@ vvv_ipv4_only_error() {
 }
 
 vvv_ipv4_only_is_container() {
+  case "${VVV_IPV4_ONLY_CONTAINER_MODE:-auto}" in
+    1|yes|true) return 0 ;;
+    0|no|false) return 1 ;;
+  esac
   [ -e /.dockerenv ] && return 0
   grep -qiE 'docker|lxc|containerd|kubepods|podman|incus' "$VVV_IPV4_ONLY_PROC_ROOT/1/cgroup" 2>/dev/null && return 0
   grep -qE 'lxcfs|/dev/\.incus|/dev/incus' "$VVV_IPV4_ONLY_PROC_ROOT/mounts" 2>/dev/null && return 0
