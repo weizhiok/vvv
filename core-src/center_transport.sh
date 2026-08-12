@@ -87,7 +87,7 @@ write_tunnel_caddyfile(){
 }
 
 http://127.0.0.1:${port} {
-  bind 0.0.0.0
+  bind 127.0.0.1
   log {
     output discard
   }
