@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# VVV_DEBIAN_12_13_COMPAT_V1
 # 构建编号：040203（日本主机，多 VPS 兼容修复 + Hysteria 2 限速 50 Mbps）
 # 构建版本：213222；基于 040203，新增 HTTP/HTTPS/SOCKS5 上游中转与 Loon 优先输出。
 # 可作为文件执行，也可整段粘贴到 SSH 终端。
@@ -302,7 +303,7 @@ check_debian() {
   [[ -r /etc/os-release ]] || fail "无法读取 /etc/os-release。"
   # shellcheck disable=SC1091
   source /etc/os-release
-  [[ "${ID:-}" == "debian" && "${VERSION_ID:-}" == "13" ]] || fail "主机脚本仅支持 Debian 13。当前系统：${PRETTY_NAME:-未知}"
+  [[ "${ID:-}" == "debian" && "${VERSION_ID:-}" =~ ^(12|13)$ ]] || fail "主机脚本仅支持 Debian 12/13。当前系统：${PRETTY_NAME:-未知}"
   command -v systemctl >/dev/null 2>&1 || fail "当前 Debian 没有 systemctl，无法管理代理服务。"
   [[ "$(cat /proc/1/comm 2>/dev/null | tr -d '[:space:]')" == "systemd" ]] || fail "当前系统不是以 systemd 作为 PID 1，主机脚本无法安全安装服务。"
 

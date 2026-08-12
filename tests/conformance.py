@@ -261,11 +261,17 @@ def test_installer_and_diagnostics():
     require(all(name in validation for name in ('restore_manager.py','diagnostic_report.py','node_probe.py')), '最终验证没有覆盖新增 Python 模块')
 
 
-def test_no_qr_and_debian13():
+def test_no_qr_and_debian12_13():
     files = ['vvv-install.sh','core-src/bootstrap.sh','core-src/host.sh','core-src/landing.sh','core-src/center_install.sh','core-src/center_manager.sh']
     text = '\n'.join(read(path) for path in files)
     require('qrencode' not in text and 'qr_helper' not in text, '仍保留二维码实现')
-    require(all('Debian 13' in read(path) for path in ('vvv-install.sh','core-src/bootstrap.sh','core-src/host.sh','core-src/landing.sh')), '系统限制不是 Debian 13')
+    os_gate_files = ('vvv-install.sh','core-src/bootstrap.sh','core-src/host.sh','core-src/landing.sh')
+    require(all('Debian 12/13' in read(path) for path in os_gate_files), '系统限制没有统一为 Debian 12/13')
+    require(all('仅支持 Debian 13' not in read(path) for path in os_gate_files), '仍存在 Debian 13 单版本限制')
+    require('^(12|13)$' in read('vvv-install.sh'), '顶层安装器没有同时接受 Debian 12/13')
+    require('^(12|13)$' in read('core-src/bootstrap.sh'), '角色安装菜单没有同时接受 Debian 12/13')
+    require('^(12|13)$' in read('core-src/host.sh'), '主机脚本没有同时接受 Debian 12/13')
+    require('12|13)' in read('core-src/landing.sh'), '中转副机脚本没有同时接受 Debian 12/13')
 
 
 def main():
@@ -274,7 +280,7 @@ def main():
         test_transports_and_management, test_hy2_server_hard_limit,
         test_temporary_nodes_are_local_copies_only, test_config_only_backup_and_restore,
         test_node_names_and_clients, test_landing_and_direct_ip_change,
-        test_embedded_python_heredocs, test_installer_and_diagnostics, test_no_qr_and_debian13,
+        test_embedded_python_heredocs, test_installer_and_diagnostics, test_no_qr_and_debian12_13,
     ]
     for test in tests:
         test(); print('PASS', test.__name__)
