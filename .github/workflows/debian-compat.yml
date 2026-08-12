@@ -30,7 +30,7 @@ jobs:
         run: |
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
             ca-certificates curl unzip tar gzip openssl jq python3 python3-venv \
-            iproute2 procps nftables cron tzdata kmod util-linux
+            iproute2 procps nftables cron tzdata kmod util-linux systemd
       - name: Validate fresh-install compatibility
         run: |
           python3 -m py_compile core-src/debian_compat.py tests/test_debian_12_13_compat.py
