@@ -163,12 +163,62 @@ detect_os() {
 }
 
 repair_dpkg_state() {
+  DPKG_REPAIR_ADMIN_DIR="${VVV_DPKG_ADMIN_DIR:-/var/lib/dpkg}"
+  DPKG_REPAIR_BACKUP_ROOT="${VVV_DPKG_BACKUP_ROOT:-/var/backups}"
+  DPKG_REPAIR_BACKUP_DIR=""
+  DPKG_REPAIR_CONFIGURED=0
+  DPKG_REPAIR_FIX_BROKEN=0
+  DPKG_REPAIR_ATTEMPT=1
   command -v dpkg >/dev/null 2>&1 || fail "当前 Debian 找不到 dpkg，无法继续安装。"
   export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
 
   echo "检查并修复 dpkg 配置状态……"
-  if ! dpkg --force-confold --configure -a; then
-    echo "检测到未完成或依赖异常的 dpkg 状态，尝试安全修复（禁止自动删除软件包）……"
+  while [ "$DPKG_REPAIR_ATTEMPT" -le 8 ]; do
+    DPKG_REPAIR_LOG="$(mktemp /tmp/vvv-dpkg-configure.XXXXXX)"
+    if LC_ALL=C dpkg --force-confold --configure -a >"$DPKG_REPAIR_LOG" 2>&1; then
+      cat "$DPKG_REPAIR_LOG"
+      rm -f "$DPKG_REPAIR_LOG"
+      DPKG_REPAIR_CONFIGURED=1
+      break
+    fi
+    cat "$DPKG_REPAIR_LOG" >&2
+
+    DPKG_REPAIR_BAD_FILE="$(sed -n "s#^dpkg: error: parsing file '\([^']*\)'.*#\1#p" "$DPKG_REPAIR_LOG" | head -n1)"
+    case "$DPKG_REPAIR_BAD_FILE" in
+      "$DPKG_REPAIR_ADMIN_DIR"/updates/[0-9][0-9][0-9][0-9]) ;;
+      *) DPKG_REPAIR_BAD_FILE="" ;;
+    esac
+
+    if [ -n "$DPKG_REPAIR_BAD_FILE" ]; then
+      if [ ! -f "$DPKG_REPAIR_BAD_FILE" ] || [ -L "$DPKG_REPAIR_BAD_FILE" ]; then
+        rm -f "$DPKG_REPAIR_LOG"
+        fail "dpkg 报告的 updates 临时文件不是普通文件，拒绝自动处理：$DPKG_REPAIR_BAD_FILE"
+      fi
+      if [ -z "$DPKG_REPAIR_BACKUP_DIR" ]; then
+        DPKG_REPAIR_BACKUP_DIR="${DPKG_REPAIR_BACKUP_ROOT}/vvv-dpkg-recovery-$(date +%Y%m%d-%H%M%S)-$$"
+        mkdir -p "$DPKG_REPAIR_BACKUP_DIR/updates" || { rm -f "$DPKG_REPAIR_LOG"; fail "无法创建 dpkg 修复备份目录。"; }
+        chmod 700 "$DPKG_REPAIR_BACKUP_DIR" "$DPKG_REPAIR_BACKUP_DIR/updates" || { rm -f "$DPKG_REPAIR_LOG"; fail "无法保护 dpkg 修复备份目录权限。"; }
+        for DPKG_REPAIR_STATUS_FILE in "$DPKG_REPAIR_ADMIN_DIR/status" "$DPKG_REPAIR_ADMIN_DIR/status-old"; do
+          if [ -f "$DPKG_REPAIR_STATUS_FILE" ]; then
+            cp -a -- "$DPKG_REPAIR_STATUS_FILE" "$DPKG_REPAIR_BACKUP_DIR/" || { rm -f "$DPKG_REPAIR_LOG"; fail "备份 dpkg 主状态文件失败，拒绝继续。"; }
+          fi
+        done
+      fi
+      DPKG_REPAIR_FILE_NAME="${DPKG_REPAIR_BAD_FILE##*/}"
+      mv -- "$DPKG_REPAIR_BAD_FILE" "$DPKG_REPAIR_BACKUP_DIR/updates/$DPKG_REPAIR_FILE_NAME" || { rm -f "$DPKG_REPAIR_LOG"; fail "隔离损坏的 dpkg 临时更新文件失败。"; }
+      echo "检测到损坏的 dpkg 临时更新文件：$DPKG_REPAIR_BAD_FILE"
+      echo "已隔离备份到：$DPKG_REPAIR_BACKUP_DIR/updates/$DPKG_REPAIR_FILE_NAME"
+      rm -f "$DPKG_REPAIR_LOG"
+      DPKG_REPAIR_ATTEMPT=$((DPKG_REPAIR_ATTEMPT + 1))
+      continue
+    fi
+
+    rm -f "$DPKG_REPAIR_LOG"
+    if [ "$DPKG_REPAIR_FIX_BROKEN" -eq 1 ]; then
+      fail "dpkg 在依赖修复后仍无法完成配置；已停止安装，请检查上方具体软件包错误。"
+    fi
+    DPKG_REPAIR_FIX_BROKEN=1
+    echo "dpkg 配置未完成，但不是可安全隔离的 updates/NNNN 解析损坏；尝试修复依赖（禁止自动删除软件包）……"
     apt-get \
       -o DPkg::Lock::Timeout=10 \
       -o Acquire::Retries=2 \
@@ -181,17 +231,18 @@ repair_dpkg_state() {
       -o Dpkg::Options::=--force-confold \
       --fix-broken --no-remove install -y --no-install-recommends \
       || fail "自动修复损坏依赖失败；为避免误删系统软件包，脚本已停止。"
-    dpkg --force-confold --configure -a \
-      || fail "dpkg 仍有未完成配置，请检查上方具体软件包错误后重试。"
-  fi
+    DPKG_REPAIR_ATTEMPT=$((DPKG_REPAIR_ATTEMPT + 1))
+  done
 
-  audit="$(dpkg --audit 2>/dev/null || true)"
-  if [ -n "$audit" ]; then
+  [ "$DPKG_REPAIR_CONFIGURED" -eq 1 ] || fail "dpkg 连续修复后仍无法完成配置；已停止安装。"
+  DPKG_REPAIR_AUDIT="$(LC_ALL=C dpkg --audit 2>/dev/null || true)"
+  if [ -n "$DPKG_REPAIR_AUDIT" ]; then
     echo "dpkg 审计仍发现异常：" >&2
-    printf '%s\n' "$audit" >&2
+    printf '%s\n' "$DPKG_REPAIR_AUDIT" >&2
     fail "dpkg 状态仍不完整，已停止安装，未删除任何锁文件或软件包。"
   fi
   echo "dpkg 状态：正常。"
+  [ -z "$DPKG_REPAIR_BACKUP_DIR" ] || echo "dpkg 修复备份：$DPKG_REPAIR_BACKUP_DIR"
 }
 
 upgrade_system_once() {
