@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import importlib.util
+import re
 import shutil
 import subprocess
 import tempfile
@@ -19,6 +20,35 @@ def load_module(path, name):
     return module
 
 
+def scan_for_debian13_only_gates():
+    paths = [INSTALLER]
+    paths.extend(sorted((ROOT / 'core-src').glob('*.sh')))
+    paths.extend(sorted((ROOT / 'core-src').glob('*.py')))
+    forbidden_literals = (
+        'VVV 仅支持 Debian 13',
+        '主机脚本仅支持 Debian 13',
+        '落地脚本仅支持 Debian 13',
+        '当前 Debian 13 找不到',
+    )
+    forbidden_version_patterns = (
+        re.compile(r'VERSION_ID[^\n]{0,80}==\s*["\']?13["\']?'),
+        re.compile(r'VERSION_ID[^\n]{0,80}=\s*["\']13["\']'),
+    )
+    violations = []
+    for path in paths:
+        if path == COMPAT:
+            # The compatibility transformer intentionally contains legacy strings as exact patch anchors.
+            continue
+        text = path.read_text(encoding='utf-8')
+        for literal in forbidden_literals:
+            if literal in text:
+                violations.append(f'{path.relative_to(ROOT)}: {literal}')
+        for pattern in forbidden_version_patterns:
+            if pattern.search(text):
+                violations.append(f'{path.relative_to(ROOT)}: {pattern.pattern}')
+    assert not violations, 'Debian 13-only source gates remain:\n' + '\n'.join(violations)
+
+
 def main():
     compat = load_module(COMPAT, 'vvv_debian_compat_test')
     assert compat.SUPPORTED_VERSIONS == ('12', '13')
@@ -30,6 +60,8 @@ def main():
     assert 'python3 "$TMP/app/debian_compat.py" "$TMP/app"' in installer
     assert installer.index('python3 "$TMP/app/debian_compat.py" "$TMP/app"') < installer.index('python3 "$TMP/prepare.py"')
     subprocess.run(['bash', '-n', str(INSTALLER)], check=True)
+
+    scan_for_debian13_only_gates()
 
     with tempfile.TemporaryDirectory(prefix='vvv-debian-compat-test.') as td:
         app = Path(td)
