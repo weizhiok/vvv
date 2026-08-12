@@ -31,7 +31,8 @@ def main():
     expect_error('0,443', 443, '1–65535')
 
     rules = hop.build_ruleset('443,20000-50000', 443)
-    assert 'table inet vvv_hy2_hop' in rules
+    assert 'table ip vvv_hy2_hop' in rules
+    assert 'table inet vvv_hy2_hop' not in rules
     assert 'elements = { 20000-50000 }' in rules
     assert 'redirect to :443' in rules
     assert len(rules) < 1024, 'range must not be expanded port-by-port'
@@ -61,7 +62,7 @@ def main():
         hop.udp_socket_rows = original_rows
         hop.inode_owners = original_owners
 
-    print('Hysteria 2 port hopping engine tests passed.')
+    print('Hysteria 2 IPv4-only port hopping engine tests passed.')
 
 
 if __name__ == '__main__':

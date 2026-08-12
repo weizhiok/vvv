@@ -10,6 +10,10 @@ CENTER_STARTED=$SECONDS
 RESTORE_MODE="${VVV_RESTORE_MODE:-0}"
 
 fail(){ echo "错误：$*" >&2; exit 1; }
+IPV4_ONLY_MODULE="$BASE_DIR/ipv4_only.sh"
+[[ -r "$IPV4_ONLY_MODULE" ]] || fail "缺少 IPv4-only 系统模块。"
+# shellcheck disable=SC1090
+source "$IPV4_ONLY_MODULE"
 section(){ printf '\n========== %s ==========\n' "$*"; }
 valid_port(){ [[ "${1:-}" =~ ^[0-9]+$ ]] && ((10#$1>=1 && 10#$1<=65535)); }
 valid_domain(){ [[ "${1:-}" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]; }
@@ -202,6 +206,7 @@ EOF_SUB_UNIT
 }
 
 [[ $(id -u) -eq 0 ]] || fail "请使用 root 用户运行。"
+vvv_enforce_ipv4_only || fail "无法强制启用 IPv4-only。"
 public_ip="$(jq -r '.public_ip // empty' /etc/jp-relay/state.json 2>/dev/null || true)"
 [[ "$public_ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || fail "无法读取本机公网 IPv4。"
 domain="${VVV_SUB_DOMAIN:-}"; domain="${domain,,}"; domain="${domain%.}"
@@ -249,7 +254,7 @@ fi
 
 install -d -m700 "$CFG_DIR" "$DATA_DIR" "$DATA_DIR/hosts" "$DATA_DIR/output" "$DATA_DIR/backups" /usr/local/lib/vvv
 install -d -m755 /var/www/vvv-acme /etc/caddy
-for file in sub_center.py sync_agent.py backup_manager.py rclone_manager.sh client_adapters.py adapter_manager.py center_transport.sh center_manager.sh restore_manager.py diagnostic_report.py node_probe.py; do
+for file in sub_center.py sync_agent.py backup_manager.py rclone_manager.sh client_adapters.py adapter_manager.py center_transport.sh center_manager.sh restore_manager.py diagnostic_report.py node_probe.py ipv4_only.sh; do
   [[ -f "$BASE_DIR/$file" ]] && install -m755 "$BASE_DIR/$file" "/usr/local/lib/vvv/$file"
 done
 python3 /usr/local/lib/vvv/client_adapters.py >/dev/null || fail "客户端适配器自检失败。"

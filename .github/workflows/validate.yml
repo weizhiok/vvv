@@ -59,6 +59,11 @@ jobs:
         run: |
           python3 -m py_compile tests/test_interrupted_dpkg_repair.py
           python3 tests/test_interrupted_dpkg_repair.py
+      - name: Validate IPv4-only enforcement
+        run: |
+          python3 -m py_compile tests/test_ipv4_only.py
+          sh -n core-src/ipv4_only.sh
+          python3 tests/test_ipv4_only.py
       - name: Validate Hysteria 2 port hopping and client formats
         run: |
           python3 tests/test_hy2_port_hopping.py

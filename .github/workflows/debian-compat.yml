@@ -33,10 +33,12 @@ jobs:
             iproute2 procps nftables cron tzdata kmod util-linux systemd
       - name: Validate fresh-install compatibility
         run: |
-          python3 -m py_compile core-src/debian_compat.py tests/test_debian_12_13_compat.py tests/test_interrupted_dpkg_repair.py
+          python3 -m py_compile core-src/debian_compat.py tests/test_debian_12_13_compat.py tests/test_interrupted_dpkg_repair.py tests/test_ipv4_only.py
           bash -n vvv-install.sh
+          sh -n core-src/ipv4_only.sh
           python3 tests/test_debian_12_13_compat.py
           python3 tests/test_interrupted_dpkg_repair.py
+          python3 tests/test_ipv4_only.py
       - name: Verify required Debian interfaces
         run: |
           command -v bash

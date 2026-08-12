@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-TABLE_FAMILY = "inet"
+TABLE_FAMILY = "ip"
 TABLE_NAME = "vvv_hy2_hop"
 
 
