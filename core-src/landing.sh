@@ -6,8 +6,8 @@
 # 只需把日本 VPS 输出的完整 JPR3 对接密钥粘贴到下方。
 # 运行后不会再出现安装选项，将自动安装 JPR3 指定的单协议或双协议。
 umask 077
-LANDING_SOURCE_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
-[[ -f "$LANDING_SOURCE_DIR/ipv4_only.sh" ]] || { echo "错误：缺少 IPv4-only 系统模块。" >&2; exit 1; }
+LANDING_SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
+[ -f "$LANDING_SOURCE_DIR/ipv4_only.sh" ] || { echo "错误：缺少 IPv4-only 系统模块。" >&2; exit 1; }
 install -d -m700 /usr/local/lib/vvv
 install -m755 "$LANDING_SOURCE_DIR/ipv4_only.sh" /usr/local/lib/vvv/ipv4_only.sh
 
