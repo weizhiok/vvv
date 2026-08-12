@@ -1,0 +1,60 @@
+name: Restore full conformance Debian assertion
+
+on:
+  push:
+    branches: [agent/debian12-13-full-compat]
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/debian12-13-full-compat
+          fetch-depth: 0
+      - name: Restore main conformance and patch only Debian contract
+        run: |
+          git show origin/main:tests/conformance.py > tests/conformance.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tests/conformance.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''def test_no_qr_and_debian13():
+              files = ['vvv-install.sh','core-src/bootstrap.sh','core-src/host.sh','core-src/landing.sh','core-src/center_install.sh','core-src/center_manager.sh']
+              text = '\\n'.join(read(path) for path in files)
+              require('qrencode' not in text and 'qr_helper' not in text, '仍保留二维码实现')
+              require(all('Debian 13' in read(path) for path in ('vvv-install.sh','core-src/bootstrap.sh','core-src/host.sh','core-src/landing.sh')), '系统限制不是 Debian 13')
+          '''
+          new = '''def test_no_qr_and_debian12_13():
+              files = ['vvv-install.sh','core-src/bootstrap.sh','core-src/host.sh','core-src/landing.sh','core-src/center_install.sh','core-src/center_manager.sh']
+              text = '\\n'.join(read(path) for path in files)
+              require('qrencode' not in text and 'qr_helper' not in text, '仍保留二维码实现')
+              os_gate_files = ('vvv-install.sh','core-src/bootstrap.sh','core-src/host.sh','core-src/landing.sh')
+              require(all('Debian 12/13' in read(path) for path in os_gate_files), '系统限制没有统一为 Debian 12/13')
+              require(all('仅支持 Debian 13' not in read(path) for path in os_gate_files), '仍存在 Debian 13 单版本限制')
+              require('^(12|13)$' in read('vvv-install.sh'), '顶层安装器没有同时接受 Debian 12/13')
+              require('^(12|13)$' in read('core-src/bootstrap.sh'), '角色安装菜单没有同时接受 Debian 12/13')
+              require('^(12|13)$' in read('core-src/host.sh'), '主机脚本没有同时接受 Debian 12/13')
+              require('12|13)' in read('core-src/landing.sh'), '中转副机脚本没有同时接受 Debian 12/13')
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(f'old conformance block count={text.count(old)}')
+          text = text.replace(old, new, 1)
+          old_ref = 'test_embedded_python_heredocs, test_installer_and_diagnostics, test_no_qr_and_debian13,'
+          new_ref = 'test_embedded_python_heredocs, test_installer_and_diagnostics, test_no_qr_and_debian12_13,'
+          if text.count(old_ref) != 1:
+              raise SystemExit(f'old conformance reference count={text.count(old_ref)}')
+          path.write_text(text.replace(old_ref, new_ref, 1), encoding='utf-8')
+          PY
+          python3 tests/conformance.py
+      - name: Commit minimal conformance update
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tests/conformance.py
+          git commit -m 'Update full conformance for Debian 12 and 13'
+          git push origin HEAD:agent/debian12-13-full-compat
