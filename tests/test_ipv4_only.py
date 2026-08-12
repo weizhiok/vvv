@@ -68,6 +68,30 @@ def simulate_system_enforcement():
         assert rendered.split().count('ipv6.disable=1') == 1, rendered
 
 
+def generated_manager_contract(host):
+    marker = "cat > /usr/local/sbin/jp-relay-manager <<'JP_RELAY_JPR3_MANAGER_EOF'\n"
+    assert host.count(marker) == 1, 'jp-relay-manager heredoc must exist exactly once'
+    tail = host.split(marker, 1)[1]
+    assert '\nJP_RELAY_JPR3_MANAGER_EOF' in tail, 'jp-relay-manager heredoc terminator missing'
+    manager = tail.split('\nJP_RELAY_JPR3_MANAGER_EOF', 1)[0]
+
+    module_decl = 'IPV4_ONLY_MODULE=/usr/local/lib/vvv/ipv4_only.sh'
+    source_line = 'source "$IPV4_ONLY_MODULE"'
+    assert module_decl in manager
+    assert '[[ -r "$IPV4_ONLY_MODULE" ]]' in manager
+    assert source_line in manager
+    assert 'vvv_enforce_ipv4_only' in manager
+    assert manager.index(source_line) < manager.index('vvv_enforce_ipv4_only')
+
+    with tempfile.NamedTemporaryFile('w', encoding='utf-8', delete=False) as handle:
+        handle.write(manager)
+        manager_path = Path(handle.name)
+    try:
+        subprocess.run(['bash', '-n', str(manager_path)], check=True)
+    finally:
+        manager_path.unlink(missing_ok=True)
+
+
 def static_contracts():
     installer = read(ROOT / 'vvv-install.sh')
     bootstrap = read(ROOT / 'core-src' / 'bootstrap.sh')
@@ -90,6 +114,8 @@ def static_contracts():
     ):
         assert 'ipv4_only.sh' in text, label
         assert 'vvv_enforce_ipv4_only' in text, label
+
+    generated_manager_contract(host)
 
     assert '"listen":"0.0.0.0"' in host
     assert '"listen":"::"' not in host
@@ -125,7 +151,7 @@ def static_contracts():
 def main():
     static_contracts()
     simulate_system_enforcement()
-    print('PASS VVV enforces permanent server-side IPv4-only policy and IPv4-only application listeners')
+    print('PASS VVV enforces permanent server-side IPv4-only policy and generated relay manager runtime loading')
 
 
 if __name__ == '__main__':
