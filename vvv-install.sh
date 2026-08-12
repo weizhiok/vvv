@@ -30,7 +30,7 @@ fail(){ echo "错误：$*" >&2; exit 1; }
 [[ -r /etc/os-release ]] || fail "无法读取 /etc/os-release。"
 # shellcheck disable=SC1091
 source /etc/os-release
-[[ "${ID:-}" == debian && "${VERSION_ID:-}" == 13 ]] || fail "VVV 仅支持 Debian 13。当前系统：${PRETTY_NAME:-未知}"
+[[ "${ID:-}" == debian && "${VERSION_ID:-}" =~ ^(12|13)$ ]] || fail "VVV 仅支持 Debian 12/13。当前系统：${PRETTY_NAME:-未知}"
 
 if ! command -v curl >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
   echo "APT/dpkg 锁最多等待 10 秒；超时将立即报错。"
@@ -57,21 +57,22 @@ echo "正在下载 VVV 普通源码……"
 curl -fsSL --retry 5 --retry-all-errors "$RAW/core-src/bootstrap.sh?v=$nonce" -o "$TMP/app/bootstrap.sh" || fail "下载 bootstrap.sh 失败。"
 curl -fsSL --retry 5 --retry-all-errors "$RAW/src/prepare.py?v=$nonce" -o "$TMP/prepare.py" || fail "下载 prepare.py 失败。"
 curl -fsSL --retry 5 --retry-all-errors "$RAW/src/validate_embedded_python.py?v=$nonce" -o "$TMP/validate_embedded_python.py" || fail "下载内嵌 Python 检查器失败。"
-files=(host.sh landing.sh center_install.sh register_sync.sh vvv_manager.sh sub_center.py sync_agent.py backup_manager.py rclone_manager.sh client_adapters.py client_package_renderer.py name_guard_runtime.py name_guard_installer.py adapter_manager.py client_upgrade_engine.py client_local_renderer.py hy2_port_hop.py hy2_port_hop.sh center_transport.sh center_manager.sh restore_manager.py diagnostic_report.py node_probe.py)
+files=(host.sh landing.sh center_install.sh register_sync.sh vvv_manager.sh sub_center.py sync_agent.py backup_manager.py rclone_manager.sh client_adapters.py client_package_renderer.py name_guard_runtime.py name_guard_installer.py debian_compat.py adapter_manager.py client_upgrade_engine.py client_local_renderer.py hy2_port_hop.py hy2_port_hop.sh center_transport.sh center_manager.sh restore_manager.py diagnostic_report.py node_probe.py)
 for file in "${files[@]}"; do
   printf '  下载 %s\n' "$file"
   curl -fsSL --retry 5 --retry-all-errors "$RAW/core-src/$file?v=$nonce-$file" -o "$TMP/app/$file" || fail "下载 $file 失败。"
   [[ -s "$TMP/app/$file" ]] || fail "$file 是空文件。"
 done
 
-python3 -m py_compile "$TMP/prepare.py" "$TMP/validate_embedded_python.py"
+python3 -m py_compile "$TMP/prepare.py" "$TMP/validate_embedded_python.py" "$TMP/app/debian_compat.py"
+python3 "$TMP/app/debian_compat.py" "$TMP/app" >/dev/null || fail "Debian 12/13 兼容性准备失败。"
 python3 "$TMP/prepare.py" "$TMP/app/host.sh" "$TMP/app/landing.sh" "$TMP/app/center_install.sh" || fail "源码参数化处理失败。"
 python3 "$TMP/validate_embedded_python.py"   "$TMP/app/bootstrap.sh" "$TMP/app/host.sh" "$TMP/app/landing.sh"   "$TMP/app/center_install.sh" "$TMP/app/register_sync.sh" "$TMP/app/vvv_manager.sh"   "$TMP/app/rclone_manager.sh" "$TMP/app/center_transport.sh" "$TMP/app/center_manager.sh"   || fail "Shell 内嵌 Python 语法检查失败。"
 for file in bootstrap.sh center_install.sh register_sync.sh vvv_manager.sh rclone_manager.sh center_transport.sh center_manager.sh host.sh hy2_port_hop.sh; do
   bash -n "$TMP/app/$file" || fail "$file 语法检查失败。"
 done
 sh -n "$TMP/app/landing.sh" || fail "landing.sh 语法检查失败。"
-python3 -m py_compile "$TMP/app/sub_center.py" "$TMP/app/sync_agent.py" "$TMP/app/backup_manager.py" "$TMP/app/client_adapters.py" "$TMP/app/client_package_renderer.py" "$TMP/app/name_guard_runtime.py" "$TMP/app/name_guard_installer.py" "$TMP/app/adapter_manager.py" "$TMP/app/client_upgrade_engine.py" "$TMP/app/client_local_renderer.py" "$TMP/app/hy2_port_hop.py" "$TMP/app/restore_manager.py" "$TMP/app/diagnostic_report.py" "$TMP/app/node_probe.py" || fail "Python 模块语法检查失败。"
+python3 -m py_compile "$TMP/app/sub_center.py" "$TMP/app/sync_agent.py" "$TMP/app/backup_manager.py" "$TMP/app/client_adapters.py" "$TMP/app/client_package_renderer.py" "$TMP/app/name_guard_runtime.py" "$TMP/app/name_guard_installer.py" "$TMP/app/debian_compat.py" "$TMP/app/adapter_manager.py" "$TMP/app/client_upgrade_engine.py" "$TMP/app/client_local_renderer.py" "$TMP/app/hy2_port_hop.py" "$TMP/app/restore_manager.py" "$TMP/app/diagnostic_report.py" "$TMP/app/node_probe.py" || fail "Python 模块语法检查失败。"
 python3 "$TMP/app/client_adapters.py" >/dev/null || fail "客户端适配器自检失败。"
 
 # 新源码先复制到 /usr/local/lib 同一文件系统的暂存目录。
@@ -107,7 +108,7 @@ if [[ ! -f /usr/local/lib/vvv/client_adapters.py ]]; then
   install -m755 "$SOURCE_TARGET/client_adapters.py" /usr/local/lib/vvv/client_adapters.py
 fi
 
-echo "VVV 普通源码下载和语法检查全部通过。"
+echo "VVV 普通源码下载和语法检查全部通过（Debian ${VERSION_ID}）。"
 if [[ -r /dev/tty ]]; then
   exec bash "$SOURCE_TARGET/bootstrap.sh" </dev/tty
 else
