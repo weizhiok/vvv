@@ -50,8 +50,8 @@ def make_fake_tools(root: Path, mode: str):
         'case "$*" in\n'
         '  *"--force-confold --configure -a"*)\n'
         '    if [ "$mode" = corrupt-update ] && [ -f "$admin/updates/0000" ]; then\n'
-        '      echo "dpkg: error: parsing file '\''$admin/updates/0000'\'' near line 0:" >&2\n'
-        '      echo "end of file after field name '\'''\''" >&2\n'
+        "      echo \"dpkg: error: parsing file '$admin/updates/0000' near line 0:\" >&2\n"
+        "      echo \"end of file after field name ''\" >&2\n"
         '      exit 2\n'
         '    fi\n'
         '    if [ "$mode" = dependency-broken ] && [ "$(cat "$state")" = 0 ]; then\n'
@@ -166,7 +166,7 @@ def main():
     fn = extract_installer_function(installer)
 
     output, apt_calls, snapshot = run_simulation(fn, 'corrupt-update')
-    assert "parsing file" in output and 'updates/0000' in output
+    assert 'parsing file' in output and 'updates/0000' in output
     assert '检测到损坏的 dpkg 临时更新文件' in output
     assert '已隔离备份到' in output
     assert 'dpkg 状态：正常' in output
