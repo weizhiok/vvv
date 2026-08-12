@@ -27,7 +27,7 @@ cat > /usr/local/sbin/jp-relay-manager <<'JP_RELAY_JPR3_MANAGER_EOF'
 set -Eeuo pipefail
 umask 077
 
-IPV4_ONLY_MODULE=/usr/local/lib/vvv/ipv4_only.sh
+IPV4_ONLY_MODULE="${VVV_IPV4_ONLY_MODULE:-/usr/local/lib/vvv/ipv4_only.sh}"
 [[ -r "$IPV4_ONLY_MODULE" ]] || { echo "错误：缺少 IPv4-only 系统模块。" >&2; exit 1; }
 # shellcheck disable=SC1090
 source "$IPV4_ONLY_MODULE"

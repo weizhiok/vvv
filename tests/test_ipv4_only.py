@@ -75,7 +75,7 @@ def generated_manager_contract(host):
     assert '\nJP_RELAY_JPR3_MANAGER_EOF' in tail, 'jp-relay-manager heredoc terminator missing'
     manager = tail.split('\nJP_RELAY_JPR3_MANAGER_EOF', 1)[0]
 
-    module_decl = 'IPV4_ONLY_MODULE=/usr/local/lib/vvv/ipv4_only.sh'
+    module_decl = 'IPV4_ONLY_MODULE="${VVV_IPV4_ONLY_MODULE:-/usr/local/lib/vvv/ipv4_only.sh}"'
     source_line = 'source "$IPV4_ONLY_MODULE"'
     assert module_decl in manager
     assert '[[ -r "$IPV4_ONLY_MODULE" ]]' in manager
