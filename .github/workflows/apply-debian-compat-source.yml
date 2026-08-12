@@ -1,0 +1,37 @@
+name: Apply Debian compatibility source patch
+
+on:
+  push:
+    branches: [agent/debian12-13-full-compat]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-source:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/debian12-13-full-compat
+      - name: Apply strict compatibility transformation
+        run: |
+          python3 core-src/debian_compat.py core-src
+          bash -n core-src/bootstrap.sh
+          bash -n core-src/host.sh
+          sh -n core-src/landing.sh
+          grep -Fq 'Debian 12/13' core-src/bootstrap.sh
+          grep -Fq 'Debian 12/13' core-src/host.sh
+          grep -Fq 'Debian 12/13' core-src/landing.sh
+      - name: Commit transformed role sources
+        run: |
+          if git diff --quiet -- core-src/bootstrap.sh core-src/host.sh core-src/landing.sh; then
+            echo 'Role sources are already Debian 12/13 compatible.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add core-src/bootstrap.sh core-src/host.sh core-src/landing.sh
+          git commit -m 'Make role sources support Debian 12 and 13'
+          git push origin HEAD:agent/debian12-13-full-compat
