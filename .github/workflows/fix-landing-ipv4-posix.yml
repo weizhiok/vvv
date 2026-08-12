@@ -1,0 +1,26 @@
+name: Fix landing IPv4 POSIX
+on:
+  push:
+    branches: [agent/force-ipv4-only]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/force-ipv4-only
+      - run: python3 tools/fix_landing_ipv4_posix.py
+      - run: |
+          sh -n core-src/landing.sh
+          dash -n core-src/landing.sh
+          python3 tests/test_ipv4_only.py
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add core-src/landing.sh
+          git diff --cached --quiet && exit 0
+          git commit -m "Keep landing IPv4 setup POSIX-sh compatible"
+          git push
