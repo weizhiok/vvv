@@ -115,8 +115,7 @@ repair_dpkg_state() {
   audit="$(LC_ALL=C dpkg --audit 2>/dev/null || true)"
   if [[ -n "$audit" ]]; then
     echo "dpkg 审计仍发现异常：" >&2
-    printf '%s
-' "$audit" >&2
+    printf '%s\n' "$audit" >&2
     fail "dpkg 状态仍不完整，已停止安装，未删除任何锁文件或软件包。"
   fi
   echo "dpkg 状态：正常。"
