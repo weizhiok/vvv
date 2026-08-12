@@ -168,12 +168,21 @@ repair_dpkg_state() {
   DPKG_REPAIR_BACKUP_DIR=""
   DPKG_REPAIR_CONFIGURED=0
   DPKG_REPAIR_FIX_BROKEN=0
-  DPKG_REPAIR_ATTEMPT=1
+  DPKG_REPAIR_QUARANTINED=0
   command -v dpkg >/dev/null 2>&1 || fail "当前 Debian 找不到 dpkg，无法继续安装。"
   export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
 
+  DPKG_REPAIR_UPDATE_COUNT=0
+  if [ -d "$DPKG_REPAIR_ADMIN_DIR/updates" ]; then
+    DPKG_REPAIR_UPDATE_COUNT="$(find "$DPKG_REPAIR_ADMIN_DIR/updates" -maxdepth 1 -mindepth 1 -name '[0-9][0-9][0-9][0-9]' 2>/dev/null | wc -l | tr -d '[:space:]')"
+  fi
+  case "$DPKG_REPAIR_UPDATE_COUNT" in ''|*[!0-9]*) DPKG_REPAIR_UPDATE_COUNT=0;; esac
+  [ "$DPKG_REPAIR_UPDATE_COUNT" -le 10000 ] || fail "dpkg updates/NNNN 条目数量异常（${DPKG_REPAIR_UPDATE_COUNT}），拒绝自动处理。"
+  DPKG_REPAIR_MAX_ATTEMPTS=$((DPKG_REPAIR_UPDATE_COUNT + 3))
+  DPKG_REPAIR_ATTEMPT=1
+
   echo "检查并修复 dpkg 配置状态……"
-  while [ "$DPKG_REPAIR_ATTEMPT" -le 8 ]; do
+  while [ "$DPKG_REPAIR_ATTEMPT" -le "$DPKG_REPAIR_MAX_ATTEMPTS" ]; do
     DPKG_REPAIR_LOG="$(mktemp /tmp/vvv-dpkg-configure.XXXXXX)"
     if LC_ALL=C dpkg --force-confold --configure -a >"$DPKG_REPAIR_LOG" 2>&1; then
       cat "$DPKG_REPAIR_LOG"
@@ -183,7 +192,7 @@ repair_dpkg_state() {
     fi
     cat "$DPKG_REPAIR_LOG" >&2
 
-    DPKG_REPAIR_BAD_FILE="$(sed -n "s#^dpkg: error: parsing file '\([^']*\)'.*#\1#p" "$DPKG_REPAIR_LOG" | head -n1)"
+    DPKG_REPAIR_BAD_FILE="$(sed -n "s#^dpkg: error: parsing file '\\([^']*\\)'.*#\\1#p" "$DPKG_REPAIR_LOG" | head -n1)"
     case "$DPKG_REPAIR_BAD_FILE" in
       "$DPKG_REPAIR_ADMIN_DIR"/updates/[0-9][0-9][0-9][0-9]) ;;
       *) DPKG_REPAIR_BAD_FILE="" ;;
@@ -205,7 +214,12 @@ repair_dpkg_state() {
         done
       fi
       DPKG_REPAIR_FILE_NAME="${DPKG_REPAIR_BAD_FILE##*/}"
+      if [ -e "$DPKG_REPAIR_BACKUP_DIR/updates/$DPKG_REPAIR_FILE_NAME" ]; then
+        rm -f "$DPKG_REPAIR_LOG"
+        fail "dpkg 修复备份目录已存在同名文件，拒绝覆盖：$DPKG_REPAIR_FILE_NAME"
+      fi
       mv -- "$DPKG_REPAIR_BAD_FILE" "$DPKG_REPAIR_BACKUP_DIR/updates/$DPKG_REPAIR_FILE_NAME" || { rm -f "$DPKG_REPAIR_LOG"; fail "隔离损坏的 dpkg 临时更新文件失败。"; }
+      DPKG_REPAIR_QUARANTINED=$((DPKG_REPAIR_QUARANTINED + 1))
       echo "检测到损坏的 dpkg 临时更新文件：$DPKG_REPAIR_BAD_FILE"
       echo "已隔离备份到：$DPKG_REPAIR_BACKUP_DIR/updates/$DPKG_REPAIR_FILE_NAME"
       rm -f "$DPKG_REPAIR_LOG"
@@ -234,7 +248,7 @@ repair_dpkg_state() {
     DPKG_REPAIR_ATTEMPT=$((DPKG_REPAIR_ATTEMPT + 1))
   done
 
-  [ "$DPKG_REPAIR_CONFIGURED" -eq 1 ] || fail "dpkg 连续修复后仍无法完成配置；已停止安装。"
+  [ "$DPKG_REPAIR_CONFIGURED" -eq 1 ] || fail "dpkg 在按 updates/NNNN 实际数量计算的安全重试范围内仍无法完成配置；已停止安装。"
   DPKG_REPAIR_AUDIT="$(LC_ALL=C dpkg --audit 2>/dev/null || true)"
   if [ -n "$DPKG_REPAIR_AUDIT" ]; then
     echo "dpkg 审计仍发现异常：" >&2
@@ -242,7 +256,10 @@ repair_dpkg_state() {
     fail "dpkg 状态仍不完整，已停止安装，未删除任何锁文件或软件包。"
   fi
   echo "dpkg 状态：正常。"
-  [ -z "$DPKG_REPAIR_BACKUP_DIR" ] || echo "dpkg 修复备份：$DPKG_REPAIR_BACKUP_DIR"
+  if [ -n "$DPKG_REPAIR_BACKUP_DIR" ]; then
+    echo "本次共隔离损坏的 dpkg 临时更新文件：${DPKG_REPAIR_QUARANTINED} 个"
+    echo "dpkg 修复备份：$DPKG_REPAIR_BACKUP_DIR"
+  fi
 }
 
 upgrade_system_once() {
