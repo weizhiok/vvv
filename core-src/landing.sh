@@ -6,6 +6,10 @@
 # 只需把日本 VPS 输出的完整 JPR3 对接密钥粘贴到下方。
 # 运行后不会再出现安装选项，将自动安装 JPR3 指定的单协议或双协议。
 umask 077
+LANDING_SOURCE_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+[[ -f "$LANDING_SOURCE_DIR/ipv4_only.sh" ]] || { echo "错误：缺少 IPv4-only 系统模块。" >&2; exit 1; }
+install -d -m700 /usr/local/lib/vvv
+install -m755 "$LANDING_SOURCE_DIR/ipv4_only.sh" /usr/local/lib/vvv/ipv4_only.sh
 
 # ============================================================
 PAIRING_KEY="${VVV_PAIRING_KEY:-请粘贴以JPR3.开头的完整对接密钥}"
@@ -17,6 +21,7 @@ cat > "$LANDING_CORE" <<'JP_RELAY_JPR3_LANDING_CORE_EOF'
 #!/bin/sh
 set -eu
 umask 077
+. /usr/local/lib/vvv/ipv4_only.sh
 
 PAIRING_KEY="${PAIRING_KEY:-}"
 COMBINED_INSTALL="${VVV_COMBINED_INSTALL:-0}"
@@ -1387,6 +1392,10 @@ CURRENT_STEP="检查 root 权限"
 CURRENT_STEP="检查操作系统"
 log "$CURRENT_STEP"
 detect_os
+
+CURRENT_STEP="强制 IPv4-only"
+log "$CURRENT_STEP"
+vvv_enforce_ipv4_only || fail "无法强制启用 IPv4-only。"
 
 CURRENT_STEP="解析并验证 JPR3 对接密钥"
 log "$CURRENT_STEP"

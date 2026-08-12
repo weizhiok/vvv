@@ -22,6 +22,12 @@ valid_domain(){ [[ "${1:-}" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,6
 port_in_use(){ ss -H -lnt "sport = :$1" 2>/dev/null | grep -q .; }
 fail(){ echo "错误：$*" >&2; exit 1; }
 
+IPV4_ONLY_MODULE="$BASE_DIR/ipv4_only.sh"
+[[ -r "$IPV4_ONLY_MODULE" ]] || fail "缺少 IPv4-only 系统模块。"
+# shellcheck disable=SC1090
+source "$IPV4_ONLY_MODULE"
+vvv_enforce_ipv4_only || fail "无法强制启用 IPv4-only。"
+
 json_value() {
   local path="$1" expression="$2" default="${3:-}"
   python3 - "$path" "$expression" "$default" <<'PY_JSON_VALUE'

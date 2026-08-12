@@ -14,10 +14,12 @@ fi
 
 HOST_SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 install -d -m700 /usr/local/lib/vvv
-for module in client_adapters.py client_package_renderer.py hy2_port_hop.py hy2_port_hop.sh; do
+for module in client_adapters.py client_package_renderer.py hy2_port_hop.py hy2_port_hop.sh ipv4_only.sh; do
   [[ -f "$HOST_SOURCE_DIR/$module" ]] || { echo "错误：缺少运行模块 $module。" >&2; exit 1; }
   install -m755 "$HOST_SOURCE_DIR/$module" "/usr/local/lib/vvv/$module"
 done
+# shellcheck disable=SC1090
+source "$HOST_SOURCE_DIR/ipv4_only.sh"
 
 mkdir -p /usr/local/sbin
 cat > /usr/local/sbin/jp-relay-manager <<'JP_RELAY_JPR3_MANAGER_EOF'
@@ -2915,6 +2917,7 @@ acquire_manager_lock() {
 
 bootstrap() {
   CURRENT_STEP="检查 Debian 系统"; log "$CURRENT_STEP"; check_debian
+  CURRENT_STEP="强制 IPv4-only"; log "$CURRENT_STEP"; vvv_enforce_ipv4_only || fail "无法强制启用 IPv4-only。"
 
   if [[ ! -f "$STATE_FILE" ]]; then
     CURRENT_STEP="选择协议与统一端口"; log "$CURRENT_STEP"; prompt_initial_mode_and_port

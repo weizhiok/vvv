@@ -63,6 +63,7 @@ write_http_caddyfile(){
 }
 
 :${port} {
+  bind 0.0.0.0
   log {
     output discard
   }
@@ -86,6 +87,7 @@ write_tunnel_caddyfile(){
 }
 
 http://127.0.0.1:${port} {
+  bind 0.0.0.0
   log {
     output discard
   }
@@ -109,6 +111,7 @@ write_domain_https_caddyfile(){
 }
 
 ${domain}:${port} {
+  bind 0.0.0.0
   tls {
     issuer acme {
       disable_tlsalpn_challenge
@@ -136,6 +139,7 @@ write_ip_bootstrap_caddyfile(){
 }
 
 :80 {
+  bind 0.0.0.0
   root * ${ACME_WEBROOT}
   file_server
   log {
@@ -155,6 +159,7 @@ write_ip_https_caddyfile(){
 }
 
 :80 {
+  bind 0.0.0.0
   root * ${ACME_WEBROOT}
   @acme_challenge path /.well-known/acme-challenge/*
   handle @acme_challenge {
@@ -167,6 +172,7 @@ write_ip_https_caddyfile(){
 }
 
 https://${ip}:${port} {
+  bind 0.0.0.0
   tls ${CADDY_CERT_DIR}/ip-fullchain.pem ${CADDY_CERT_DIR}/ip-privkey.pem
   log {
     output discard
@@ -309,7 +315,7 @@ write_cloudflared_service(){
 #!/usr/bin/env bash
 set -Eeuo pipefail
 token="$(cat /etc/vvv-sub/cloudflared.token)"
-exec /usr/local/bin/cloudflared tunnel --no-autoupdate run --token "$token"
+exec /usr/local/bin/cloudflared tunnel --no-autoupdate --edge-ip-version 4 run --token "$token"
 EOF
   chmod 700 /usr/local/lib/vvv/run-cloudflared.sh
   cat > /etc/systemd/system/vvv-cloudflared.service <<'EOF'
