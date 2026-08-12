@@ -1,0 +1,29 @@
+name: Fix renderer IPv4 manager anchor
+on:
+  push:
+    branches: [agent/fix-ipv4-manager-runtime]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-ipv4-manager-runtime
+      - name: Patch client renderer manager header compatibility
+        run: python3 tools/fix_client_renderer_ipv4_manager_anchor.py
+      - name: Run focused regressions
+        run: |
+          python3 -m py_compile core-src/client_package_renderer.py tests/test_created_node_client_output.py tests/test_ipv4_only.py
+          python3 tests/test_created_node_client_output.py
+          python3 tests/test_ipv4_only.py
+      - name: Commit renderer compatibility fix
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add core-src/client_package_renderer.py
+          git diff --cached --quiet && exit 0
+          git commit -m "Keep client renderer compatible with IPv4-only manager header"
+          git push
