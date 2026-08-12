@@ -16,7 +16,7 @@ jobs:
         with:
           ref: agent/dynamic-dpkg-update-recovery
       - name: Patch dynamic dpkg recovery
-        run: python3 tools/apply_dynamic_dpkg_recovery.py
+        run: python3 tools/apply_dynamic_dpkg_recovery_v2.py
       - name: Run focused regression
         run: python3 tests/test_interrupted_dpkg_repair.py
       - name: Commit patched sources
