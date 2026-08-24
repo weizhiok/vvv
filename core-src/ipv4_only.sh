@@ -6,6 +6,7 @@ VVV_IPV4_ONLY_ETC_ROOT="${VVV_IPV4_ONLY_ETC_ROOT:-/etc}"
 VVV_IPV4_ONLY_PROC_ROOT="${VVV_IPV4_ONLY_PROC_ROOT:-/proc}"
 VVV_IPV4_ONLY_BOOT_ROOT="${VVV_IPV4_ONLY_BOOT_ROOT:-/boot}"
 VVV_IPV4_ONLY_IP_BIN="${VVV_IPV4_ONLY_IP_BIN:-ip}"
+VVV_IPV4_ONLY_ROUTE_SETTLE_SECONDS="${VVV_IPV4_ONLY_ROUTE_SETTLE_SECONDS:-1}"
 
 vvv_ipv4_only_note() {
   printf '%s\n' "$*"
@@ -32,7 +33,10 @@ vvv_ipv4_only_network_checks_enabled() {
 }
 
 vvv_ipv4_only_ip_available() {
-  command -v "$VVV_IPV4_ONLY_IP_BIN" >/dev/null 2>&1
+  case "$VVV_IPV4_ONLY_IP_BIN" in
+    */*) [ -x "$VVV_IPV4_ONLY_IP_BIN" ] ;;
+    *) command -v "$VVV_IPV4_ONLY_IP_BIN" >/dev/null 2>&1 ;;
+  esac
 }
 
 vvv_ipv4_only_write_persistent_files() {
@@ -63,7 +67,7 @@ vvv_ipv4_only_apply_runtime() {
   failed=0
   for iface_dir in "$conf_root"/*; do
     [ -d "$iface_dir" ] || continue
-    for knob_name in disable_ipv6 accept_ra autoconf; do
+    for knob_name in accept_ra autoconf disable_ipv6; do
       knob="$iface_dir/$knob_name"
       [ -e "$knob" ] || continue
       case "$knob_name" in
@@ -123,16 +127,30 @@ EOF_VVV_IPV4_GRUB
   fi
 }
 
+vvv_ipv4_only_cleanup_routes_once() {
+  "$VVV_IPV4_ONLY_IP_BIN" -6 route flush table all proto ra >/dev/null 2>&1 || true
+  "$VVV_IPV4_ONLY_IP_BIN" -6 route flush table all >/dev/null 2>&1 || true
+  "$VVV_IPV4_ONLY_IP_BIN" -6 route flush cache >/dev/null 2>&1 || true
+}
+
 vvv_ipv4_only_cleanup_routes() {
   vvv_ipv4_only_network_checks_enabled || return 0
   vvv_ipv4_only_ip_available || return 0
   vvv_ipv4_only_is_container && return 0
 
-  # Some VPS kernels keep RA-learned IPv6 routes until their lifetime expires
-  # even after every IPv6 address has disappeared. IPv4-only means those routes
-  # must not remain usable, so purge the IPv6 FIB after disabling RA/autoconf.
-  "$VVV_IPV4_ONLY_IP_BIN" -6 route flush table all >/dev/null 2>&1 || true
-  "$VVV_IPV4_ONLY_IP_BIN" -6 route flush cache >/dev/null 2>&1 || true
+  # A few cloud images re-inject an already learned RA default route
+  # asynchronously just after the first flush. Re-assert the runtime policy
+  # after a short settle window and purge the IPv6 FIB a second time.
+  vvv_ipv4_only_cleanup_routes_once
+
+  case "$VVV_IPV4_ONLY_ROUTE_SETTLE_SECONDS" in
+    ''|*[!0-9]*) settle_seconds=1 ;;
+    *) settle_seconds="$VVV_IPV4_ONLY_ROUTE_SETTLE_SECONDS" ;;
+  esac
+  [ "$settle_seconds" -eq 0 ] || sleep "$settle_seconds"
+
+  vvv_ipv4_only_apply_runtime || return 1
+  vvv_ipv4_only_cleanup_routes_once
 }
 
 vvv_ipv4_only_list_usable_global_routes() {
@@ -153,16 +171,22 @@ vvv_ipv4_only_verify_runtime() {
   if [ -d "$conf_root" ]; then
     for iface_dir in "$conf_root"/*; do
       [ -d "$iface_dir" ] || continue
-      knob="$iface_dir/disable_ipv6"
-      [ -e "$knob" ] || continue
-      value="$(cat "$knob" 2>/dev/null || true)"
-      if [ "$value" != 1 ]; then
-        if vvv_ipv4_only_is_container; then
-          return 0
+      for knob_name in disable_ipv6 accept_ra autoconf; do
+        knob="$iface_dir/$knob_name"
+        [ -e "$knob" ] || continue
+        case "$knob_name" in
+          disable_ipv6) expected=1 ;;
+          *) expected=0 ;;
+        esac
+        value="$(cat "$knob" 2>/dev/null || true)"
+        if [ "$value" != "$expected" ]; then
+          if vvv_ipv4_only_is_container; then
+            return 0
+          fi
+          vvv_ipv4_only_error "IPv6 内核策略仍未生效：$knob=$value（期望 $expected）"
+          return 1
         fi
-        vvv_ipv4_only_error "IPv6 内核开关仍未关闭：$knob=$value"
-        return 1
-      fi
+      done
     done
   fi
 
@@ -191,5 +215,5 @@ vvv_enforce_ipv4_only() {
   vvv_ipv4_only_apply_runtime || return 1
   vvv_ipv4_only_cleanup_routes || return 1
   vvv_ipv4_only_verify_runtime || return 1
-  vvv_ipv4_only_note "IPv4-only：已强制启用（运行时禁 IPv6/RA/自动配置 + 清理 IPv6 路由 + 永久 sysctl + IPv6 模块策略 + GRUB 启动参数）。"
+  vvv_ipv4_only_note "IPv4-only：已强制启用（运行时禁 IPv6/RA/自动配置 + 双阶段清理 IPv6 路由 + 永久 sysctl + IPv6 模块策略 + GRUB 启动参数）。"
 }
